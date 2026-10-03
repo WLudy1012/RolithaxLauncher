@@ -17,18 +17,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +43,7 @@ import com.wludy.rolithax.launcher.data.DaemonState
 import com.wludy.rolithax.launcher.data.DaemonStatus
 import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
+import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
 import com.wludy.rolithax.launcher.ui.MslxCard
 
 /**
@@ -56,6 +61,7 @@ fun ServersOverviewScreen(
     viewModel: ServersOverviewViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pendingDelete = remember { mutableStateOf<ManagedServer?>(null) }
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
@@ -142,7 +148,7 @@ fun ServersOverviewScreen(
                                 server = server,
                                 onOpen = { server.ref?.let(onOpenServer) },
                                 onStopLocal = viewModel::stopLocal,
-                                onDeleteLocal = { server.localDirName?.let(viewModel::deleteLocal) },
+                                onDeleteLocal = { pendingDelete.value = server },
                             )
                         }
                     }
@@ -164,6 +170,39 @@ fun ServersOverviewScreen(
             }
             Spacer(Modifier.height(20.dp))
         }
+    }
+    pendingDelete.value?.let { server ->
+        val confirmation = remember(server.key) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pendingDelete.value = null },
+            title = { Text("删除本地实例") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("删除会永久移除该实例及其本地文件。请输入实例名称确认：${server.name}")
+                    OutlinedTextField(
+                        value = confirmation.value,
+                        onValueChange = { confirmation.value = it },
+                        label = { Text("实例名称") },
+                        singleLine = true,
+                    )
+                    if (server.localDirName?.let(LocalServerRuntime::isRunningOrStarting) == true) {
+                        Text("实例正在启动或运行，请停止后再删除。", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = server.localDirName != null && confirmation.value == server.name &&
+                        server.localDirName?.let(LocalServerRuntime::isRunningOrStarting) != true,
+                    onClick = {
+                        viewModel.clearMessage()
+                        server.localDirName?.let(viewModel::deleteLocal)
+                        pendingDelete.value = null
+                    },
+                ) { Text("永久删除") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete.value = null }) { Text("取消") } },
+        )
     }
 }
 
@@ -226,7 +265,8 @@ private fun ServerRow(
             TextButton(onClick = onStopLocal) { Text("停止") }
         }
         TextButton(onClick = onOpen) { Text(if (server.isLocal) "管理" else "控制台") }
-        if (server.isLocal) {
+        val localBusy = server.localDirName?.let(LocalServerRuntime::isRunningOrStarting) == true
+        if (server.isLocal && !server.running && !localBusy) {
             IconButton(onClick = onDeleteLocal) {
                 Icon(
                     Icons.Filled.Delete,

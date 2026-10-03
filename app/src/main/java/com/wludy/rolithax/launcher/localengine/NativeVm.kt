@@ -18,6 +18,8 @@ internal object NativeVm {
      */
     external fun setupStdio(): IntArray?
 
+    external fun restoreStdio(): Boolean
+
     /** 创建 JVM；[options] 为 JVM 启动参数（-D/-X 等）。返回 0 表示成功。 */
     external fun createJvm(libjvmPath: String, jreRoot: String, options: Array<String>): Int
 

@@ -43,7 +43,10 @@ import okhttp3.ResponseBody
 import retrofit2.HttpException
 import retrofit2.Response
 import okhttp3.OkHttpClient
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
+
+private const val MAX_INSTANCE_ICON_BYTES = 2 * 1024 * 1024
 
 /** 实例相关的数据入口，封装 REST 调用与 SignalR 控制台客户端创建。 */
 class InstanceRepository {
@@ -510,10 +513,34 @@ class InstanceRepository {
     private suspend fun fetchIconBytes(call: suspend () -> Response<ResponseBody>): ByteArray? =
         runCatching {
             val response = call()
-            if (!response.isSuccessful) return@runCatching null
-            if (!response.headers()["Content-Type"].orEmpty().startsWith("image/")) return@runCatching null
-            response.body()?.bytes()
+            if (!response.isSuccessful) {
+                response.errorBody()?.close()
+                return@runCatching null
+            }
+            if (!response.headers()["Content-Type"].orEmpty().startsWith("image/")) {
+                response.body()?.close()
+                return@runCatching null
+            }
+            response.body()?.use(::readLimitedIcon)
         }.getOrNull()
+
+    private fun readLimitedIcon(body: ResponseBody): ByteArray? {
+        if (body.contentLength() > MAX_INSTANCE_ICON_BYTES) return null
+        return body.byteStream().use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count == 0) continue
+                if (count > MAX_INSTANCE_ICON_BYTES - total) return@use null
+                output.write(buffer, 0, count)
+                total += count
+            }
+            output.toByteArray().takeIf { it.isNotEmpty() }
+        }
+    }
 
     /** 第三方状态 API：mcsrvstat.us → mcstatus.io 回退，仅取 online + icon 两个字段。 */
     private suspend fun fetchThirdPartyIcon(address: String): ByteArray? {
@@ -533,7 +560,9 @@ class InstanceRepository {
         if (dataUri.isNullOrBlank()) return null
         val marker = dataUri.indexOf("base64,", ignoreCase = true)
         if (marker < 0) return null
-        return runCatching { Base64.decode(dataUri.substring(marker + "base64,".length), Base64.DEFAULT) }
+        val payload = dataUri.substring(marker + "base64,".length)
+        if (payload.length > (MAX_INSTANCE_ICON_BYTES + 2) / 3 * 4 + 4) return null
+        return runCatching { Base64.decode(payload, Base64.DEFAULT).takeIf { it.size <= MAX_INSTANCE_ICON_BYTES } }
             .getOrNull()
     }
 

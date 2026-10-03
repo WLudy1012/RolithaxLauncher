@@ -171,10 +171,11 @@ object LocalStorage {
 
     /** 按目录名解析实例目录（找不到返回 null；同名时私有优先，与历史行为一致）。 */
     fun resolveServerDir(context: Context, dirName: String): Pair<InstanceStorage, File>? {
+        if (dirName == "." || dirName == "..") return null
         val safe = sanitizeName(dirName)
         // 目录名可能被消毒改写（如用户手建的奇怪目录），故按原始名与消毒名各试一次
         return sequenceOf(dirName, safe).distinct().firstOrNull { candidate ->
-            candidate.isNotBlank() && !candidate.contains("..") && !candidate.contains(File.separator)
+            candidate.isNotBlank() && candidate != "." && candidate != ".." && !candidate.contains(File.separator)
         }?.let { name ->
             InstanceStorage.entries.firstOrNull { serverDir(context, name, it).isDirectory }?.let { it to serverDir(context, name, it) }
         }

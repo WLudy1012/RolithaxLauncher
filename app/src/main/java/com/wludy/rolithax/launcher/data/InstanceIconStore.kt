@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -22,6 +24,10 @@ import kotlinx.coroutines.withContext
 object InstanceIconStore {
 
     private const val MEMORY_CACHE_BYTES = 6 * 1024 * 1024
+    private const val MAX_ICON_BYTES = 2 * 1024 * 1024
+    private const val MAX_IMAGE_DIMENSION = 16_384
+    private const val MAX_IMAGE_PIXELS = 100_000_000L
+    private const val MAX_DECODED_DIMENSION = 256
     private const val DISK_TTL_MS = 24 * 60 * 60 * 1000L
     private const val NEGATIVE_TTL_MS = 60_000L
 
@@ -42,6 +48,11 @@ object InstanceIconStore {
     fun init(context: Context) {
         appContext = context.applicationContext
     }
+
+    fun readFile(file: File): ByteArray? = runCatching {
+        if (!file.isFile || file.length() !in 1..MAX_ICON_BYTES.toLong()) return@runCatching null
+        file.inputStream().use(::readLimited)
+    }.getOrNull()
 
     /** 取图标；[loader] 仅在缓存未命中时调用，返回 PNG 字节（null = 无图标）。 */
     suspend fun load(key: String, loader: suspend () -> ByteArray?): Bitmap? = withContext(Dispatchers.IO) {
@@ -73,14 +84,14 @@ object InstanceIconStore {
         val file = diskFile(key) ?: return null
         if (!file.isFile) return null
         if (System.currentTimeMillis() - file.lastModified() > DISK_TTL_MS) return null
-        return runCatching { decode(file.readBytes()) }.getOrNull()
+        return runCatching { readFile(file)?.let(::decode) }.getOrNull()
     }
 
     /** 过期的磁盘缓存：仅作为加载失败时的兜底，命中后同样进内存缓存。 */
     private fun readStaleDisk(key: String): Bitmap? {
         val file = diskFile(key) ?: return null
         if (!file.isFile) return null
-        return runCatching { decode(file.readBytes()) }.getOrNull()?.also { memoryCache.put(key, it) }
+        return runCatching { readFile(file)?.let(::decode) }.getOrNull()?.also { memoryCache.put(key, it) }
     }
 
     private fun writeDisk(key: String, bytes: ByteArray) {
@@ -98,6 +109,38 @@ object InstanceIconStore {
         return File(File(context.cacheDir, "instance_icons"), "$safe-${key.hashCode()}.png")
     }
 
-    private fun decode(bytes: ByteArray): Bitmap? =
-        runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+    private fun readLimited(input: InputStream): ByteArray? {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            if (count == 0) continue
+            if (count > MAX_ICON_BYTES - total) return null
+            output.write(buffer, 0, count)
+            total += count
+        }
+        return output.toByteArray().takeIf { it.isNotEmpty() }
+    }
+
+    private fun decode(bytes: ByteArray): Bitmap? {
+        if (bytes.isEmpty() || bytes.size > MAX_ICON_BYTES) return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width !in 1..MAX_IMAGE_DIMENSION || height !in 1..MAX_IMAGE_DIMENSION) return null
+        if (width.toLong() * height > MAX_IMAGE_PIXELS) return null
+        var sampleSize = 1
+        while (maxOf(width, height) / sampleSize > MAX_DECODED_DIMENSION) sampleSize *= 2
+        return runCatching {
+            BitmapFactory.decodeByteArray(
+                bytes,
+                0,
+                bytes.size,
+                BitmapFactory.Options().apply { inSampleSize = sampleSize },
+            )
+        }.getOrNull()
+    }
 }

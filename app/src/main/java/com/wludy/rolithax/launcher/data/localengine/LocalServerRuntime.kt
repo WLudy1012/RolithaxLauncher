@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -25,6 +27,8 @@ import java.io.File
 object LocalServerRuntime {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val startMutex = Mutex()
+    private val lifecycleLock = Any()
 
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
@@ -58,9 +62,25 @@ object LocalServerRuntime {
     var currentDirName: String = ""
         private set
 
+    @Volatile
+    private var startingDirName: String = ""
+
     /** 当前引擎类型（进程内 / Shizuku exec）；null 表示尚未启动过。 */
     val activeKind: EngineKind?
         get() = engine?.kind
+
+    fun isRunningOrStarting(dirName: String): Boolean = synchronized(lifecycleLock) {
+        startingDirName == dirName || ((_running.value || engine?.running?.value == true) && currentDirName == dirName)
+    }
+
+    fun isStarting(): Boolean = synchronized(lifecycleLock) { startingDirName.isNotEmpty() }
+
+    internal fun deleteGuarded(dirName: String, block: () -> Unit): Result<Unit> = synchronized(lifecycleLock) {
+        runCatching {
+            check(!isRunningOrStarting(dirName)) { "本地实例正在启动或运行，请停止后再删除" }
+            block()
+        }
+    }
 
     /** 向当前运行实例发送一条控制台命令。 */
     fun sendCommand(command: String) {
@@ -96,65 +116,83 @@ object LocalServerRuntime {
         keepAlive: Boolean,
         runtime: LocalJreManager.JavaRuntime = LocalJreManager.DEFAULT_RUNTIME,
         useExec: Boolean = false,
-    ): Result<Unit> = runCatching {
-        val app = context.applicationContext
-        appContext = app
-        if (engine?.running?.value == true) return@runCatching
-        // 引擎选择：增强模式开启且 Shizuku 已授权 → exec 子进程；否则回退进程内 JVM 基线
-        val exec = useExec && ShizukuController.isReady()
-        val chosen: LocalEngine = if (exec) {
-            ShizukuShellEngine(
-                context = app,
-                runtime = runtime,
-                dirName = workDir.name,
-                localInstanceDir = workDir,
-                minMemM = minMemM,
-                maxMemM = maxMemM,
-                extraArgs = extraArgs,
-                useSerialGc = useSerialGc,
-            )
-        } else {
-            InProcessJvmEngine(
-                jreHome = jreHome,
-                serverJar = serverJar,
-                workDir = workDir,
-                minMemM = minMemM,
-                maxMemM = maxMemM,
-                extraArgs = extraArgs,
-                useSerialGc = useSerialGc,
-                runtime = runtime,
-            )
+    ): Result<Unit> {
+        val reserved = synchronized(lifecycleLock) {
+            if (startingDirName.isNotEmpty() || _running.value || engine?.running?.value == true) {
+                false
+            } else {
+                startingDirName = workDir.name
+                true
+            }
         }
-        engine = chosen
-        currentServerName = serverName
-        currentDirName = workDir.name
-        scope.launch { chosen.logs.collect { append(it) } }
-        chosen.onExit = { code ->
-            _running.value = false
-            refreshJvmState()
-            releaseWakeLock()
-            AppLogger.i("LocalEngine", "服务端退出 rc=$code（${chosen.kind}），停止前台服务")
-            if (keepAlive) runCatching { LocalServerService.stop(app) }
+        if (!reserved) return Result.failure(IllegalStateException("已有本地实例正在启动或运行"))
+        return try {
+            startMutex.withLock {
+                runCatching {
+                    val app = context.applicationContext
+                    appContext = app
+                    // 引擎选择：增强模式开启且 Shizuku 已授权 → exec 子进程；否则回退进程内 JVM 基线
+                    val exec = useExec && ShizukuController.isReady()
+                    val chosen: LocalEngine = if (exec) {
+                        ShizukuShellEngine(
+                            context = app,
+                            runtime = runtime,
+                            dirName = workDir.name,
+                            localInstanceDir = workDir,
+                            minMemM = minMemM,
+                            maxMemM = maxMemM,
+                            extraArgs = extraArgs,
+                            useSerialGc = useSerialGc,
+                        )
+                    } else {
+                        InProcessJvmEngine(
+                            jreHome = jreHome,
+                            serverJar = serverJar,
+                            workDir = workDir,
+                            minMemM = minMemM,
+                            maxMemM = maxMemM,
+                            extraArgs = extraArgs,
+                            useSerialGc = useSerialGc,
+                            runtime = runtime,
+                        )
+                    }
+                    engine = chosen
+                    currentServerName = serverName
+                    currentDirName = workDir.name
+                    scope.launch { chosen.logs.collect { append(it) } }
+                    chosen.onExit = { code ->
+                        _running.value = false
+                        refreshJvmState()
+                        releaseWakeLock()
+                        AppLogger.i("LocalEngine", "服务端退出 rc=$code（${chosen.kind}），停止前台服务")
+                        if (keepAlive) runCatching { LocalServerService.stop(app) }
+                    }
+                    // 前台服务必须在引擎启动前就位：staging/exec 可能耗时数秒，若等服务端起来后再
+                    // startForegroundService，会撞上系统前台服务时限；且服务端秒退时 onExit 的 stop
+                    // 会与尾部的 start 竞态（两次调用跨线程，AMS 侧顺序无保证），触发
+                    // ForegroundServiceDidNotStartInTimeException 直接打崩 App。
+                    if (keepAlive) {
+                        runCatching { LocalServerService.start(app) }
+                            .onFailure { AppLogger.w("LocalEngine", "启动前台服务失败（不影响服务端运行）", it) }
+                        acquireWakeLock(app)
+                    }
+                    val ok = withContext(Dispatchers.IO) { chosen.start() }
+                    if (!ok) {
+                        engine = null
+                        releaseWakeLock()
+                        if (keepAlive) runCatching { LocalServerService.stop(app) }
+                        throw IllegalStateException("启动失败，详见日志")
+                    }
+                    _running.value = chosen.running.value
+                    _startedOnce.value = true
+                    refreshJvmState()
+            }
+            }
+        } finally {
+            synchronized(lifecycleLock) {
+                if (startingDirName == workDir.name) startingDirName = ""
+            }
         }
-        // 前台服务必须在引擎启动前就位：staging/exec 可能耗时数秒，若等服务端起来后再
-        // startForegroundService，会撞上系统前台服务时限；且服务端秒退时 onExit 的 stop
-        // 会与尾部的 start 竞态（两次调用跨线程，AMS 侧顺序无保证），触发
-        // ForegroundServiceDidNotStartInTimeException 直接打崩 App。
-        if (keepAlive) {
-            runCatching { LocalServerService.start(app) }
-                .onFailure { AppLogger.w("LocalEngine", "启动前台服务失败（不影响服务端运行）", it) }
-            acquireWakeLock(app)
-        }
-        val ok = withContext(Dispatchers.IO) { chosen.start() }
-        if (!ok) {
-            engine = null
-            releaseWakeLock()
-            if (keepAlive) runCatching { LocalServerService.stop(app) }
-            throw IllegalStateException("启动失败，详见日志")
-        }
-        _running.value = true
-        _startedOnce.value = true
-        refreshJvmState()
     }
 
     /** 优雅停止：向服务端 stdin 发 stop（exec 模式超时兜底 kill）。 */

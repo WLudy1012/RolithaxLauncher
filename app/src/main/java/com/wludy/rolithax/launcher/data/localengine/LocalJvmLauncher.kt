@@ -44,6 +44,8 @@ class LocalJvmLauncher(
     private var cmdPfd: ParcelFileDescriptor? = null
     private var logPfd: ParcelFileDescriptor? = null
     private var cmdOut: FileOutputStream? = null
+    private var logInput: FileInputStream? = null
+    private var logPump: Thread? = null
 
     @Volatile
     var running: Boolean = false
@@ -77,16 +79,6 @@ class LocalJvmLauncher(
         workDir.mkdirs()
         writeEula()
 
-        val fds = NativeVm.setupStdio()
-        if (fds == null || fds.size < 2) {
-            emit("stdio 重定向失败，无法接管服务端控制台")
-            return false
-        }
-        cmdPfd = ParcelFileDescriptor.adoptFd(fds[0])
-        logPfd = ParcelFileDescriptor.adoptFd(fds[1])
-        cmdOut = FileOutputStream(cmdPfd!!.fileDescriptor)
-        startLogPump(FileInputStream(logPfd!!.fileDescriptor))
-
         val resolved = ServerEntrypoint.resolve(serverJar, File(workDir, ".mslx-runtime")) { emit(it) }
             .getOrElse { e ->
                 emit("解析核心入口失败：${e.message}")
@@ -94,25 +86,67 @@ class LocalJvmLauncher(
             }
         resolved.note?.let { emit(it) }
 
-        val options = buildOptions(resolved, javaHome)
+        val options = runCatching { buildOptions(resolved, javaHome) }.getOrElse { e ->
+            emit("JVM 参数构建失败：${e.message}")
+            return false
+        }
+        val fds = NativeVm.setupStdio()
+        if (fds == null || fds.size < 2) {
+            NativeVm.restoreStdio()
+            emit("stdio 重定向失败，无法接管服务端控制台")
+            return false
+        }
+        try {
+            cmdPfd = ParcelFileDescriptor.adoptFd(fds[0])
+            cmdOut = ParcelFileDescriptor.AutoCloseOutputStream(cmdPfd!!)
+            cmdPfd = null
+            logPfd = ParcelFileDescriptor.adoptFd(fds[1])
+            val logStream = ParcelFileDescriptor.AutoCloseInputStream(logPfd!!)
+            logPfd = null
+            startLogPump(logStream)
+        } catch (error: Throwable) {
+            restoreStdioAndClose()
+            emit("stdio setup failed: ${error.message}")
+            return false
+        }
+
         emit("启动 JVM：${runtime.label}，-Xmx${maxMemM}M，主类 ${resolved.mainClass}")
-        val rc = NativeVm.createJvm(libjvm.absolutePath, javaHome.absolutePath, options.toTypedArray())
+        val rc = runCatching {
+            NativeVm.createJvm(libjvm.absolutePath, javaHome.absolutePath, options.toTypedArray())
+        }.getOrElse { error ->
+            restoreStdioAndClose()
+            emit("JVM 创建异常：${error.message}")
+            return false
+        }
         if (rc != 0) {
+            restoreStdioAndClose()
             emit("JVM 创建失败（rc=$rc），详见 App 日志")
             return false
         }
 
-        running = true
-        worker = Thread({
-            val code = NativeVm.callMain(resolved.mainClass, arrayOf("nogui"))
+        try {
+            running = true
+            worker = Thread({
+                val code = runCatching { NativeVm.callMain(resolved.mainClass, arrayOf("nogui")) }
+                    .getOrElse { error ->
+                        AppLogger.e("LocalEngine", "服务端主线程异常", error)
+                        -1
+                    }
+                restoreStdioAndClose()
+                running = false
+                exitCode = code
+                emit(if (code == 0) "服务端已退出" else "服务端异常退出（rc=$code）")
+                AppLogger.i("LocalEngine", "服务端线程结束 rc=$code")
+                onExit?.invoke(code)
+            }, "mslx-server").apply {
+                isDaemon = true
+                start()
+            }
+        } catch (error: Throwable) {
             running = false
-            exitCode = code
-            emit(if (code == 0) "服务端已退出" else "服务端异常退出（rc=$code）")
-            AppLogger.i("LocalEngine", "服务端线程结束 rc=$code")
-            onExit?.invoke(code)
-        }, "mslx-server").apply {
-            isDaemon = true
-            start()
+            restoreStdioAndClose()
+            emit("启动服务端线程失败：${error.message}")
+            return false
         }
         AppLogger.i("LocalEngine", "进程内 JVM 服务端已启动：${resolved.mainClass}")
         return true
@@ -183,7 +217,8 @@ class LocalJvmLauncher(
 
     /** fd 1/2 已指向管道，这里持续读取转发到 [logs]，避免缓冲区写满阻塞服务端。 */
     private fun startLogPump(input: FileInputStream) {
-        Thread({
+        logInput = input
+        logPump = Thread({
             runCatching {
                 input.bufferedReader(Charsets.UTF_8).forEachLine { line ->
                     _logs.trySend(line)
@@ -193,6 +228,21 @@ class LocalJvmLauncher(
             isDaemon = true
             start()
         }
+    }
+
+    private fun restoreStdioAndClose() {
+        val restored = runCatching { NativeVm.restoreStdio() }.getOrDefault(false)
+        if (!restored) AppLogger.e("LocalEngine", "恢复应用标准输入输出失败")
+        runCatching { cmdOut?.close() }
+        cmdOut = null
+        runCatching { logInput?.close() }
+        logInput = null
+        logPump?.interrupt()
+        logPump = null
+        runCatching { cmdPfd?.close() }
+        cmdPfd = null
+        runCatching { logPfd?.close() }
+        logPfd = null
     }
 
     private fun emit(line: String) {

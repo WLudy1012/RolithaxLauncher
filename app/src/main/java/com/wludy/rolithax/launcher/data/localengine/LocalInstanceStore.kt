@@ -116,7 +116,7 @@ object LocalInstanceStore {
     }
 
     /** 删除实例：整目录递归删除（世界存档一并删除，调用方需先确认）。 */
-    fun delete(context: Context, dirName: String): Result<Unit> = runCatching {
+    fun delete(context: Context, dirName: String): Result<Unit> = LocalServerRuntime.deleteGuarded(dirName) {
         val (storage, dir) = resolve(context, dirName) ?: throw IllegalStateException("实例不存在：$dirName")
         // 双保险：只允许删除对应根目录下的子目录，防止路径穿越
         val base = LocalStorage.serversDir(context, storage).canonicalPath + File.separator

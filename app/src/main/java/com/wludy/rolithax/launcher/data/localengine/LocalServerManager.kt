@@ -61,7 +61,7 @@ class LocalServerManager(
      * 失败原因以 [Result.failure] 返回，消息可直接展示给用户。
      */
     suspend fun start(dirName: String): Result<Unit> {
-        if (running.value) {
+        if (running.value || LocalServerRuntime.isStarting()) {
             return Result.failure(IllegalStateException("已有本机服务端在运行，请先停止后再启动"))
         }
         val (storage, serverDir) = LocalInstanceStore.resolve(app, dirName)

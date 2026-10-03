@@ -182,6 +182,7 @@ class BackupManager(
             .map { it[0] to it[1] }
             .distinct()
             .toList()
+        require(instances.map { it.second }.distinct().size == instances.size) { "备份中存在跨存储位置的同名实例" }
         val prepared = instances.map { (storageKey, dirName) ->
             val storage = InstanceStorage.fromKey(storageKey)
             if (storage == InstanceStorage.PUBLIC) require(LocalStorage.publicStorageGranted()) { "当前设备未授予公共目录权限" }
@@ -189,7 +190,7 @@ class BackupManager(
             val root = LocalStorage.serversDir(app, storage).canonicalFile
             val target = File(root, dirName).canonicalFile
             require(target.path.startsWith(root.path + File.separator)) { "导入目标路径越界" }
-            require(!target.exists()) { "实例已存在：$dirName" }
+            require(!LocalStorage.existsServerDir(app, dirName)) { "设备上已存在同名实例（可能位于另一存储位置）：$dirName" }
             val temporary = File(root, ".${dirName}.import-${UUID.randomUUID()}")
             ImportDirectory(source, target, temporary)
         }

@@ -52,6 +52,38 @@ static int mslx_disable_heap_tagging(void) {
 
 static JavaVM *g_vm = NULL;
 static void *g_jvmHandle = NULL;
+static int g_savedStdin = -1;
+static int g_savedStdout = -1;
+static int g_savedStderr = -1;
+
+static void mslx_close_fd(int *fd) {
+    if (*fd >= 0) {
+        close(*fd);
+        *fd = -1;
+    }
+}
+
+static jboolean mslx_restore_stdio(void) {
+    fflush(stdout);
+    fflush(stderr);
+    int restored = 1;
+    if (g_savedStdin >= 0) {
+        if (dup2(g_savedStdin, STDIN_FILENO) < 0) restored = 0;
+        else mslx_close_fd(&g_savedStdin);
+    }
+    if (g_savedStdout >= 0) {
+        if (dup2(g_savedStdout, STDOUT_FILENO) < 0) restored = 0;
+        else mslx_close_fd(&g_savedStdout);
+    }
+    if (g_savedStderr >= 0) {
+        if (dup2(g_savedStderr, STDERR_FILENO) < 0) restored = 0;
+        else mslx_close_fd(&g_savedStderr);
+    }
+    clearerr(stdin);
+    clearerr(stdout);
+    clearerr(stderr);
+    return restored ? JNI_TRUE : JNI_FALSE;
+}
 
 /* ---------- stdio 重定向 ---------- */
 
@@ -60,18 +92,20 @@ Java_com_wludy_rolithax_launcher_localengine_NativeVm_setupStdio(JNIEnv *env, jc
     int inPipe[2] = {-1, -1};   /* [0] 读端 -> fd0；[1] 写端交给 Kotlin 发命令 */
     int outPipe[2] = {-1, -1};  /* [0] 读端交给 Kotlin 收日志；[1] 写端 -> fd1/fd2 */
 
-    if (pipe(inPipe) != 0 || pipe(outPipe) != 0) {
-        LOGE("pipe() failed: %s", strerror(errno));
-        return NULL;
-    }
+    if (g_savedStdin >= 0 || g_savedStdout >= 0 || g_savedStderr >= 0) return NULL;
+    if (pipe(inPipe) != 0 || pipe(outPipe) != 0) goto fail;
+    g_savedStdin = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, 3);
+    g_savedStdout = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
+    g_savedStderr = fcntl(STDERR_FILENO, F_DUPFD_CLOEXEC, 3);
+    if (g_savedStdin < 0 || g_savedStdout < 0 || g_savedStderr < 0) goto fail;
+    fflush(NULL);
     if (dup2(inPipe[0], STDIN_FILENO) < 0 || dup2(outPipe[1], STDOUT_FILENO) < 0 ||
-        dup2(outPipe[1], STDERR_FILENO) < 0) {
-        LOGE("dup2() failed: %s", strerror(errno));
-        return NULL;
-    }
+        dup2(outPipe[1], STDERR_FILENO) < 0) goto fail;
     /* 原始 fd 已复制，关掉多余副本，避免日志读取端永远等不到 EOF */
     close(inPipe[0]);
     close(outPipe[1]);
+    inPipe[0] = -1;
+    outPipe[1] = -1;
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
@@ -80,10 +114,30 @@ Java_com_wludy_rolithax_launcher_localengine_NativeVm_setupStdio(JNIEnv *env, jc
     fds[1] = outPipe[0];  /* Kotlin 侧：读服务端 stdout/stderr */
 
     jintArray result = (*env)->NewIntArray(env, 2);
-    if (result == NULL) return NULL;
+    if (result == NULL) goto fail;
     (*env)->SetIntArrayRegion(env, result, 0, 2, fds);
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->DeleteLocalRef(env, result);
+        goto fail;
+    }
     LOGI("stdio redirected: cmdWriteFd=%d logReadFd=%d", fds[0], fds[1]);
     return result;
+
+fail: {
+        int error = errno;
+        mslx_restore_stdio();
+        mslx_close_fd(&inPipe[0]);
+        mslx_close_fd(&inPipe[1]);
+        mslx_close_fd(&outPipe[0]);
+        mslx_close_fd(&outPipe[1]);
+        LOGE("stdio setup failed: %s", strerror(error));
+        return NULL;
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_restoreStdio(JNIEnv *env, jclass clazz) {
+    return mslx_restore_stdio();
 }
 
 /* ---------- 创建 JVM ---------- */

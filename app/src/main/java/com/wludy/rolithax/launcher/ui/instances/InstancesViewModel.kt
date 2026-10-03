@@ -13,6 +13,7 @@ import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ensureRepository
 import com.wludy.rolithax.launcher.data.isStoppableStatus
 import com.wludy.rolithax.launcher.data.localengine.LocalInstanceStore
+import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -79,6 +80,10 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
                 val dir = server.localDirName
                 if (dir.isNullOrBlank()) {
                     _state.update { it.copy(deleting = false, deleteError = "无法确定实例目录") }
+                    return@launch
+                }
+                if (LocalServerRuntime.isRunningOrStarting(dir)) {
+                    _state.update { it.copy(deleting = false, deleteError = "本地实例正在启动或运行，请停止后再删除") }
                     return@launch
                 }
                 LocalInstanceStore.delete(getApplication(), dir).fold(

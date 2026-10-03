@@ -39,7 +39,7 @@ object InstanceIcons {
         if (server.isLocal) {
             val dirName = server.localDirName ?: return null
             val file = File(LocalInstanceStore.dir(container.appContext, dirName), ICON_FILE_NAME)
-            return runCatching { if (file.isFile) file.readBytes() else null }.getOrNull()
+            return InstanceIconStore.readFile(file)
         }
         val ref = server.ref ?: return null
         val id = ref.remoteIdOrNull ?: return null
