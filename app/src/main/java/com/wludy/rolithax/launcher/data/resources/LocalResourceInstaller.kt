@@ -36,7 +36,7 @@ class LocalResourceInstaller {
                 val file = entry.version.files.firstOrNull { it.primary } ?: entry.version.files.first()
                 val staged = File(stage, "package-$itemIndex")
                 requireAllowedUrl(file.url)
-                download(file, staged, ALLOWED_HOSTS) { progress ->
+                download(file, staged, ALLOWED_HOSTS, maxBytes = if (entry.project.type == "modpack") MAX_MODPACK_ARCHIVE_BYTES else null) { progress ->
                     onProgress(((itemIndex + progress) / entries.size).coerceIn(0f, 1f), "下载 ${entry.project.name}")
                 }
                 require(file.size <= 0 || staged.length() == file.size) { "${entry.project.name} 文件长度校验失败" }
@@ -61,12 +61,19 @@ class LocalResourceInstaller {
         }
     }
 
-    private suspend fun download(file: ResourceFile, target: File, allowedHosts: Set<String>, onProgress: (Float) -> Unit = {}) {
+    private suspend fun download(
+        file: ResourceFile,
+        target: File,
+        allowedHosts: Set<String>,
+        maxBytes: Long? = null,
+        onProgress: (Float) -> Unit = {},
+    ) {
+        require(maxBytes == null || file.size <= 0 || file.size <= maxBytes) { "资源文件超过大小限制" }
         val (algorithm, hash) = file.sha512.split(':', limit = 2).let {
             if (it.size == 2) it[0].uppercase().replace("SHA", "SHA-") to it[1]
             else "SHA-512" to it.first()
         }
-        LocalDownloader.downloadVerified(file.url, target, hash, algorithm, onProgress, allowedHosts)
+        LocalDownloader.downloadVerified(file.url, target, hash, algorithm, onProgress, allowedHosts, maxBytes)
     }
 
     private fun destination(type: String, filename: String, entry: ResourceCartEntry, root: File): String {
@@ -100,8 +107,19 @@ class LocalResourceInstaller {
                 val (algorithm, hash) = item.hashes.entries.firstOrNull { it.key in SUPPORTED_HASHES }
                     ?.let { (key, value) -> algorithmFor(key) to value }
                     ?: throw IllegalArgumentException("整合包文件缺少可用摘要：${item.path}")
-                LocalDownloader.downloadVerified(item.downloads.first(), staged, hash, algorithm, allowedHosts = ALLOWED_HOSTS)
+                val remainingBytes = MAX_PACK_BYTES - unpacked
+                require(item.fileSize <= 0 || item.fileSize <= remainingBytes) { "整合包总数据超出限制" }
+                val downloadLimit = item.fileSize.takeIf { it > 0 } ?: remainingBytes
+                LocalDownloader.downloadVerified(
+                    item.downloads.first(),
+                    staged,
+                    hash,
+                    algorithm,
+                    allowedHosts = ALLOWED_HOSTS,
+                    maxBytes = downloadLimit,
+                )
                 require(item.fileSize <= 0 || staged.length() == item.fileSize) { "整合包文件长度不符：${item.path}" }
+                require(staged.length() <= MAX_PACK_BYTES - unpacked) { "整合包总数据超出限制" }
                 unpacked += staged.length()
                 require(unpacked <= MAX_PACK_BYTES) { "整合包下载内容超过限制" }
                 output += PendingFile(staged, relative, false)
@@ -110,9 +128,15 @@ class LocalResourceInstaller {
             val hasServerOverrides = zip.entries().asSequence().any { it.name.startsWith("server-overrides/") }
             val prefix = if (hasServerOverrides) "server-overrides/" else "overrides/"
             var overrideIndex = 0
+            var overrideBytes = 0L
             zip.entries().asSequence()
                 .filter { it.name.startsWith(prefix) && !it.isDirectory }
                 .forEach { item ->
+                    require(overrideIndex < MAX_OVERRIDE_ENTRIES) { "整合包 override 文件数量超出限制" }
+                    if (item.size >= 0) {
+                        require(item.size <= MAX_OVERRIDE_FILE_BYTES) { "整合包 override 单文件超出限制" }
+                        require(item.size <= MAX_OVERRIDE_TOTAL_BYTES - overrideBytes) { "整合包 override 总解压数据超出限制" }
+                    }
                     val relative = safeRelative(item.name.removePrefix(prefix))
                     val staged = File(stage, "override-${overrideIndex++}")
                     zip.getInputStream(item).use { input -> staged.outputStream().use { outputStream ->
@@ -122,10 +146,13 @@ class LocalResourceInstaller {
                             val count = input.read(buffer)
                             if (count < 0) break
                             total += count
-                            require(total <= MAX_OVERRIDE_BYTES) { "整合包覆盖文件超过限制" }
+                            require(total <= MAX_OVERRIDE_FILE_BYTES) { "整合包 override 单文件超出限制" }
+                            require(count.toLong() <= MAX_OVERRIDE_TOTAL_BYTES - overrideBytes) { "整合包 override 总解压数据超出限制" }
+                            overrideBytes += count
                             outputStream.write(buffer, 0, count)
                         }
                     } }
+                    require(item.size < 0 || staged.length() == item.size) { "整合包 override 文件长度不匹配" }
                     output += PendingFile(staged, relative, true)
                 }
         }
@@ -206,6 +233,9 @@ class LocalResourceInstaller {
         private val SUPPORTED_HASHES = setOf("sha512", "sha256", "sha1")
         private const val MAX_PACK_ENTRIES = 10_000
         private const val MAX_PACK_BYTES = 4L * 1024 * 1024 * 1024
-        private const val MAX_OVERRIDE_BYTES = 1024L * 1024 * 1024
+        private const val MAX_MODPACK_ARCHIVE_BYTES = 512L * 1024 * 1024
+        private const val MAX_OVERRIDE_ENTRIES = 10_000
+        private const val MAX_OVERRIDE_FILE_BYTES = 512L * 1024 * 1024
+        private const val MAX_OVERRIDE_TOTAL_BYTES = 1024L * 1024 * 1024
     }
 }

@@ -56,7 +56,7 @@ static void *g_jvmHandle = NULL;
 /* ---------- stdio 重定向 ---------- */
 
 JNIEXPORT jintArray JNICALL
-Java_com_mslx_console_localengine_NativeVm_setupStdio(JNIEnv *env, jclass clazz) {
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_setupStdio(JNIEnv *env, jclass clazz) {
     int inPipe[2] = {-1, -1};   /* [0] 读端 -> fd0；[1] 写端交给 Kotlin 发命令 */
     int outPipe[2] = {-1, -1};  /* [0] 读端交给 Kotlin 收日志；[1] 写端 -> fd1/fd2 */
 
@@ -89,7 +89,7 @@ Java_com_mslx_console_localengine_NativeVm_setupStdio(JNIEnv *env, jclass clazz)
 /* ---------- 创建 JVM ---------- */
 
 JNIEXPORT jint JNICALL
-Java_com_mslx_console_localengine_NativeVm_createJvm(JNIEnv *env, jclass clazz,
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_createJvm(JNIEnv *env, jclass clazz,
                                                     jstring libjvmPath, jstring jreRoot,
                                                     jobjectArray options) {
     if (g_vm != NULL) {
@@ -170,7 +170,7 @@ Java_com_mslx_console_localengine_NativeVm_createJvm(JNIEnv *env, jclass clazz,
 /* ---------- 调用服务端主类 ---------- */
 
 JNIEXPORT jint JNICALL
-Java_com_mslx_console_localengine_NativeVm_callMain(JNIEnv *env, jclass clazz,
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_callMain(JNIEnv *env, jclass clazz,
                                                    jstring mainClass, jobjectArray args) {
     if (g_vm == NULL) {
         LOGE("JVM not created");
@@ -211,12 +211,12 @@ Java_com_mslx_console_localengine_NativeVm_callMain(JNIEnv *env, jclass clazz,
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_mslx_console_localengine_NativeVm_isJvmCreated(JNIEnv *env, jclass clazz) {
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_isJvmCreated(JNIEnv *env, jclass clazz) {
     return g_vm != NULL ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
-Java_com_mslx_console_localengine_NativeVm_destroyJvm(JNIEnv *env, jclass clazz) {
+Java_com_wludy_rolithax_launcher_localengine_NativeVm_destroyJvm(JNIEnv *env, jclass clazz) {
     if (g_vm != NULL) {
         (*g_vm)->DestroyJavaVM(g_vm);
         g_vm = NULL;

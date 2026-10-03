@@ -37,7 +37,9 @@ object LocalDownloader {
         algorithm: String,
         onProgress: (Float) -> Unit = {},
         allowedHosts: Set<String>? = null,
+        maxBytes: Long? = null,
     ): File = withContext(Dispatchers.IO) {
+        require(maxBytes == null || maxBytes > 0) { "下载大小限制无效" }
         val expected = expectedHash.trim().lowercase()
         val expectedLength = when (algorithm.uppercase()) {
             "SHA-512" -> 128
@@ -63,6 +65,7 @@ object LocalDownloader {
                         }
                         val body = response.body ?: throw IllegalStateException("响应为空")
                         val total = body.contentLength()
+                        if (maxBytes != null && total > maxBytes) throw IllegalStateException("下载文件超过大小限制")
                         val digest = MessageDigest.getInstance(algorithm)
                         target.parentFile?.mkdirs()
                         body.byteStream().use { input ->
@@ -73,9 +76,11 @@ object LocalDownloader {
                                     val read = input.read(buf)
                                     if (read < 0) break
                                     if (read == 0) continue
+                                    val nextDone = done + read
+                                    if (maxBytes != null && nextDone > maxBytes) throw IllegalStateException("下载文件超过大小限制")
                                     output.write(buf, 0, read)
                                     digest.update(buf, 0, read)
-                                    done += read
+                                    done = nextDone
                                     if (total > 0) onProgress(done.toFloat() / total)
                                 }
                                 if (total >= 0 && done != total) throw IllegalStateException("下载内容不完整：期望 $total 字节，实际 $done 字节")
