@@ -2,7 +2,10 @@ package com.wludy.rolithax.launcher.ui.navigation
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -11,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -26,6 +30,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.AppSettings
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.ui.MainBottomNav
+import com.wludy.rolithax.launcher.ui.MainNavigationRail
 import com.wludy.rolithax.launcher.ui.TopPage
 import com.wludy.rolithax.launcher.ui.connect.ConnectScreen
 import com.wludy.rolithax.launcher.ui.console.ConsoleScreen
@@ -151,19 +156,43 @@ fun AppNavHost(
         else -> null
     }
 
+    val onTopPageNavigate: (TopPage) -> Unit = { page ->
+        if (page == TopPage.NEW_INSTANCE && currentTopPage == TopPage.NEW_INSTANCE) {
+            CreateResetBus.request()
+        } else {
+            navigateTopLevel(topLevelRoute(page))
+        }
+    }
+
     // 根容器保持透明：底色由 MainActivity 的 GlassBackground 提供（毛玻璃背景层）
-    Column(Modifier.fillMaxSize()) {
-        NavHost(
-            navController = navController,
-            startDestination = Routes.SPLASH,
-            modifier = Modifier.weight(1f),
-            // 页面切换瞬时完成（不用淡入淡出）：交叉淡出在部分设备上会把目标页停留在透明态，
-            // 导致"整页空白只剩 Dock"；Dock 自身的选中动画保留在 MainBottomNav
-            enterTransition = { EnterTransition.None },
-            exitTransition = { ExitTransition.None },
-            popEnterTransition = { EnterTransition.None },
-            popExitTransition = { ExitTransition.None },
-        ) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val useNavigationRail = maxWidth >= 600.dp && maxHeight >= 360.dp
+        val showRailLabels = maxHeight >= 480.dp
+
+        Row(Modifier.fillMaxSize()) {
+            if (useNavigationRail) {
+                currentTopPage?.let { topPage ->
+                    MainNavigationRail(
+                        current = topPage,
+                        onNavigate = onTopPageNavigate,
+                        modifier = Modifier.fillMaxHeight(),
+                        showLabels = showRailLabels,
+                    )
+                }
+            }
+
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                NavHost(
+                    navController = navController,
+                    startDestination = Routes.SPLASH,
+                    modifier = Modifier.weight(1f),
+                    // 页面切换瞬时完成（不用淡入淡出）：交叉淡出在部分设备上会把目标页停留在透明态，
+                    // 导致整页空白；导航栏自身的选中动画保留在导航组件中。
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None },
+                ) {
 
             composable(Routes.SPLASH) {
                 // 用 rememberUpdatedState 保证动画结束后拿到最新的 onboarded 状态
@@ -481,19 +510,15 @@ fun AppNavHost(
             }
         }
 
-        // 底部 Dock：与页面解耦，切换时保持稳定（不重建、动画不被截断）
-        currentTopPage?.let { topPage ->
-            MainBottomNav(
-                current = topPage,
-                onNavigate = { page ->
-                    if (page == TopPage.NEW_INSTANCE && topPage == TopPage.NEW_INSTANCE) {
-                        // 重按"新建"tab：重置新建实例表单（Dock 与页面 ViewModel 经 CreateResetBus 桥接）
-                        CreateResetBus.request()
-                    } else {
-                        navigateTopLevel(topLevelRoute(page))
+                if (!useNavigationRail) {
+                    currentTopPage?.let { topPage ->
+                        MainBottomNav(
+                            current = topPage,
+                            onNavigate = onTopPageNavigate,
+                        )
                     }
-                },
-            )
+                }
+            }
         }
     }
 }

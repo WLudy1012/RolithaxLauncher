@@ -62,6 +62,8 @@ import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.resources.ResourceIssue
 import com.wludy.rolithax.launcher.data.resources.ResourceProject
 import com.wludy.rolithax.launcher.data.resources.ResourceVersion
+import com.wludy.rolithax.launcher.data.resources.hasCompleteCompatibilityMetadata
+import com.wludy.rolithax.launcher.data.resources.isCompatibleWith
 import com.wludy.rolithax.launcher.ui.MslxCard
 import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 import java.text.NumberFormat
@@ -183,21 +185,46 @@ fun ResourceCenterScreen(
                     ).joinToString(" · "),
                 )
 
-                when (val refresh = projects.loadState.refresh) {
-                    is LoadState.Loading -> if (projects.itemCount == 0) {
+                val refreshState = projects.loadState.refresh
+                val appendState = projects.loadState.append
+                when {
+                    refreshState is LoadState.Loading && projects.itemCount == 0 -> {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             androidx.compose.material3.CircularProgressIndicator()
                         }
-                    } else ProjectList(projects, viewModel, Modifier.weight(1f))
-                    is LoadState.Error -> if (projects.itemCount == 0) {
-                        EmptyMessage("资源暂时无法加载", refresh.error.message ?: "检查网络后重试", "重试", projects::retry)
-                    } else ProjectList(projects, viewModel, Modifier.weight(1f))
-                    else -> if (projects.itemCount == 0) {
+                    }
+                    refreshState is LoadState.Error && projects.itemCount == 0 -> {
+                        EmptyMessage("资源暂时无法加载", refreshState.error.message ?: "检查网络后重试", "重试", projects::retry)
+                    }
+                    refreshState is LoadState.Error -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            InlineRefreshError("刷新资源失败", refreshState.error.message ?: "检查网络后重试", projects::retry)
+                            ProjectList(projects, viewModel, Modifier.weight(1f))
+                        }
+                    }
+                    projects.itemCount == 0 && appendState is LoadState.Loading -> {
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.CircularProgressIndicator()
+                        }
+                    }
+                    projects.itemCount == 0 && appendState is LoadState.NotLoading && !appendState.endOfPaginationReached -> {
+                        EmptyMessage(
+                            "正在查找兼容资源",
+                            "首批扫描还没有找到匹配项目，远端仍有内容待检查。",
+                            "继续扫描",
+                            projects::refresh,
+                        )
+                    }
+                    projects.itemCount == 0 -> {
                         EmptyMessage("没有匹配的资源", "试试其他关键词、版本或资源类型。")
-                    } else ProjectList(projects, viewModel, Modifier.weight(1f))
+                    }
+                    else -> ProjectList(projects, viewModel, Modifier.weight(1f))
                 }
 
-                when (projects.loadState.append) {
+                when (appendState) {
                     is LoadState.Loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     is LoadState.Error -> TextButton(onClick = projects::retry, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                         Text("加载更多失败，点此重试")
@@ -233,6 +260,7 @@ fun ResourceCenterScreen(
     }
 
     state.selectedProject?.let { project ->
+        val versionsError = state.versionsError
         ModalBottomSheet(onDismissRequest = viewModel::closeVersions) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Text(project.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -242,10 +270,17 @@ fun ResourceCenterScreen(
                     Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
                         androidx.compose.material3.CircularProgressIndicator()
                     }
+                } else if (versionsError != null && state.versions.isEmpty()) {
+                    EmptyMessage("版本加载失败", versionsError, "重试", viewModel::retryVersions)
                 } else if (state.versions.isEmpty()) {
                     EmptyMessage("没有可安装的版本", "当前实例的游戏版本或加载器可能不受支持。")
                 } else {
                     LazyColumn {
+                        versionsError?.let { error ->
+                            item {
+                                InlineRefreshError("版本刷新失败", error, viewModel::retryVersions)
+                            }
+                        }
                         items(state.versions, key = ResourceVersion::id) { version ->
                             VersionRow(version, state.gameVersion, state.loader) { viewModel.addVersion(version) }
                         }
@@ -424,8 +459,8 @@ private fun TargetRow(server: ManagedServer, selected: Boolean, onClick: () -> U
 
 @Composable
 private fun VersionRow(version: ResourceVersion, gameVersion: String, loader: String, onAdd: () -> Unit) {
-    val matching = (gameVersion.isBlank() || gameVersion in version.gameVersions) &&
-        (loader.isBlank() || loader in version.loaders) && version.serverCompatible
+    val matching = version.isCompatibleWith(gameVersion, loader)
+    val metadataComplete = version.hasCompleteCompatibilityMetadata(gameVersion, loader)
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -441,7 +476,15 @@ private fun VersionRow(version: ResourceVersion, gameVersion: String, loader: St
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Button(onClick = onAdd, enabled = matching) { Text(if (matching) "加入" else "不匹配") }
+        Button(onClick = onAdd, enabled = matching) {
+            Text(
+                when {
+                    !matching -> "不匹配"
+                    !metadataComplete -> "兼容性未知"
+                    else -> "加入"
+                },
+            )
+        }
     }
 }
 
@@ -517,6 +560,25 @@ private fun EmptyMessage(title: String, message: String, action: String? = null,
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (action != null && onAction != null) TextButton(onClick = onAction) { Text(action) }
+        }
+    }
+}
+
+@Composable
+private fun InlineRefreshError(title: String, message: String, onRetry: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = onRetry) { Text("重试") }
         }
     }
 }

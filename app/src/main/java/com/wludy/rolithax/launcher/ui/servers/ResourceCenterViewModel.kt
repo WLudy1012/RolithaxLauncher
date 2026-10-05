@@ -20,6 +20,7 @@ import com.wludy.rolithax.launcher.data.resources.ResourceProject
 import com.wludy.rolithax.launcher.data.resources.ResourceRepository
 import com.wludy.rolithax.launcher.data.resources.ResourceVersion
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,6 +30,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class ResourceCenterUiState(
     val loadingTargets: Boolean = true,
@@ -45,6 +47,7 @@ data class ResourceCenterUiState(
     val selectedProject: ResourceProject? = null,
     val versions: List<ResourceVersion> = emptyList(),
     val loadingVersions: Boolean = false,
+    val versionsError: String? = null,
     val showTargetPicker: Boolean = false,
     val showCart: Boolean = false,
     val issues: List<ResourceIssue> = emptyList(),
@@ -63,6 +66,10 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
     private val filter = MutableStateFlow(ResourceFilter(type = "mod", serverOnly = true))
     private var searchJob: Job? = null
     private var installJob: Job? = null
+    private var serverSelectionJob: Job? = null
+    private var serverSelectionId = 0L
+    private var versionsJob: Job? = null
+    private var versionsRequestId = 0L
     private var remoteInstall: Pair<com.wludy.rolithax.launcher.data.InstanceRepository, String>? = null
 
     private val _state = MutableStateFlow(ResourceCenterUiState())
@@ -101,40 +108,94 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
 
     fun selectServer(server: ManagedServer) {
         val ref = server.ref ?: return
-        val (version, loader) = if (ref.isLocal) {
-            val meta = LocalInstanceStore.load(getApplication(), ref.instanceId)
-            meta?.coreVersion.orEmpty() to loaderFor(meta?.core.orEmpty())
-        } else {
-            parseVersion(server.detail) to loaderFor(server.detail)
+        val selectionId = ++serverSelectionId
+        serverSelectionJob?.cancel()
+        serverSelectionJob = viewModelScope.launch {
+            val (version, loader) = if (ref.isLocal) {
+                withContext(Dispatchers.IO) {
+                    val meta = LocalInstanceStore.load(getApplication(), ref.instanceId)
+                    meta?.coreVersion.orEmpty() to loaderFor(meta?.core.orEmpty())
+                }
+            } else {
+                parseVersion(server.detail) to loaderFor(server.detail)
+            }
+            if (selectionId != serverSelectionId) return@launch
+            _state.update {
+                it.copy(
+                    selectedServerKey = server.key,
+                    gameVersion = version,
+                    loader = loader,
+                    showTargetPicker = false,
+                    cart = emptyList(),
+                    issues = emptyList(),
+                    cartValidated = false,
+                )
+            }
+            updateFilter()
+            refreshCart(server.key)
         }
-        _state.update {
-            it.copy(
-                selectedServerKey = server.key,
-                gameVersion = version,
-                loader = loader,
-                showTargetPicker = false,
-                cart = emptyList(),
-                issues = emptyList(),
-                cartValidated = false,
-            )
-        }
-        updateFilter()
-        refreshCart(server.key)
     }
 
     fun openVersions(project: ResourceProject) {
-        _state.update { it.copy(selectedProject = project, versions = emptyList(), loadingVersions = true, message = null) }
-        viewModelScope.launch {
-            val current = _state.value
-            val result = repository.versions(
-                project.id,
-                ResourceFilter(project.type, gameVersion = current.gameVersion, loader = current.loader, providerId = current.providerId),
+        val requestId = ++versionsRequestId
+        versionsJob?.cancel()
+        val current = _state.value
+        val requestFilter = ResourceFilter(
+            project.type,
+            gameVersion = current.gameVersion,
+            loader = current.loader,
+            providerId = current.providerId,
+        )
+        _state.update {
+            it.copy(
+                selectedProject = project,
+                versions = emptyList(),
+                loadingVersions = true,
+                versionsError = null,
+                message = null,
             )
-            _state.update { it.copy(versions = result, loadingVersions = false) }
+        }
+        versionsJob = viewModelScope.launch {
+            try {
+                val result = repository.versionsWithStatus(project.id, requestFilter)
+                if (requestId != versionsRequestId || _state.value.selectedProject?.id != project.id) return@launch
+                _state.update {
+                    it.copy(
+                        versions = result.versions,
+                        loadingVersions = false,
+                        versionsError = result.error?.message?.takeIf(String::isNotBlank),
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                if (requestId != versionsRequestId || _state.value.selectedProject?.id != project.id) return@launch
+                _state.update {
+                    it.copy(
+                        loadingVersions = false,
+                        versionsError = error.message?.takeIf(String::isNotBlank) ?: "检查网络后重试",
+                    )
+                }
+            }
         }
     }
 
-    fun closeVersions() = _state.update { it.copy(selectedProject = null, versions = emptyList()) }
+    fun retryVersions() {
+        _state.value.selectedProject?.let(::openVersions)
+    }
+
+    fun closeVersions() {
+        versionsJob?.cancel()
+        versionsRequestId++
+        _state.update {
+            it.copy(
+                selectedProject = null,
+                versions = emptyList(),
+                loadingVersions = false,
+                versionsError = null,
+            )
+        }
+    }
 
     fun addVersion(version: ResourceVersion) {
         val current = _state.value

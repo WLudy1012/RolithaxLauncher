@@ -51,6 +51,15 @@ data class ResourceVersion(
     val serverCompatible: Boolean,
 )
 
+fun ResourceVersion.isCompatibleWith(gameVersion: String, loader: String): Boolean =
+    serverCompatible &&
+        (gameVersion.isBlank() || gameVersions.isEmpty() || gameVersion in gameVersions) &&
+        (loader.isBlank() || loaders.isEmpty() || loaders.any { it.equals(loader, ignoreCase = true) })
+
+fun ResourceVersion.hasCompleteCompatibilityMetadata(gameVersion: String, loader: String): Boolean =
+    (gameVersion.isBlank() || gameVersions.isNotEmpty()) &&
+        (loader.isBlank() || loaders.isNotEmpty())
+
 data class ResourceCartEntry(
     val project: ResourceProject,
     val version: ResourceVersion,

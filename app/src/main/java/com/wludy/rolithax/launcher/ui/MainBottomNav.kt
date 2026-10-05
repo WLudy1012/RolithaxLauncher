@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
@@ -27,6 +28,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailDefaults
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -75,6 +79,49 @@ fun MainBottomNav(
                 page = page,
                 selected = page == current,
                 onNavigate = onNavigate,
+            )
+        }
+    }
+}
+
+@Composable
+fun MainNavigationRail(
+    current: TopPage,
+    onNavigate: (TopPage) -> Unit,
+    modifier: Modifier = Modifier,
+    showLabels: Boolean = true,
+) {
+    NavigationRail(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        windowInsets = NavigationRailDefaults.windowInsets,
+    ) {
+        TopPage.entries.forEach { page ->
+            NavigationRailItem(
+                selected = page == current,
+                onClick = { onNavigate(page) },
+                icon = {
+                    if (page == TopPage.NEW_INSTANCE) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = page.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    } else {
+                        Icon(imageVector = page.icon, contentDescription = null)
+                    }
+                },
+                label = { Text(page.label) },
+                alwaysShowLabel = showLabels,
             )
         }
     }

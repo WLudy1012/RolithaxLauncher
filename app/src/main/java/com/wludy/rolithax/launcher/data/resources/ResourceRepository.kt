@@ -24,6 +24,11 @@ class ResourceRepository(
     providers: List<ResourceProvider>,
     private val mslApi: MslServerCoreApi,
 ) {
+    data class ResourceVersionsResult(
+        val versions: List<ResourceVersion>,
+        val error: Throwable? = null,
+    )
+
     private val dao = database.resourceDao()
     private val gson = Gson()
     private val providerRegistry = providers.associateBy { it.id.lowercase() }
@@ -37,21 +42,22 @@ class ResourceRepository(
         ).flow
             .mapEntities()
 
-    suspend fun versions(projectId: String, filter: ResourceFilter): List<ResourceVersion> {
+    suspend fun versions(projectId: String, filter: ResourceFilter): List<ResourceVersion> =
+        versionsWithStatus(projectId, filter).versions
+
+    suspend fun versionsWithStatus(projectId: String, filter: ResourceFilter): ResourceVersionsResult {
         val cacheProjectId = "${filter.providerId.lowercase()}:$projectId"
         val cached = dao.versions(cacheProjectId)
             .mapNotNull { runCatching { it.toDomain(gson) }.getOrNull() }
-            .filter { version ->
-                (filter.gameVersion.isBlank() || version.gameVersions.isEmpty() || filter.gameVersion in version.gameVersions) &&
-                    (filter.loader.isBlank() || version.loaders.isEmpty() || version.loaders.any { it.equals(filter.loader, ignoreCase = true) })
-            }
-        return runCatching {
+            .filter { it.isCompatibleWith(filter.gameVersion, filter.loader) }
+        return try {
             val parsed = providerFor(filter.providerId).versions(projectId, filter)
             dao.putVersions(parsed.map { it.toEntity(gson, cacheProjectId) })
-            parsed
-        }.getOrElse { error ->
-            if (error is CancellationException) throw error
-            cached
+            ResourceVersionsResult(parsed)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            ResourceVersionsResult(cached, error)
         }
     }
 
@@ -275,15 +281,14 @@ private class ResourceRemoteMediator(
             val sync = dao.syncInfo(filter.key)
             if (loadType == LoadType.APPEND && sync?.endReached == true) return MediatorResult.Success(true)
             var offset = if (loadType == LoadType.REFRESH) 0 else sync?.nextOffset ?: 0
-            val etag = if (loadType == LoadType.REFRESH) sync?.etag else null
+            val etag = if (loadType == LoadType.REFRESH && sync?.endReached != false) sync?.etag else null
             var lastTag: String? = sync?.etag
             val refreshOffset = if (loadType == LoadType.REFRESH) maxOf(sync?.nextOffset ?: 0, state.config.initialLoadSize) else 0
             val desiredItems = if (loadType == LoadType.REFRESH) state.config.initialLoadSize else state.config.pageSize
-            val maxAttempts = if (loadType == LoadType.REFRESH && sync != null) {
-                maxOf(MAX_EMPTY_PAGE_SCAN, refreshOffset / ResourceRepository.PAGE_SIZE + 2)
-            } else {
-                MAX_EMPTY_PAGE_SCAN
-            }
+            val maxAttempts = if (loadType == LoadType.REFRESH) {
+                if (sync == null) MAX_INITIAL_SCAN_PAGES
+                else maxOf(MAX_APPEND_SCAN_PAGES, refreshOffset / ResourceRepository.PAGE_SIZE + 2)
+            } else MAX_APPEND_SCAN_PAGES
             var total = sync?.totalHits ?: 0
             var endReached = false
             val items = mutableListOf<ResourceItemEntity>()
@@ -331,7 +336,8 @@ private class ResourceRemoteMediator(
     }
 
     companion object {
-        private const val MAX_EMPTY_PAGE_SCAN = 5
+        private const val MAX_INITIAL_SCAN_PAGES = 20
+        private const val MAX_APPEND_SCAN_PAGES = 5
     }
 }
 
