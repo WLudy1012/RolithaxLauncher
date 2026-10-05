@@ -2,7 +2,7 @@
 
 日期：2026-09-30
 适用仓库：MSLX-Android（Android 客户端）
-阶段：研究方案已形成；自动评审和首启引导已在本地实现，待提交与远端运行验证
+阶段：本地实现已完成；等待用户后续提交/推送和设备、远端流水线验收
 
 ## 目标与约束
 
@@ -141,3 +141,60 @@
 ## 开始实现时的建议顺序
 
 先完成阶段 0 的 Java 25、CNB 和 API 契约核验，然后按“数据安全/下载 → 会话与多地址 → 本地运行时 → UI 导航与页面 → 加密迁移包 → 模块整理与发布验收”推进。网络和存储公共层先稳定，再把页面接入新状态接口。每阶段独立编译、验证、用中文提交，并同步维护 `develops/llm.txt`；在用户明确要求发版前不创建版本 tag。
+
+## 阶段 2—5 执行记录（2026-10-01）
+
+- 阶段 2：`ReconnectingHubClient` 增加关闭状态、连接代际保护和可回收重连作用域；`InstanceRepository` 统一持有 Daemon OkHttp 客户端，配置变化或移除时关闭 Hub、Dispatcher、连接池和缓存。`DaemonRegistry` 删除 Daemon 时释放仓储，地址探测使用结构化并发，临时探测仓储在每次结果后关闭，并加入当前地址优先、15% 延迟容差与 60 秒切换冷却。设置页展示备用地址数量、在线状态和延迟。
+- 阶段 3：本机服务在启用保活时申请可释放的 `PARTIAL_WAKE_LOCK`，启动失败、异常退出时释放；新增“前台页面保持屏幕亮起”开关，仅控制可见 Activity 的 `FLAG_KEEP_SCREEN_ON`。新增局域网地址、传输类型、热点限制和防火墙权限诊断；无 Shizuku/root 时只给出指引，不执行未授权系统修改。扫码页使用系统 Insets，顶部与底部面板避开状态栏/导航栏并保持竖屏。
+- 阶段 4：Dock 调整为主页、实例、中央“+”、资源、设置五项；资源中心新增明确空态。实例卡片移除启停/删除快捷按钮，支持长按或更多菜单进行置顶/删除，置顶键持久化并参与排序。一言卡片移到主页首屏上方。ANSI 解析器补充可跨 SignalR 分块保留状态的增量解析器。
+- 阶段 5：新增 `BackupManager`，通过 SAF 直接流式写入/读取带版本清单的 AES-GCM 加密 ZIP；口令使用 PBKDF2-HMAC-SHA256 派生，限制条目、单文件、总大小、路径深度并拒绝路径穿越、未知条目、缺块、篡改和截断。导入先在应用私有暂存区校验，再提交本机实例和设置，不导出 Android Keystore 密钥，不在运行实例期间允许迁移，也不会自动启动实例。
+- 下载策略：公共 API 客户端改为进程级复用；核心下载器对 429/5xx 做有限退避重试，仍要求可信 SHA-256 后才原子替换。MSLAPI 下载描述增加可选镜像列表，远程请求携带镜像元数据，本机核心安装按同一摘要依次尝试镜像。Java 25 项目镜像地址更新到当前 `v1.7.7-Beta` tag；该 tag 和 FCL 固定地址在本次核验没有可用 Java 25 归档，摘要未猜改。CNB 发布流水线改为归档来源全部失败时告警并跳过缺失附件，不以无校验文件替代，也不因此阻断 APK 构建。
+- 验证：JDK 21 下 `:app:compileDebugKotlin`、`:app:testDebugUnitTest`（无测试源）、`:app:lintDebug`、`git diff --check` 成功；`.cnb.yml`、`android.yml`、`release.yml`、`auto-issue-review.yml` 均可由 PyYAML 解析。未进行真实设备扫码、热点、防火墙、跨设备备份和远端流水线验证；当前新增代码未提交、未推送。
+
+## 阶段 6 状态与剩余外部验收
+
+- 包结构已经按网络、下载、本机运行时、备份和 UI 职责收敛在现有单模块 package 内；暂不拆 Gradle 多模块，避免在依赖边界未经过设备回归前引入大规模迁移风险。
+- 仍需真实设备验收：Android 24/35、深浅色与大字体、连续 Dock 点击、扫码状态栏、长按实例卡片、前台服务/锁屏、热点可达性、权限撤销、加密备份错误口令/篡改/跨设备恢复。
+- 仍需远端验收：GitHub Issue 自动评审模型实际运行、CNB Maven 镜像构建、CNB/GitHub Release 资产和 Java 21/25 归档的真实 URL 与摘要。没有可信 Java 25 归档前，客户端必须继续拒绝安装该运行时。
+
+- 追加验收：` :app:assembleDebug` 与 `:app:assembleRelease` 均成功（JDK 21、NDK 28.2.13676358）；Release APK 约 47.0 MiB，SHA-256 为 `DC873A69EEBC88B840060FBB5803A4E3253E8AA5FC8C445EB4C10BDB0F1231F6`。Debug APK SHA-256 为 `5E1E86685118D796DC9363DF32DB2238D58AB3A971DEC7E2E053AE1E9D8693E2`。这只是本地构建产物，未提交或发布。
+
+## 阶段 5—6 追加修复（2026-10-01）
+
+- 加密备份现在会把应用私有 `theme/background_light` 与 `theme/background_dark` 背景文件一并写入加密归档；导入后使用当前设备路径重新保存，避免跨设备恢复旧绝对路径。
+- 实例导入改为先把每个实例复制到目标根目录的随机临时目录，完整复制成功后再改名提交；任一实例失败会删除本次已提交目录。导入仍在本机服务端运行时被拒绝。
+- CNB tag 流程不再把缺失的 Java 21/25 文件列入附件；GitHub Release 通过 `$GITHUB_ENV` 动态生成附件清单，仅上传实际存在且已校验的归档。无可信归档时只发布 APK 和内嵌 Java 17 副本，不上传空文件或未校验文件。
+- 新增代码验证：`:app:compileDebugKotlin`、`:app:testDebugUnitTest`（无测试源）、`:app:lintDebug`、`:app:assembleDebug`、`:app:assembleRelease` 均成功；四份 GitHub/CNB YAML 已通过 PyYAML 解析；`git diff --check` 成功。
+
+## 当前交付边界
+
+- 本地可完成的阶段 1—6 代码、工作流和文档修改均已完成，工作区保持未提交、未推送。
+- Java 25 仍是外部资产阻塞：当前来源返回 404，客户端继续要求真实归档与可信 SHA-256，不能通过猜测地址或关闭校验标记完成。
+- 真实设备行为、GitHub 自动评审远端运行、CNB Maven/Release 运行、热点/防火墙授权和跨设备恢复仍需外部环境验收；本地构建通过不等同于这些验收已完成。
+
+## GitHub Actions 警告修复（2026-10-01）
+
+- `android.yml`、`release.yml` 与 `auto-issue-review.yml` 已使用运行于 Node 24 的 Action 版本；`setup-java` 已升级到 v6。
+- run `36810845157` 最终构建成功。缓存恢复警告来自把 SDK platform/build-tools 与 NDK 一并缓存后，tar 无法覆盖 runner 预装的 `build-tools/35.0.0`；现改为只缓存 NDK 并使用新缓存键。
+- 三份 YAML 均通过解析，`actionlint@latest` 除对官方 Copilot CLI 必需的 `copilot-requests: write` 权限做针对性忽略外通过。远端复跑待推送后确认。
+
+## Rolithax 品牌迁移与资源中心实施记录（2026-10-01）
+
+- 已完成 Android 全量包名/显示名迁移：`com.wludy.rolithax.launcher` / `Rolithax Launcher`。由于 applicationId 与签名改变，按用户选择接受全新安装，旧数据通过加密导出/导入迁移。
+- 已完成扩展插件重命名：插件 ID `mslx-plugin-rolithax`，程序集、目录和前端均为 Rolithax 命名；最低 Daemon 版本 `1.5.10.2`。服务器端插件负责云端 Modrinth 下载与安装。
+- 资源中心首期已接入 Modrinth v3 与 MSLAPI，包含 Room 分页缓存、ETag 增量刷新、离线内容、目标实例筛选、购物清单、版本选择、递归依赖/冲突校验、客户端模组清单复制、本地校验下载与云端插件安装。CurseForge 公开镜像和其他 Provider 保持后续阶段。
+- 已按 MSLAPI 要求加入 User-Agent、准确服务署名、MSL Logo 和官网链接。发布 JKS 已生成于本地忽略目录，alias 为 `wludy`；工作流现在固定验证 alias，并增加了 GitHub/CNB 的 main 源码合并同步，tag Release 同步 main 与 tag，均不强推。CNB tag 构建改为读取项目受保护变量，不再初始化时导入外部密钥仓库文件。
+- 验证：Android Release APK 已成功构建并验签；插件最近一次 Release 打包成功，ZIP 内含 `Rolithax.Plugin.DaemonExtensions.dll` 与 `README.md`，构建 0 错误、65 条来自 MSLX.SDK 的 nullable 警告；前端 typecheck/build 已通过。三份 YAML 均由 PyYAML 解析，两个仓库 `git diff --check` 均成功。
+- 未完成的外部验收：GitHub Actions Secrets 与 CNB 项目受保护变量尚需更新为 Rolithax JKS；没有 Android 设备，真机导航、下载/安装交互与响应式 UI 需设备验收；未经远端执行不能宣称 GitHub/CNB 工作流已验证。当前改动未提交、未推送。
+## KSP Actions 故障修复与 1.7.8 Beta 发布（2026-10-01）
+
+- 修复 KSP 插件标记解析失败：`settings.gradle.kts` 显式映射至 `symbol-processing-gradle-plugin` 实现模块，避免 CI 依赖易失的 marker artifact。
+- 版本升至 `1.7.8` / `versionCode 40`。本地在刷新依赖后成功构建 Debug 与签名 Release；签名 APK SHA-256：`C7752C7883C879D883C6E07CD846E63F04CC8466E1C55AB9902C38EE7AD9AFDB`。
+- 修复提交 `f9328b8` 已推送；Android CI run `36870184795` 成功，CNB main 已同步。`v1.7.8-Beta` 已推送 GitHub，Release run `36871287822` 成功发布 full/lite APK 与经过 SHA-256 校验的 JRE 17/21/25 附件；GitHub 与 CNB main/tag refs 已核对一致。
+- 相关验证通过；本地未跟踪的用户 `website/` 与此计划文件未提交，签名密钥未提交。
+
+## CNB 密钥导入修复（2026-10-05）
+
+- 修复 `.cnb.yml` 在流水线初始化阶段导入 `MSLX-secrets/-/blob/main/keystore.yml` 失败的问题。
+- tag 构建改为从 CNB 项目受保护变量读取 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；密钥文件、密码和 Base64 内容继续保持在仓库外。
+- `.cnb.yml` 已通过 PyYAML 解析；需要在 CNB 项目设置中补齐变量后，tag 构建才能恢复签名发布。

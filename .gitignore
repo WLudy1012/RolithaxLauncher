@@ -21,6 +21,8 @@ ACTIONS_GUIDE.md
 # 本地归档产物
 /build/dist/
 # 本地开发资料与上游参考（只留本机，不入库）：文档/上游 MSLX-dev 源码/图标素材
-/develops/
+/develop/secret/
+/develops/secret/
 /MSLX-dev/
 /_icons/
+AGENTS.local.md

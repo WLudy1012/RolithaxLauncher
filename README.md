@@ -183,7 +183,7 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 
 - **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release APK，并上传 debug APK 工件；main 构建通过后先合并 CNB main 再普通推送源码，不覆盖 CNB 独立提交。
 - **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
-  `v*` tag 推送时从密钥仓库恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
+  `v*` tag 推送时从 CNB 项目受保护变量恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release；完成后同步 main 源码和 tag 到 CNB。
 - **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
   （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
@@ -202,7 +202,19 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 | `KEYSTORE_PASSWORD` | 密钥库密码 |
 | `KEY_PASSWORD` | 密钥密码 |
 
-签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions 与 CNB 私有密钥仓库都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
+签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions Secrets 与 CNB 项目受保护变量都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
 
 > Windows 生成 `KEYSTORE_BASE64`：
 > `[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`
+
+### CNB 项目变量
+
+在 CNB 仓库的项目设置中创建以下受保护变量，并让 tag 流水线可读取：
+
+| 变量 | 内容 |
+| --- | --- |
+| `KEYSTORE_BASE64` | `rolithax-release.jks` 的单行 Base64 内容 |
+| `KEYSTORE_PASSWORD` | 密钥库密码 |
+| `KEY_PASSWORD` | `wludy` 别名的密钥密码 |
+
+`.cnb.yml` 不再通过 `pipeline imports` 读取 `MSLX-secrets` 文件；这样即使密钥仓库不可访问，流水线也能正常初始化，缺少变量时才在签名阶段给出明确错误。
