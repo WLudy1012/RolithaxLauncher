@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 data class FileManagerUiState(
@@ -51,6 +52,9 @@ class FileManagerViewModel(
     private val _message = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val message = _message.asSharedFlow()
 
+    private var directoryLoadJob: Job? = null
+    private var directoryRequestId = 0L
+
     init {
         viewModelScope.launch {
             // 进程重建后直接恢复本页时，连接表可能尚未同步：先补齐再加载
@@ -60,14 +64,20 @@ class FileManagerViewModel(
     }
 
     fun loadDirectory(path: String) {
+        val requestId = ++directoryRequestId
+        directoryLoadJob?.cancel()
         _state.update { it.copy(loading = true, error = null, currentPath = path) }
-        viewModelScope.launch {
+        directoryLoadJob = viewModelScope.launch {
             repository.fileList(instanceId, path).fold(
                 onSuccess = { items ->
-                    _state.update { it.copy(loading = false, items = items) }
+                    if (requestId == directoryRequestId) {
+                        _state.update { it.copy(loading = false, items = items) }
+                    }
                 },
                 onFailure = { e ->
-                    _state.update { it.copy(loading = false, error = e.message ?: "加载失败") }
+                    if (requestId == directoryRequestId) {
+                        _state.update { it.copy(loading = false, error = e.message ?: "加载失败") }
+                    }
                 },
             )
         }

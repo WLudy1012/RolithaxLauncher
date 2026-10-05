@@ -734,9 +734,9 @@ private fun ResourceStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanc
     var minUnit by remember { mutableStateOf("GB") }
     var maxUnit by remember { mutableStateOf("GB") }
     SectionCard("资源配置") {
-        MemoryField("最小内存", state.minM, minUnit, { minUnit = it }, { mb -> onUpdate { it.copy(minM = mb) } })
+        MemoryField("最小内存", state.minM, minUnit, state.resetGeneration, { minUnit = it }, { mb -> onUpdate { it.copy(minM = mb) } })
         Spacer(Modifier.height(8.dp))
-        MemoryField("最大内存", state.maxM, maxUnit, { maxUnit = it }, { mb -> onUpdate { it.copy(maxM = mb) } })
+        MemoryField("最大内存", state.maxM, maxUnit, state.resetGeneration, { maxUnit = it }, { mb -> onUpdate { it.copy(maxM = mb) } })
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = state.args,
@@ -866,15 +866,25 @@ private fun MemoryField(
     label: String,
     valueMb: Int,
     unit: String,
+    resetGeneration: Long,
     onUnitChange: (String) -> Unit,
     onValueChange: (Int) -> Unit,
 ) {
     // 本地文本态：允许清空/输入中间态（如 "1."），只有合法正数才写回父级，
     // 修复"数字仅剩一位时无法删除"的问题
     var text by remember { mutableStateOf(formatMemory(valueMb, unit)) }
-    // 单位切换或外部重置（如 viewModel.reset）时同步显示
-    LaunchedEffect(unit, valueMb) {
+    var lastValueMb by remember { mutableStateOf(valueMb) }
+    // 仅在单位切换或表单明确重置时同步，避免输入小数时被父级数值更新打断
+    LaunchedEffect(unit, resetGeneration) {
         text = formatMemory(valueMb, unit)
+        lastValueMb = valueMb
+    }
+    // 覆盖外部的数值修改；用户自身写回的值已提前记录，不会覆盖正在编辑的文本
+    LaunchedEffect(valueMb) {
+        if (valueMb != lastValueMb) {
+            text = formatMemory(valueMb, unit)
+            lastValueMb = valueMb
+        }
     }
     Column {
         Text(label, style = MaterialTheme.typography.labelLarge)
@@ -887,7 +897,9 @@ private fun MemoryField(
                     text = filtered
                     val num = filtered.toFloatOrNull()
                     if (num != null && num > 0f) {
-                        onValueChange(if (unit == "GB") (num * 1024).toInt().coerceAtLeast(1) else num.toInt().coerceAtLeast(1))
+                        val nextValueMb = if (unit == "GB") (num * 1024).toInt().coerceAtLeast(1) else num.toInt().coerceAtLeast(1)
+                        lastValueMb = nextValueMb
+                        onValueChange(nextValueMb)
                     }
                 },
                 singleLine = true,

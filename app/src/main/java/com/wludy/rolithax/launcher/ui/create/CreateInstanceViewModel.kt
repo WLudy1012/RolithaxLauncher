@@ -116,6 +116,7 @@ data class CreateInstanceUiState(
     // 模式: 1 快速 / 2 整合包 / 3 基岩版 / 4 MCDR / 10 自定义
     val mode: Int = 1,
     val step: Int = 0,
+    val resetGeneration: Long = 0L,
     // 基础
     val name: String = "新建服务器",
     val path: String = "",
@@ -967,6 +968,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     fun reset() {
         creationClient?.disconnect()
         _state.value = CreateInstanceUiState(
+            resetGeneration = _state.value.resetGeneration + 1,
             onlineJavaVersions = _state.value.onlineJavaVersions,
             localJavas = _state.value.localJavas,
             coreCategories = _state.value.coreCategories,
