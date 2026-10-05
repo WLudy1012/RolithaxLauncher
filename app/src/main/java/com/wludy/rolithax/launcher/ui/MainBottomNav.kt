@@ -7,7 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -120,9 +121,11 @@ private fun RowScope.DockItem(
             .height(68.dp)
             .weight(1f)
             // indication=null：不绘制默认 ripple 矩形框，按压反馈走图标缩放/变淡
-            .clickable(
+            .selectable(
+                selected = selected,
                 interactionSource = interactionSource,
                 indication = null,
+                role = Role.Tab,
                 onClick = { onNavigate(page) },
             ),
         contentAlignment = Alignment.Center,
@@ -142,7 +145,7 @@ private fun RowScope.DockItem(
                 )
                 Icon(
                     imageVector = page.icon,
-                    contentDescription = page.label,
+                    contentDescription = null,
                     tint = if (page == TopPage.NEW_INSTANCE) MaterialTheme.colorScheme.onPrimary
                     else if (isPressed) contentColor.copy(alpha = 0.6f) else contentColor,
                     modifier = Modifier

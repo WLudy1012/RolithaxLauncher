@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -201,6 +205,7 @@ fun AppearanceScreen(
                         ) {
                             PresetColors.forEach { preset ->
                                 ColorDot(
+                                    name = preset.name,
                                     color = Color(preset.argb),
                                     selected = settings.seedColor == preset.argb,
                                     onClick = { viewModel.setTheme(ThemeMode.SEED, preset.argb) },
@@ -396,10 +401,10 @@ private fun ThemeOption(
 }
 
 @Composable
-private fun ColorDot(color: Color, selected: Boolean, onClick: () -> Unit) {
+private fun ColorDot(name: String, color: Color, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(color)
             .then(
@@ -409,7 +414,8 @@ private fun ColorDot(color: Color, selected: Boolean, onClick: () -> Unit) {
                     Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 },
             )
-            .clickable(onClick = onClick),
+            .semantics { contentDescription = "${name}主题色" }
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (selected) {

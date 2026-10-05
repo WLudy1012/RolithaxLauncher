@@ -3,7 +3,6 @@ package com.wludy.rolithax.launcher.ui.home
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -56,6 +56,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -279,12 +282,15 @@ private fun DaemonPagerSection(
         ) {
             pages.indices.forEach { index ->
                 val selected = index == pagerState.currentPage
-                // 外层 20dp 热区保证可点，内层才是圆点本身
+                // 外层热区保证可点，内层才是圆点本身
                 Box(
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
-                        .clickable { scope.launch { pagerState.animateScrollToPage(index) } },
+                        .selectable(selected = selected, role = Role.Tab) {
+                            scope.launch { pagerState.animateScrollToPage(index) }
+                        }
+                        .semantics { contentDescription = "第${index + 1}页，共${pages.size}页" },
                     contentAlignment = Alignment.Center,
                 ) {
                     Box(

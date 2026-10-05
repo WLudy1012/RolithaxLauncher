@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -61,6 +62,7 @@ import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import com.wludy.rolithax.launcher.data.model.UserInfo
 import com.wludy.rolithax.launcher.ui.MslxCard
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -69,11 +71,19 @@ fun UserCenterScreen(
     viewModel: UserCenterViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var revealApiKey by remember(state.user?.id) { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     var showSelfEditor by remember { mutableStateOf(false) }
     var showCreateEditor by remember { mutableStateOf(false) }
     var editingUser by remember { mutableStateOf<UserInfo?>(null) }
     var deletingUser by remember { mutableStateOf<UserInfo?>(null) }
+
+    LaunchedEffect(revealApiKey, state.user?.id) {
+        if (revealApiKey) {
+            delay(15_000)
+            revealApiKey = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -151,15 +161,31 @@ fun UserCenterScreen(
                         item {
                             MslxCard {
                                 val clipboard = LocalClipboardManager.current
+                                val apiKey = user.apiKey
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("API Key", style = MaterialTheme.typography.labelLarge)
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(user.apiKey ?: "未返回", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                                        IconButton(enabled = !user.apiKey.isNullOrBlank(), onClick = { clipboard.setText(AnnotatedString(user.apiKey.orEmpty())) }) {
-                                            Icon(Icons.Filled.Settings, contentDescription = "复制 API Key")
-                                        }
+                                        Text(
+                                            text = when {
+                                                apiKey.isNullOrBlank() -> "未返回"
+                                                revealApiKey -> apiKey
+                                                else -> "••••••••"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        TextButton(
+                                            enabled = !apiKey.isNullOrBlank(),
+                                            onClick = { revealApiKey = !revealApiKey },
+                                        ) { Text(if (revealApiKey) "隐藏" else "显示") }
+                                        TextButton(
+                                            enabled = !apiKey.isNullOrBlank(),
+                                            onClick = { clipboard.setText(AnnotatedString(apiKey.orEmpty())) },
+                                        ) { Text("复制") }
                                     }
-                                    Text("可复制 API Key 用于连接 Daemon。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("完整密钥默认隐藏；显示后 15 秒自动隐藏，也可直接复制。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
