@@ -23,10 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedTextField
@@ -60,7 +58,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -72,6 +69,7 @@ import com.wludy.rolithax.launcher.ui.StatusDot
 import com.wludy.rolithax.launcher.ui.MslxCard
 import com.wludy.rolithax.launcher.ui.MslxEmptyState
 import com.wludy.rolithax.launcher.ui.statusColor
+import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -103,7 +101,7 @@ fun InstancesScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -144,7 +142,9 @@ fun InstancesScreen(
                         description = state.error.orEmpty(),
                         actionLabel = "重试",
                         onAction = { viewModel.refresh(initial = true) },
-                        modifier = Modifier.align(Alignment.Center),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 20.dp),
                     )
                 }
 
@@ -155,7 +155,9 @@ fun InstancesScreen(
                         description = "点「新建」创建云端或本机实例（本机实例直接在手机上开服）",
                         actionLabel = "新建实例",
                         onAction = onOpenNewInstance,
-                        modifier = Modifier.align(Alignment.Center),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = 20.dp),
                     )
                 }
 
@@ -170,7 +172,7 @@ fun InstancesScreen(
                             contentPadding = PaddingValues(
                                 start = 20.dp, end = 20.dp, top = 10.dp, bottom = 30.dp,
                             ),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             items(state.servers, key = { it.key }) { server ->
                                 InstanceCard(
@@ -215,7 +217,15 @@ fun InstancesScreen(
                     OutlinedTextField(confirmation, { confirmation = it }, label = { Text("实例名") }, singleLine = true)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(deleteFiles, { deleteFiles = it })
-                        Text(if (target.isLocal) "同时删除本机上的服务端数据文件（含世界存档）" else "同时删除磁盘上的服务端数据文件")
+                        // 长文案交给 Text 自己换行：不给 weight 会把 Checkbox 之外的宽度撑爆
+                        Text(
+                            text = if (target.isLocal) {
+                                "同时删除本机上的服务端数据文件（含世界存档）"
+                            } else {
+                                "同时删除磁盘上的服务端数据文件"
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                     if (!deleteError.isNullOrBlank()) {
                         Text(
@@ -252,7 +262,11 @@ private fun InstanceCard(
     MslxCard(
         onClick = null,
         highlighted = server.running,
-        modifier = modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        // 先按卡片圆角裁剪再挂点击：长按/点击水波纹才不会被裁成直角
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(GlassCardShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
         Row(
             modifier = Modifier
@@ -315,6 +329,7 @@ private fun InstanceCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
@@ -322,11 +337,19 @@ private fun InstanceCard(
             IconButton(onClick = onMenu) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "实例操作")
             }
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // 启停/删除进行中：用进度代替箭头，避免“点了没反应”
+            if (busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

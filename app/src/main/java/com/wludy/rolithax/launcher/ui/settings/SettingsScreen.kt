@@ -12,11 +12,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -29,8 +30,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -53,14 +52,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.DaemonConfig
 import com.wludy.rolithax.launcher.data.UpdateChannel
 import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxEmptyState
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.update.UpdateViewModel
 
@@ -120,14 +124,14 @@ fun SettingsScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("设置", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
                 ),
             )
@@ -175,12 +179,12 @@ fun SettingsScreen(
                     }
                 }
             }
-            Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.size(12.dp))
 
             // ---- 更新渠道 ----
             SectionTitle("更新渠道")
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(vertical = 8.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     ChannelOption(
                         title = "稳定版",
                         subtitle = "仅接收正式稳定版更新（推荐）",
@@ -196,13 +200,13 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.size(12.dp))
 
             // ---- 服务端 ----
             // 「本机开服」入口已删除（与底部「新建」tab 完全重复）；
             // 本机运行时的配置统一收敛到「本机运行时与开服设置」。
             SectionTitle("服务端")
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column {
                     EntryRow(
                         icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
@@ -231,11 +235,11 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.size(12.dp))
 
             // ---- 通用 ----
             SectionTitle("通用")
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column {
                     EntryRow(
                         icon = { Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary) },
@@ -269,35 +273,37 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.size(20.dp))
+            Spacer(Modifier.size(12.dp))
 
             // ---- Daemon 管理 ----
             SectionTitle("Daemon 管理")
             if (settings.daemonDecodeFailed) {
                 // 解析失败时清理不可恢复数据并写入运行日志
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                // alpha = 1f：错误提示需要高于玻璃面板的对比度，不参与背景透光
+                GlassSurface(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    tint = MaterialTheme.colorScheme.errorContainer,
+                    alpha = 1f,
                 ) {
                     Text(
                         text = "Daemon 配置解析失败，原始数据已备份到运行日志，请重新添加连接。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier.padding(16.dp),
                     )
                 }
             }
-            GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                    if (settings.daemons.isEmpty()) {
-                        Text(
-                            text = "尚未添加任何 Daemon",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    } else {
+            if (settings.daemons.isEmpty()) {
+                MslxEmptyState(
+                    icon = Icons.Filled.Add,
+                    title = "尚未添加任何 Daemon",
+                    description = "添加连接后可在这里选择与管理",
+                    actionLabel = "添加 Daemon",
+                    onAction = onAddDaemon,
+                )
+            } else {
+                GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
                         settings.daemons.forEach { daemon ->
                             DaemonRow(
                                 daemon = daemon,
@@ -308,16 +314,16 @@ fun SettingsScreen(
                                 onDelete = { pendingDelete = daemon },
                             )
                         }
-                    }
-                    TextButton(
-                        onClick = onAddDaemon,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("添加 Daemon")
+                        TextButton(
+                            onClick = onAddDaemon,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("添加 Daemon")
+                        }
                     }
                 }
             }
@@ -378,11 +384,8 @@ fun SettingsScreen(
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.primary,
+    MslxSectionHeader(
+        title = text,
         modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
     )
 }
@@ -397,18 +400,28 @@ private fun ChannelOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .heightIn(min = 48.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Spacer(Modifier.width(8.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+        // 整行可点：按钮自身不再接收点击，避免重复触发
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -425,6 +438,7 @@ private fun EntryRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -436,11 +450,15 @@ private fun EntryRow(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         trailing()
@@ -459,17 +477,20 @@ private fun DaemonRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .heightIn(min = 56.dp)
+            .selectable(selected = isActive, role = Role.RadioButton, onClick = onSelect)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = isActive, onClick = onSelect)
-        Spacer(Modifier.width(8.dp))
+        RadioButton(selected = isActive, onClick = null)
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = daemon.name.ifBlank { daemon.baseUrl },
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = buildString {
@@ -481,6 +502,8 @@ private fun DaemonRow(
                     }
                 },
                 style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 color = when (status?.state) {
                     com.wludy.rolithax.launcher.data.DaemonState.ONLINE -> MaterialTheme.colorScheme.primary
                     com.wludy.rolithax.launcher.data.DaemonState.OFFLINE -> MaterialTheme.colorScheme.error

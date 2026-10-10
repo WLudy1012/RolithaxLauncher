@@ -32,6 +32,7 @@ Rolithax Launcher 是面向 MSLX Daemon 的 Android 客户端，也支持在 And
 | Room | 2.6.1 |
 | Paging | 3.3.2 |
 | Coil Compose | 2.7.0 |
+| Haze | 1.1.1 |
 | Kotlin Coroutines | 1.9.0 |
 | XZ / Commons Compress | 1.10 / 1.27.1 |
 | Shizuku | 13.1.5 |

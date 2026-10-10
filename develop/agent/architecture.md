@@ -56,6 +56,7 @@ ViewModel 通过 `AndroidViewModel` 获取 Application，再从容器取得仓�
 - 远程控制台由 `ConsoleViewModel` 实现 `ConsoleController`，本地控制台由 `LocalConsoleViewModel` 实现同一接口，`ConsoleScreen` 只依赖控制器契约。
 - 状态由 ViewModel 的 `StateFlow` 暴露，Compose 使用生命周期感知的收集方式；一次性提示使用明确的事件或状态清理逻辑。
 - 所有加载、刷新、重试、错误、空态和缓存态都要有可见状态，不能把网络失败静默显示成“没有数据”。
+- 毛玻璃由 `ui/theme/Glass.kt` 统一提供：`MainActivity` 的 `GlassHost` 绘制背景（自定义图或主题色柔光）并注册为 Haze 模糊源；`MslxCard`、`GlassSurface`、Dock 与导航轨通过 `rememberGlassStyle` + `Modifier.glass` 绘制面板。仅在设置了背景图、设备支持（Haze 默认 API 32+）且不透明度 < 100% 时启用实时模糊，其余情况降级为半透明表面色并抬高不透明度下限保证对比度。页面 Scaffold 保持透明；弹窗位于独立窗口，内部不使用玻璃面板。
 
 ## 协程与并发约束
 

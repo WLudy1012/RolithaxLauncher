@@ -7,16 +7,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,15 +28,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.localengine.ShizukuStatus
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 
 /**
  * 本机开服的入口设置页（设置列表里叫「本机运行时与开服设置」）：
@@ -53,10 +58,14 @@ fun LocalServerSettingsScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("本机运行时与开服设置") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -70,21 +79,22 @@ fun LocalServerSettingsScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
             Text(
                 "本机开服默认在 App 进程内启动 JVM；运行时可选 Java 8 / 17 / 21 / 25。开启「增强模式(Shizuku)」后以独立子进程运行，支持多实例并发、停止后免重启 App 再起。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("局域网连接诊断", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = viewModel::refreshNetwork) { Text("刷新") }
-                    }
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MslxSectionHeader(
+                        title = "局域网连接诊断",
+                        actionLabel = "刷新",
+                        onAction = viewModel::refreshNetwork,
+                    )
                     Text(
                         "网络：${state.network.transport} · 服务端端口默认 25565",
                         style = MaterialTheme.typography.bodySmall,
@@ -102,11 +112,16 @@ fun LocalServerSettingsScreen(
             Spacer(Modifier.height(12.dp))
 
             // 本机 Java 运行时（JRE 安装/版本）
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("本机运行时（${state.jreAbi.ifBlank { "当前设备" }}）", style = MaterialTheme.typography.titleSmall)
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MslxSectionHeader(title = "本机运行时（${state.jreAbi.ifBlank { "当前设备" }}）")
                     state.runtimeOptions.forEach { rt ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Column(Modifier.weight(1f)) {
                                 Text(rt.label, style = MaterialTheme.typography.bodyMedium)
                                 Text(
@@ -124,6 +139,7 @@ fun LocalServerSettingsScreen(
                                     },
                                 )
                             }
+                            Spacer(Modifier.width(12.dp))
                             when {
                                 rt.installed -> Text("已就绪", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                 !rt.supported -> Text("不可用", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
@@ -141,10 +157,10 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("内存", style = MaterialTheme.typography.titleSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MslxSectionHeader(title = "内存")
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = state.minMem,
                             onValueChange = { v -> viewModel.update { it.copy(minMem = v.filter(Char::isDigit).take(5)) } },
@@ -172,9 +188,9 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("JVM 参数", style = MaterialTheme.typography.titleSmall)
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MslxSectionHeader(title = "JVM 参数")
                     OutlinedTextField(
                         value = state.jvmArgs,
                         onValueChange = { v -> viewModel.update { it.copy(jvmArgs = v) } },
@@ -182,78 +198,46 @@ fun LocalServerSettingsScreen(
                         placeholder = { Text("如：-Ddisable.watchdog=true -XX:+UseCompressedOops") },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("使用 SerialGC", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "Android 上 G1 表现不稳，默认开启；关闭后走运行时默认 GC。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = state.useSerialGc,
-                            onCheckedChange = { v -> viewModel.update { it.copy(useSerialGc = v) } },
-                        )
-                    }
+                    SwitchRow(
+                        title = "使用 SerialGC",
+                        subtitle = "Android 上 G1 表现不稳，默认开启；关闭后走运行时默认 GC。",
+                        checked = state.useSerialGc,
+                        onCheckedChange = { v -> viewModel.update { it.copy(useSerialGc = v) } },
+                    )
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("后台运行", style = MaterialTheme.typography.titleSmall)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("保活（前台服务 + 常驻通知）", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "开启后退出 App / 划掉最近任务，服务端仍继续运行（通知栏可停止）；关闭则只在 App 前台时运行。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = state.keepAlive,
-                            onCheckedChange = { v -> viewModel.update { it.copy(keepAlive = v) } },
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("前台页面保持屏幕亮起", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "仅在 App 页面可见时生效；不申请后台点亮屏幕权限。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = state.keepScreenOn,
-                            onCheckedChange = { v -> viewModel.update { it.copy(keepScreenOn = v) } },
-                        )
-                    }
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MslxSectionHeader(title = "后台运行")
+                    SwitchRow(
+                        title = "保活（前台服务 + 常驻通知）",
+                        subtitle = "开启后退出 App / 划掉最近任务，服务端仍继续运行（通知栏可停止）；关闭则只在 App 前台时运行。",
+                        checked = state.keepAlive,
+                        onCheckedChange = { v -> viewModel.update { it.copy(keepAlive = v) } },
+                    )
+                    SwitchRow(
+                        title = "前台页面保持屏幕亮起",
+                        subtitle = "仅在 App 页面可见时生效；不申请后台点亮屏幕权限。",
+                        checked = state.keepScreenOn,
+                        onCheckedChange = { v -> viewModel.update { it.copy(keepScreenOn = v) } },
+                    )
                 }
             }
 
             Spacer(Modifier.height(12.dp))
 
-            Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("增强模式（Shizuku）", style = MaterialTheme.typography.titleSmall)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("以 shell 权限运行真正的 java 子进程", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "开启后服务端跑在独立子进程：可多实例并发、停止后无需重启 App 即可再起、支持 Java 8 / 17 / 21 / 25。需先安装并授权 Shizuku；不可用时启动会自动回退到进程内 JVM。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(
-                            checked = state.useShizuku,
-                            onCheckedChange = viewModel::toggleEnhanced,
-                        )
-                    }
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    MslxSectionHeader(title = "增强模式（Shizuku）")
+                    SwitchRow(
+                        title = "以 shell 权限运行真正的 java 子进程",
+                        subtitle = "开启后服务端跑在独立子进程：可多实例并发、停止后无需重启 App 即可再起、支持 Java 8 / 17 / 21 / 25。需先安装并授权 Shizuku；不可用时启动会自动回退到进程内 JVM。",
+                        checked = state.useShizuku,
+                        onCheckedChange = viewModel::toggleEnhanced,
+                    )
                     Text(
                         state.shizukuStatusText,
                         style = MaterialTheme.typography.bodySmall,
@@ -275,11 +259,40 @@ fun LocalServerSettingsScreen(
             }
 
             Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = viewModel::save, modifier = Modifier.weight(1f)) { Text("保存") }
                 OutlinedButton(onClick = viewModel::resetDefaults, modifier = Modifier.weight(1f)) { Text("恢复默认") }
             }
             Spacer(Modifier.height(20.dp))
         }
+    }
+}
+
+/** 整行可点的开关行：行高 ≥48dp，点击区域覆盖整行。 */
+@Composable
+private fun SwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        // 整行已处理点击，开关自身不再接收点击，避免重复触发
+        Switch(checked = checked, onCheckedChange = null)
     }
 }

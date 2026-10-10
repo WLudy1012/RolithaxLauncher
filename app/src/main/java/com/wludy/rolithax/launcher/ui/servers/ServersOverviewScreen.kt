@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -45,6 +47,8 @@ import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
 import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.StatusDot
 
 /**
  * 服务端总览：多 Daemon 连接状态 + 统一服务端列表。
@@ -65,12 +69,12 @@ fun ServersOverviewScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("服务端总览") },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    containerColor = Color.Transparent,
                     scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
                 ),
                 navigationIcon = {
@@ -100,15 +104,13 @@ fun ServersOverviewScreen(
 
             // ---------- Daemon 连接 ----------
             MslxCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Daemon 连接（${state.daemons.size}）",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text(
-                        "所有 Daemon 同时保持连接并并行探测状态，互不影响；各服务端完全对等，标「默认」的那台只影响新建实例的默认落点。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MslxSectionHeader(
+                        title = "Daemon 连接（${state.daemons.size}）",
+                        subtitle = "所有 Daemon 同时保持连接并并行探测状态，互不影响；各服务端完全对等，标「默认」的那台只影响新建实例的默认落点。",
                     )
                     if (state.daemons.isEmpty()) {
                         Text(
@@ -131,11 +133,11 @@ fun ServersOverviewScreen(
 
             // ---------- 统一服务端列表 ----------
             MslxCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "服务端（本机 + 各 Daemon，共 ${state.servers.size}）",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MslxSectionHeader(title = "服务端（本机 + 各 Daemon，共 ${state.servers.size}）")
                     if (state.servers.isEmpty()) {
                         Text(
                             "暂无服务端。可以用下面的按钮新建本机实例或云端实例。",
@@ -214,12 +216,14 @@ private fun DaemonRow(status: DaemonStatus, onSetDefault: () -> Unit) {
         DaemonState.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("●", color = dotColor, style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.width(6.dp))
+        StatusDot(color = dotColor)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = status.name.ifBlank { status.id } + if (status.isDefault) "（默认）" else "",
                 style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = buildString {
@@ -254,11 +258,15 @@ private fun ServerRow(
                 text = server.name + if (server.running) " · 运行中" else "",
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (server.running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "[${server.sourceLabel}] " + server.detail.ifBlank { "—" },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         if (server.isLocal && server.running) {

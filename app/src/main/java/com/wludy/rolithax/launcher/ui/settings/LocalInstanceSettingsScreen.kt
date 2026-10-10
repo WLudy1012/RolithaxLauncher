@@ -6,27 +6,29 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.provider.DocumentsContract
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,11 +50,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,6 +69,8 @@ import com.wludy.rolithax.launcher.data.localengine.InstanceStorage
 import com.wludy.rolithax.launcher.data.localengine.LocalInstanceStore
 import com.wludy.rolithax.launcher.data.localengine.LocalStorage
 import com.wludy.rolithax.launcher.data.localengine.ServerFiles
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 import kotlinx.coroutines.launch
 
 /**
@@ -101,7 +109,7 @@ fun LocalInstanceSettingsScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("本机实例设置", fontWeight = FontWeight.SemiBold) },
@@ -112,7 +120,11 @@ fun LocalInstanceSettingsScreen(
                 },
                 actions = {
                     if (state.meta != null) {
-                        TextButton(onClick = viewModel::save, enabled = !state.saving) {
+                        TextButton(
+                            onClick = viewModel::save,
+                            enabled = !state.saving,
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
                             if (state.saving) {
                                 CircularProgressIndicator(modifier = Modifier.padding(2.dp), strokeWidth = 2.dp)
                             } else {
@@ -136,131 +148,173 @@ fun LocalInstanceSettingsScreen(
             meta == null -> Column(
                 Modifier.fillMaxSize().padding(innerPadding).padding(32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+                verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
             ) {
                 Text(state.error ?: "无法加载实例", color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = viewModel::load) { Text("重试") }
+                TextButton(onClick = viewModel::load, modifier = Modifier.heightIn(min = 48.dp)) { Text("重试") }
             }
 
-            else -> Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    "直接读写下面这个实例目录，改动在下次启动生效。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                // 存放位置：公共目录给出能在文件管理器里直接打开的绝对路径
-                SettingCard("实例目录（${state.storage.label}）") {
-                    Text(state.dirPath, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    if (state.storage == InstanceStorage.PUBLIC && !state.publicStorageGranted) {
-                        Text(
-                            "该实例在公共目录，但未授予「所有文件访问」，现在无法启动。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        TextButton(onClick = {
-                            if (!viewModel.openPublicStorageSettings()) {
-                                scope.launch { snackbarHostState.showSnackbar("未能打开系统授权页，请手动到设置里查找") }
-                            }
-                        }) { Text("去系统授权") }
-                    }
-                }
-
-                // 显示名不可改目录（目录名固定为 dirName），仅改 server 名称展示与 MOTD
-                LabeledField("服务器名称（instance.json）", meta.name) { v ->
-                    viewModel.update { it.copy(name = v) }
-                }
-                LabeledField("MOTD", meta.motd) { v -> viewModel.update { it.copy(motd = v) } }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberField("端口", meta.serverPort, Modifier.weight(1f)) { p -> viewModel.update { it.copy(serverPort = p) } }
-                    NumberField("最大玩家", meta.maxPlayers, Modifier.weight(1f)) { p -> viewModel.update { it.copy(maxPlayers = p) } }
-                }
-
+            else -> {
                 // 启动性能参数：默认跟随「设置 → 本机运行时与开服设置」的全局默认，需要差异时才独立覆盖
                 val eff = state.effective ?: meta
                 val inherit = meta.inheritGlobal
-                SwitchRow("跟随全局默认（内存 / JVM 参数 / GC / 保活）", inherit) { v -> viewModel.setInheritGlobal(v) }
-                if (inherit) {
-                    Text(
-                        "当前生效：最小 ${state.globals.minMemMb} MB · 最大 ${state.globals.maxMemMb} MB · " +
-                            "JVM 参数「${state.globals.jvmArgs.ifBlank { "无" }}」；要改请去「设置 → 本机运行时与开服设置」。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberField("最小内存 MB", eff.minMemMb, Modifier.weight(1f), enabled = !inherit) { p -> viewModel.update { it.copy(minMemMb = p) } }
-                    NumberField("最大内存 MB", eff.maxMemMb, Modifier.weight(1f), enabled = !inherit) { p -> viewModel.update { it.copy(maxMemMb = p) } }
-                }
-                LabeledField("额外 JVM 参数", eff.jvmArgs, enabled = !inherit) { v -> viewModel.update { it.copy(jvmArgs = v.trim()) } }
-
-                SwitchRow("正版验证 online-mode", meta.onlineMode) { v -> viewModel.update { it.copy(onlineMode = v) } }
-                SwitchRow("后台保活（常驻通知）", eff.keepAlive, enabled = !inherit) { v -> viewModel.update { it.copy(keepAlive = v) } }
-                SwitchRow("Serial GC（省内存）", eff.useSerialGc, enabled = !inherit) { v -> viewModel.update { it.copy(useSerialGc = v) } }
-
-                // Java 运行时
-                if (state.runtimeOptions.size > 1) {
-                    SettingCard("Java 运行时（${state.jreAbi}）") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            state.runtimeOptions.forEach { opt ->
-                                val selected = opt.id == meta.runtimeId
-                                val suffix = when {
-                                    !opt.supported -> "·不可用"
-                                    !opt.installed -> "·未装"
-                                    else -> ""
-                                }
-                                if (selected) {
-                                    // 已选中项不可点（避免“点了没反应”的空按钮）
-                                    Box(
-                                        modifier = Modifier
-                                            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    ) {
-                                        Text(
-                                            opt.label + suffix,
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-                                } else {
-                                    TextButton(
-                                        onClick = { viewModel.selectRuntime(opt.id) },
-                                        enabled = opt.supported,
-                                    ) {
-                                        Text(opt.label + suffix)
-                                    }
-                                }
-                            }
-                        }
+                val portInvalid = meta.serverPort !in 1..65535
+                val playersInvalid = meta.maxPlayers < 1
+                // 跟随全局时字段只读，错误态留给用户可改的场景
+                val memoryOrderInvalid = !inherit && eff.maxMemMb < eff.minMemMb
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    item {
                         Text(
-                            "未安装的请到「设置 → 本机运行时与开服设置」安装；标「不可用」的 Java 版本暂无 Android 构建。",
+                            "直接读写下面这个实例目录，改动在下次启动生效。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
 
-                // 文本文件编辑
-                SettingCard("配置文本") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = { editingFile = ServerFiles.PROPERTIES_NAME }, modifier = Modifier.weight(1f)) {
-                            Text("server.properties")
-                        }
-                        OutlinedButton(onClick = { editingFile = ServerFiles.EULA_NAME }, modifier = Modifier.weight(1f)) {
-                            Text("eula.txt")
+                    // 存放位置：公共目录给出能在文件管理器里直接打开的绝对路径
+                    item {
+                        SettingSection("实例目录（${state.storage.label}）") {
+                            Text(
+                                text = state.dirPath,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            if (state.storage == InstanceStorage.PUBLIC && !state.publicStorageGranted) {
+                                SettingNote(
+                                    text = "该实例在公共目录，但未授予「所有文件访问」，现在无法启动。",
+                                    isError = true,
+                                )
+                                TextButton(
+                                    onClick = {
+                                        if (!viewModel.openPublicStorageSettings()) {
+                                            scope.launch { snackbarHostState.showSnackbar("未能打开系统授权页，请手动到设置里查找") }
+                                        }
+                                    },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) { Text("去系统授权") }
+                            }
                         }
                     }
-                }
 
-                state.error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    // 显示名不可改目录（目录名固定为 dirName），仅改 server 名称展示与 MOTD
+                    item {
+                        SettingSection("服务器") {
+                            TextFieldSetting("服务器名称（instance.json）", meta.name) { v ->
+                                viewModel.update { it.copy(name = v) }
+                            }
+                            TextFieldSetting("MOTD", meta.motd) { v -> viewModel.update { it.copy(motd = v) } }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                NumberFieldSetting(
+                                    label = "端口",
+                                    value = meta.serverPort,
+                                    modifier = Modifier.weight(1f),
+                                    isError = portInvalid,
+                                    supportingText = if (portInvalid) "范围 1 - 65535" else null,
+                                ) { p -> viewModel.update { it.copy(serverPort = p) } }
+                                NumberFieldSetting(
+                                    label = "最大玩家",
+                                    value = meta.maxPlayers,
+                                    modifier = Modifier.weight(1f),
+                                    isError = playersInvalid,
+                                    supportingText = if (playersInvalid) "至少 1" else null,
+                                ) { p -> viewModel.update { it.copy(maxPlayers = p) } }
+                            }
+                            SwitchSetting("正版验证 online-mode", meta.onlineMode) { v ->
+                                viewModel.update { it.copy(onlineMode = v) }
+                            }
+                        }
+                    }
+
+                    item {
+                        SettingSection("启动与性能") {
+                            SwitchSetting(
+                                title = "跟随全局默认（内存 / JVM 参数 / GC / 保活）",
+                                checked = inherit,
+                                subtitle = "当前生效：最小 ${state.globals.minMemMb} MB · 最大 ${state.globals.maxMemMb} MB · " +
+                                    "JVM 参数「${state.globals.jvmArgs.ifBlank { "无" }}」",
+                                onCheckedChange = { v -> viewModel.setInheritGlobal(v) },
+                            )
+                            if (inherit) {
+                                SettingNote("要改请去「设置 → 本机运行时与开服设置」。")
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                NumberFieldSetting(
+                                    label = "最小内存",
+                                    value = eff.minMemMb,
+                                    modifier = Modifier.weight(1f),
+                                    suffix = "MB",
+                                    enabled = !inherit,
+                                ) { p -> viewModel.update { it.copy(minMemMb = p) } }
+                                NumberFieldSetting(
+                                    label = "最大内存",
+                                    value = eff.maxMemMb,
+                                    modifier = Modifier.weight(1f),
+                                    suffix = "MB",
+                                    enabled = !inherit,
+                                    isError = memoryOrderInvalid,
+                                    supportingText = if (memoryOrderInvalid) "需不小于最小内存" else null,
+                                ) { p -> viewModel.update { it.copy(maxMemMb = p) } }
+                            }
+                            TextFieldSetting("额外 JVM 参数", eff.jvmArgs, enabled = !inherit) { v ->
+                                viewModel.update { it.copy(jvmArgs = v.trim()) }
+                            }
+                            SwitchSetting("后台保活（常驻通知）", eff.keepAlive, enabled = !inherit) { v ->
+                                viewModel.update { it.copy(keepAlive = v) }
+                            }
+                            SwitchSetting("Serial GC（省内存）", eff.useSerialGc, enabled = !inherit) { v ->
+                                viewModel.update { it.copy(useSerialGc = v) }
+                            }
+                        }
+                    }
+
+                    // Java 运行时
+                    if (state.runtimeOptions.size > 1) {
+                        item {
+                            SettingSection(
+                                title = "Java 运行时（${state.jreAbi}）",
+                                subtitle = "未安装的请到「设置 → 本机运行时与开服设置」安装；" +
+                                    "标「不可用」的 Java 版本暂无 Android 构建。",
+                            ) {
+                                RuntimeChips(
+                                    options = state.runtimeOptions,
+                                    selectedId = meta.runtimeId,
+                                    onSelect = viewModel::selectRuntime,
+                                )
+                            }
+                        }
+                    }
+
+                    // 文本文件编辑
+                    item {
+                        SettingSection("配置文本") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                OutlinedButton(
+                                    onClick = { editingFile = ServerFiles.PROPERTIES_NAME },
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                ) {
+                                    Text("server.properties", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                OutlinedButton(
+                                    onClick = { editingFile = ServerFiles.EULA_NAME },
+                                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                                ) {
+                                    Text("eula.txt", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+
+                    state.error?.let {
+                        item {
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
         }
@@ -288,7 +342,7 @@ fun LocalInstanceSettingsScreen(
  * 本机实例的配置文本与 Java 运行时在本机实例设置页提供，
  * 而**公共目录**实例本身就能用系统文件管理器直接放插件/改配置（路径在本机实例设置页顶部）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LocalInstancePendingScreen(
     dirName: String,
@@ -304,7 +358,7 @@ fun LocalInstancePendingScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("本机实例", fontWeight = FontWeight.SemiBold) },
@@ -321,50 +375,70 @@ fun LocalInstancePendingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                // 小屏下正文较长，允许滚动避免底部按钮被挤出屏幕
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                "本机的文件与插件直接在实例目录里管理",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                "这一页对接的是远程 Daemon 的文件接口。本机实例的文件就在下面这个目录里，" +
-                    "用系统文件管理器就能放 mods/、plugins/ 与改配置文件（改完重启服务生效）。",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SettingCard("实例目录（${storage.label}）") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "本机的文件与插件直接在实例目录里管理",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "这一页对接的是远程 Daemon 的文件接口。本机实例的文件就在下面这个目录里，" +
+                        "用系统文件管理器就能放 mods/、plugins/ 与改配置文件（改完重启服务生效）。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            SettingSection("实例目录（${storage.label}）") {
                 Text(dirPath, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("MSLX 实例目录", dirPath))
-                        scope.launch { snackbarHostState.showSnackbar("已复制目录路径") }
-                    }) { Text("复制路径") }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    TextButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                            clipboard?.setPrimaryClip(ClipData.newPlainText("MSLX 实例目录", dirPath))
+                            scope.launch { snackbarHostState.showSnackbar("已复制目录路径") }
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    ) { Text("复制路径") }
                     if (canOpenInFileManager) {
-                        TextButton(onClick = {
-                            val opened = openPublicDirInFileManager(context, dirPath)
-                            if (!opened) {
-                                scope.launch { snackbarHostState.showSnackbar("未找到可打开该目录的文件管理器，已改为复制路径") }
-                                openPublicDirInFileManager(context, dirPath, copyOnly = true)
-                            }
-                        }) { Text("在文件管理器打开") }
+                        TextButton(
+                            onClick = {
+                                val opened = openPublicDirInFileManager(context, dirPath)
+                                if (!opened) {
+                                    scope.launch { snackbarHostState.showSnackbar("未找到可打开该目录的文件管理器，已改为复制路径") }
+                                    openPublicDirInFileManager(context, dirPath, copyOnly = true)
+                                }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) { Text("在文件管理器打开", maxLines = 1, overflow = TextOverflow.Ellipsis) }
                     }
                 }
             }
             if (storage == InstanceStorage.PRIVATE) {
-                Text(
+                SettingNote(
                     "提示：该实例在应用私有目录，系统文件管理器看不到；新建时选「公共目录」可直接拖文件进去。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            OutlinedButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("本机实例设置（server.properties / eula / Java 运行时）")
+            OutlinedButton(
+                onClick = onOpenSettings,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+            ) {
+                Text(
+                    text = "本机实例设置（server.properties / eula / Java 运行时）",
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            TextButton(onClick = onBack) { Text("返回") }
+            TextButton(onClick = onBack, modifier = Modifier.heightIn(min = 48.dp)) { Text("返回") }
         }
     }
 }
@@ -396,42 +470,103 @@ private fun openPublicDirInFileManager(
     }.isSuccess
 }
 
+// ==================== 可复用小组件 ====================
+
+/** 分区：统一标题层级（[MslxSectionHeader]）+ 玻璃卡片，卡片内边距 16dp、行间距 12dp。 */
 @Composable
-private fun SettingCard(title: String, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            content()
+private fun SettingSection(
+    title: String,
+    subtitle: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MslxSectionHeader(title = title, subtitle = subtitle)
+        MslxCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = content,
+            )
         }
     }
 }
 
+/** 卡片内说明文字：比正文弱一级；[isError] 用于需要立刻被看见的阻断性提示。 */
 @Composable
-private fun LabeledField(label: String, value: String, enabled: Boolean = true, onValueChange: (String) -> Unit) {
+private fun SettingNote(text: String, isError: Boolean = false) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** 输入框标签：单行省略，避免长标签在窄列里折行撑高控件。 */
+@Composable
+private fun FieldLabel(text: String) {
+    Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+@Composable
+private fun TextFieldSetting(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onValueChange: (String) -> Unit,
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         enabled = enabled,
-        label = { Text(label) },
+        label = { FieldLabel(label) },
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     )
 }
 
 @Composable
-private fun NumberField(
+private fun NumberFieldSetting(
     label: String,
     value: Int,
     modifier: Modifier = Modifier,
+    suffix: String = "",
     enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: String? = null,
     onValueChange: (Int) -> Unit,
 ) {
+    // 本地缓冲：清空输入框时不立刻把状态打回旧值，避免删到一半被重置
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    val support = supportingText?.takeIf { it.isNotBlank() }
+    // 仅在有提示时传 supportingText，否则 Material 会为空占位预留高度
+    val supportingSlot: (@Composable () -> Unit)? = if (support == null) {
+        null
+    } else {
+        {
+            Text(
+                text = support,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
     OutlinedTextField(
-        value = value.toString(),
-        onValueChange = { t -> t.toIntOrNull()?.let(onValueChange) },
+        value = text,
+        onValueChange = { raw ->
+            val digits = raw.filter { it.isDigit() }.take(9)
+            text = digits
+            digits.toIntOrNull()?.let(onValueChange)
+        },
         enabled = enabled,
-        label = { Text(label) },
+        label = { FieldLabel(label) },
+        suffix = { if (suffix.isNotBlank()) Text(text = suffix, style = MaterialTheme.typography.labelMedium) },
+        supportingText = supportingSlot,
+        isError = isError,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         shape = RoundedCornerShape(12.dp),
@@ -440,13 +575,72 @@ private fun NumberField(
 }
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+private fun SwitchSetting(
+    title: String,
+    checked: Boolean,
+    subtitle: String? = null,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit,
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            // 整行可点击：点击标题与开关之间的空白也能切换
+            .clip(RoundedCornerShape(12.dp))
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            )
+            .heightIn(min = 48.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 12.dp),
+        ) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Switch(checked = checked, enabled = enabled, onCheckedChange = null)
+    }
+}
+
+/** Java 运行时选项：可换行排列，避免选项多时横向溢出或压缩触控区。 */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RuntimeChips(
+    options: List<LocalRuntimeOption>,
+    selectedId: String,
+    onSelect: (String) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        options.forEach { opt ->
+            val suffix = when {
+                !opt.supported -> "·不可用"
+                !opt.installed -> "·未装"
+                else -> ""
+            }
+            FilterChip(
+                selected = opt.id == selectedId,
+                onClick = { onSelect(opt.id) },
+                enabled = opt.supported,
+                label = { Text(text = opt.label + suffix, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
+        }
     }
 }
 
@@ -460,14 +654,19 @@ private fun FileEditorDialog(
     var text by remember(title) { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("编辑 $title") },
+        title = { Text(text = "编辑 $title", maxLines = 2, overflow = TextOverflow.Ellipsis) },
         text = {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
+                // 配置文件按代码文本阅读：等宽 + 限制高度后由输入框内部滚动
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 minLines = 8,
                 maxLines = 16,
-                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp),
             )
         },
         confirmButton = { TextButton(onClick = { onSave(text) }) { Text("保存") } },

@@ -44,7 +44,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -60,18 +60,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.ThemeMode
 import com.wludy.rolithax.launcher.data.ThemeBrightness
-import com.wludy.rolithax.launcher.ui.theme.GlassBackground
-import com.wludy.rolithax.launcher.ui.theme.GlassLevel
+import com.wludy.rolithax.launcher.ui.theme.GlassHost
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.theme.PresetColors
 import com.wludy.rolithax.launcher.ui.theme.ThemeConfig
-import com.wludy.rolithax.launcher.ui.theme.currentGlassLevel
+import com.wludy.rolithax.launcher.ui.theme.isRealtimeBlurSupported
+import com.wludy.rolithax.launcher.ui.theme.readableContentColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * 外观二级页：主题颜色与动态取色 + 毛玻璃（档位显示 / 深浅背景图 / 面板透明度 /
- * 实时预览 / 一键恢复默认）。
+ * 外观二级页：界面模式、主题配色与毛玻璃（深浅背景图 / 面板不透明度 / 实时预览 / 一键恢复默认）。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -80,12 +79,12 @@ fun AppearanceScreen(
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val level = remember { currentGlassLevel() }
+    val blurSupported = remember { isRealtimeBlurSupported() }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
     // 透明度草稿：拖动时实时预览，停顿 200ms 再落盘（避免高频写 DataStore）
-    var alphaDraft by remember(settings.glassAlpha) { mutableStateOf(settings.glassAlpha) }
+    var alphaDraft by remember(settings.glassAlpha) { mutableFloatStateOf(settings.glassAlpha) }
     LaunchedEffect(alphaDraft) {
         if (alphaDraft != settings.glassAlpha) {
             delay(200)
@@ -227,79 +226,59 @@ fun AppearanceScreen(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.size(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "当前档位",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        Text(
-                            text = level.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
                     Text(
-                        text = level.detail,
+                        text = if (blurSupported) {
+                            "设置背景图后，面板会实时模糊其后方的图片"
+                        } else {
+                            "当前系统不支持实时模糊（需 Android 12L+），面板将以半透明色叠加在背景图上"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
-                    if (level == GlassLevel.NONE) {
-                        Spacer(Modifier.size(8.dp))
-                        Text(
-                            text = "当前系统版本过低，毛玻璃背景与自定义背景图不可用。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    } else {
-                        Spacer(Modifier.size(12.dp))
-                        GlassPreview(config = previewConfig)
+                    Spacer(Modifier.size(12.dp))
+                    GlassPreview(config = previewConfig)
 
-                        Spacer(Modifier.size(12.dp))
-                        Text(
-                            text = "面板不透明度 ${(alphaDraft * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Slider(
-                            value = alphaDraft,
-                            onValueChange = { alphaDraft = it },
-                            valueRange = 0.25f..1f,
-                        )
+                    Spacer(Modifier.size(12.dp))
+                    Text(
+                        text = "面板不透明度 ${(alphaDraft * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Slider(
+                        value = alphaDraft,
+                        onValueChange = { alphaDraft = it },
+                        valueRange = 0.25f..1f,
+                    )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                        )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                    )
 
-                        BackgroundRow(
-                            title = "浅色模式背景图",
-                            configured = settings.lightBackgroundPath.isNotBlank(),
-                            onPick = {
-                                lightPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            },
-                            onClear = { viewModel.clearThemeBackground(dark = false) },
-                        )
-                        BackgroundRow(
-                            title = "深色模式背景图",
-                            configured = settings.darkBackgroundPath.isNotBlank(),
-                            onPick = {
-                                darkPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            },
-                            onClear = { viewModel.clearThemeBackground(dark = true) },
-                        )
+                    BackgroundRow(
+                        title = "浅色模式背景图",
+                        configured = settings.lightBackgroundPath.isNotBlank(),
+                        onPick = {
+                            lightPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onClear = { viewModel.clearThemeBackground(dark = false) },
+                    )
+                    BackgroundRow(
+                        title = "深色模式背景图",
+                        configured = settings.darkBackgroundPath.isNotBlank(),
+                        onPick = {
+                            darkPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onClear = { viewModel.clearThemeBackground(dark = true) },
+                    )
 
-                        Spacer(Modifier.size(4.dp))
-                        TextButton(onClick = viewModel::resetGlassAppearance) {
-                            Text("恢复默认外观")
-                        }
+                    Spacer(Modifier.size(4.dp))
+                    TextButton(onClick = viewModel::resetGlassAppearance) {
+                        Text("恢复默认外观")
                     }
                 }
             }
@@ -309,25 +288,24 @@ fun AppearanceScreen(
     }
 }
 
-/** 毛玻璃实时预览：小窗口里铺背景 + 半透明面板示意。 */
+/** 毛玻璃实时预览：独立的背景宿主 + 一块面板，与全局效果一致。 */
 @Composable
 private fun GlassPreview(config: ThemeConfig) {
     val shape = RoundedCornerShape(16.dp)
-    Box(
+    GlassHost(
+        config = config,
         modifier = Modifier
             .fillMaxWidth()
             .height(150.dp)
             .clip(shape)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape),
     ) {
-        GlassBackground(config = config, modifier = Modifier.fillMaxSize())
         GlassSurface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp)
                 .align(Alignment.Center),
             shape = RoundedCornerShape(14.dp),
-            alpha = config.glassAlpha,
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
@@ -422,7 +400,8 @@ private fun ColorDot(name: String, color: Color, selected: Boolean, onClick: () 
             Icon(
                 imageVector = Icons.Filled.Check,
                 contentDescription = null,
-                tint = Color.White,
+                // 色块本身可能是亮色（例：活力橙），固定的白色对勾会看不清
+                tint = readableContentColor(color),
                 modifier = Modifier.size(20.dp),
             )
         }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,8 +31,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -60,6 +59,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -69,7 +69,9 @@ import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.ui.statusColor
 import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
+import com.wludy.rolithax.launcher.ui.theme.LocalRolithaxDarkTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -105,7 +107,7 @@ fun HomeScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
@@ -133,10 +135,10 @@ fun HomeScreen(
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 30.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    Column(Modifier.padding(horizontal = 2.dp)) {
+                    Column {
                         Text(
                             text = "Rolithax Launcher",
                             style = MaterialTheme.typography.headlineSmall,
@@ -184,30 +186,26 @@ fun HomeScreen(
                 }
 
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("开服通知", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        if (state.notifications.isNotEmpty()) {
-                            TextButton(onClick = viewModel::clearNotifications) { Text("清空") }
-                        }
-                    }
+                    MslxSectionHeader(
+                        title = "开服通知",
+                        actionLabel = if (state.notifications.isNotEmpty()) "清空" else null,
+                        onAction = viewModel::clearNotifications,
+                    )
                 }
                 if (state.notifications.isEmpty()) {
                     item {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))) {
+                        MslxCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.width(10.dp))
+                                Spacer(Modifier.width(12.dp))
                                 Text(
                                     "暂无通知。实例状态变化(开服/关服)会在这里显示。",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
                                 )
                             }
                         }
@@ -221,6 +219,9 @@ fun HomeScreen(
         }
     }
 }
+
+/** Daemon 卡片基准高度：各页同高；内容更长（错误提示/大字号）时整体变高而不是裁掉底部按钮。 */
+private val DaemonCardMinHeight = 296.dp
 
 /** Daemon 卡片区：一台一张卡左右滑动；没有配置时给空态入口。 */
 @Composable
@@ -262,7 +263,7 @@ private fun DaemonPagerSection(
             pageSpacing = 12.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(296.dp),
+                .heightIn(min = DaemonCardMinHeight),
         ) { page ->
             val item = pages[page]
             DaemonCard(
@@ -317,11 +318,7 @@ private fun DaemonPagerSection(
 /** 尚未配置任何服务端时的空态：只保留「添加服务端」入口（连接向导在连接页里）。 */
 @Composable
 private fun AddDaemonEmptyCard(loading: Boolean, onAddDaemon: () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    MslxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -338,15 +335,16 @@ private fun AddDaemonEmptyCard(loading: Boolean, onAddDaemon: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = if (loading) "" else "添加 MSLX Daemon 后即可在这里查看状态与实例；本机开服实例无需连接也会显示。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (!loading) {
-                Spacer(Modifier.height(14.dp))
-                Button(onClick = onAddDaemon, modifier = Modifier.fillMaxWidth().height(44.dp)) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "添加 MSLX Daemon 后即可在这里查看状态与实例；本机开服实例无需连接也会显示。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = onAddDaemon, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                     Icon(Icons.Filled.Add, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("添加服务端", fontWeight = FontWeight.SemiBold)
@@ -366,8 +364,8 @@ private fun DaemonCard(
     onEdit: () -> Unit,
     onOpenInstances: () -> Unit,
 ) {
-    GlassSurface(shape = RoundedCornerShape(22.dp), modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 14.dp, top = 16.dp, bottom = 10.dp)) {
+    GlassSurface(modifier = Modifier.fillMaxWidth().heightIn(min = DaemonCardMinHeight)) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 16.dp, bottom = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OnlineDot(page.online)
                 Spacer(Modifier.width(8.dp))
@@ -520,7 +518,7 @@ private fun ServerRow(
         modifier = modifier.fillMaxWidth(),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -695,10 +693,22 @@ private fun InfoField(label: String, value: String, modifier: Modifier = Modifie
     }
 }
 
+/** 开/关服配色：深色主题改用高亮变体，否则深绿/橙色文字在深底上对比度不足。 */
+@Composable
+private fun notificationColor(opened: Boolean): Color {
+    val dark = LocalRolithaxDarkTheme.current
+    return when {
+        opened && dark -> Color(0xFF8BE28F)
+        opened -> Color(0xFF2E7D32)
+        dark -> Color(0xFFFFB86B)
+        else -> Color(0xFFFB8C00)
+    }
+}
+
 /** 单条开服/关服通知：点开直达对应实例（本机与远程同一条通路）。 */
 @Composable
 private fun NotificationRow(notification: ServerNotification, onClick: () -> Unit) {
-    val color = if (notification.isOpened) Color(0xFF2E7D32) else Color(0xFFFB8C00)
+    val color = notificationColor(notification.isOpened)
     // 同一时间戳只格式化一次：避免每次重组都新建 SimpleDateFormat
     val timeText = remember(notification.time) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(notification.time))
@@ -707,7 +717,7 @@ private fun NotificationRow(notification: ServerNotification, onClick: () -> Uni
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
                     .size(10.dp)
@@ -727,6 +737,8 @@ private fun NotificationRow(notification: ServerNotification, onClick: () -> Uni
                     text = "${notification.sourceLabel} · $timeText",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(

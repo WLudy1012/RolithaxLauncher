@@ -82,6 +82,28 @@ private fun readableOn(background: Color): Color {
     }
 }
 
+/** 在 [background] 上可读的前景色（深浅二选一），自绘色块、头像底板等场景复用。 */
+fun readableContentColor(background: Color): Color = readableOn(background)
+
+/** 正文/图标前景与表面色要求的最低对比度（WCAG AA 普通文本）。 */
+private const val FOREGROUND_CONTRAST = 4.5f
+
+/**
+ * 颜色用作文字或图标前景时，按需加深/提亮直到满足最低对比度。
+ * Material3 的 primary/secondary/tertiary 会被 TextButton、Icon 等直接当作用前景色，
+ * 种子色本身偏亮时（例：品牌黄绿 #9FA83A 在浅色底上仅约 2.3:1）会导致正文不可读。
+ */
+private fun ensureContrast(color: Color, background: Color, minimum: Float): Color {
+    val lighten = background.relativeLuminance() <= 0.5f
+    var result = color
+    var step = 0
+    while (contrastRatio(result, background) < minimum && step < 24) {
+        result = if (lighten) result.lighten(0.06f) else result.darken(0.06f)
+        step++
+    }
+    return result
+}
+
 /**
  * 基于种子色生成一套完整、协调的 Material3 配色。
  * 所有容器色 / 表面色都从种子色派生，保证整体和谐统一。
@@ -119,11 +141,14 @@ private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
             outlineVariant = Color(0xFF454B42),
         )
     } else {
-        val secondary = seed.desaturate(0.42f)
-        val tertiary = seed.darken(0.12f)
+        val background = seed.lighten(0.97f)
+        // 浅色界面：primary/secondary/tertiary 会被直接当作文字与图标前景，先保证对比度
+        val primary = ensureContrast(seed, background, FOREGROUND_CONTRAST)
+        val secondary = ensureContrast(seed.desaturate(0.42f), background, FOREGROUND_CONTRAST)
+        val tertiary = ensureContrast(seed.darken(0.12f), background, FOREGROUND_CONTRAST)
         lightColorScheme(
-            primary = seed,
-            onPrimary = readableOn(seed),
+            primary = primary,
+            onPrimary = readableOn(primary),
             primaryContainer = seed.lighten(0.86f),
             onPrimaryContainer = readableOn(seed.lighten(0.86f)),
             inversePrimary = seed.lighten(0.36f),
@@ -135,7 +160,7 @@ private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
             onTertiary = readableOn(tertiary),
             tertiaryContainer = seed.lighten(0.7f),
             onTertiaryContainer = readableOn(seed.lighten(0.7f)),
-            background = seed.lighten(0.97f),
+            background = background,
             onBackground = Color(0xFF1A1C1E),
             surface = seed.lighten(0.98f),
             onSurface = Color(0xFF1A1C1E),
@@ -149,6 +174,7 @@ private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
 }
 
 private val MSLXShapes = Shapes(
+    extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
     small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
     medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
     large = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),

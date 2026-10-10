@@ -34,8 +34,7 @@ import com.wludy.rolithax.launcher.ui.ConnectivityHost
 import com.wludy.rolithax.launcher.ui.ServerNotificationHelper
 import com.wludy.rolithax.launcher.ui.navigation.AppNavHost
 import com.wludy.rolithax.launcher.ui.navigation.Routes
-import com.wludy.rolithax.launcher.ui.theme.GlassBackground
-import com.wludy.rolithax.launcher.ui.theme.LocalGlassAlpha
+import com.wludy.rolithax.launcher.ui.theme.GlassHost
 import com.wludy.rolithax.launcher.ui.theme.RolithaxTheme
 import com.wludy.rolithax.launcher.ui.theme.ThemeConfig
 import com.wludy.rolithax.launcher.ui.update.CrashReportDialog
@@ -126,28 +125,23 @@ class MainActivity : ComponentActivity() {
                 darkBackground = settings.darkBackgroundPath,
             )
             RolithaxTheme(darkTheme = darkTheme, themeConfig = themeConfig) {
-                CompositionLocalProvider(LocalGlassAlpha provides themeConfig.glassAlpha) {
-                    Box(Modifier.fillMaxSize()) {
-                        // 毛玻璃背景层：所有页面共用（页面 Scaffold 保持透明以透出背景）
-                        GlassBackground(
-                            config = themeConfig,
+                // 背景层注册为模糊源：各页面 Scaffold 保持透明，玻璃面板实时模糊其后方背景
+                GlassHost(config = themeConfig, modifier = Modifier.fillMaxSize()) {
+                    AppNavHost(settings = settings, navController = navController)
+                    // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
+                    UpdateHost()
+                    // 连接连通性监视：5 秒一轮，在线→离线弹窗提醒
+                    ConnectivityHost()
+                    // 崩溃报告弹窗：上次会话发生未捕获异常时展示
+                    CrashReportDialog()
+                    // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
+                    if (settingsState != null) {
+                        DisclaimerDialog(
+                            settings = settingsState!!,
+                            onAccept = {
+                                scope.launch { app.container.settingsStore.acceptDisclaimer() }
+                            },
                         )
-                        AppNavHost(settings = settings, navController = navController)
-                        // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
-                        UpdateHost()
-                        // 连接连通性监视：5 秒一轮，在线→离线弹窗提醒
-                        ConnectivityHost()
-                        // 崩溃报告弹窗：上次会话发生未捕获异常时展示
-                        CrashReportDialog()
-                        // 首次开屏免责协议：5 秒后可确认，同意后持久化（仅真实加载后渲染）
-                        if (settingsState != null) {
-                            DisclaimerDialog(
-                                settings = settingsState!!,
-                                onAccept = {
-                                    scope.launch { app.container.settingsStore.acceptDisclaimer() }
-                                },
-                            )
-                        }
                     }
                 }
             }

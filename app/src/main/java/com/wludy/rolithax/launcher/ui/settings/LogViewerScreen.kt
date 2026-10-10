@@ -1,15 +1,18 @@
 package com.wludy.rolithax.launcher.ui.settings
 
 import android.content.Intent
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -31,15 +34,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wludy.rolithax.launcher.data.AppLogger
+
+// 日志控制台固定深色底：浅色主题下也保持终端观感；必须不透明，避免背景图透出导致不可读
+private val LogConsoleBackground = Color(0xFF11131A)
+private val LogConsoleText = Color(0xFFD7DBE4)
 
 /** 运行日志二级页：查看 / 复制 / 导出 / 清空应用日志。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,7 +70,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("运行日志") },
@@ -73,8 +83,12 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     IconButton(onClick = { logs = AppLogger.getLogs() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
-                    IconButton(onClick = { confirmClear = true }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "清空")
+                    IconButton(onClick = { confirmClear = true }, enabled = logs.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = "清空",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
                     }
                 },
             )
@@ -86,39 +100,46 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
         ) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(logs)) }) {
-                    Text("复制日志")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { clipboard.setText(AnnotatedString(logs)) },
+                        enabled = logs.isNotEmpty(),
+                    ) { Text("复制日志") }
+                    OutlinedButton(
+                        onClick = { exportLogs(context, logs) },
+                        enabled = logs.isNotEmpty(),
+                    ) { Text("导出日志") }
                 }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { exportLogs(context, logs) }) {
-                    Text("导出日志")
-                }
-                Spacer(Modifier.width(8.dp))
                 Text(
                     text = "日志文件约 ${logs.length} 字符",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 10.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (logs.length > 200_000) {
+                    Text(
+                        text = "页面仅显示末尾 20 万字符，完整日志请复制或导出",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            if (logs.length > 200_000) {
-                Text(
-                    text = "页面仅显示末尾 20 万字符，完整日志请复制或导出",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Text(
-                text = displayLogs.ifBlank { "暂无日志" },
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                ),
+            LogConsole(
+                text = displayLogs,
+                scrollState = scrollState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .verticalScroll(scrollState),
+                    .padding(bottom = 16.dp),
             )
         }
     }
@@ -139,6 +160,45 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 TextButton(onClick = { confirmClear = false }) { Text("取消") }
             },
         )
+    }
+}
+
+/** 日志文本区：自绘不透明深色底 + 等宽字，不参与玻璃背景。 */
+@Composable
+private fun LogConsole(
+    text: String,
+    scrollState: ScrollState,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(LogConsoleBackground)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape)
+            .padding(12.dp),
+    ) {
+        if (text.isBlank()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "暂无日志",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = LogConsoleText.copy(alpha = 0.7f),
+                )
+            }
+        } else {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                ),
+                color = LogConsoleText,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+            )
+        }
     }
 }
 

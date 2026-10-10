@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,14 +29,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,9 +72,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -314,18 +325,20 @@ private fun FormContent(
     val isLocal = state.target == "local"
     // 本机目标仅支持 Java 核心：只保留快速/自定义
     val visibleModes = if (isLocal) MODES.filter { (v, _) -> v == 1 || v == 10 } else MODES
+    // 只用于把"下一步被拦下"的必填错误显示到字段上；真正的校验仍在 ViewModel
+    var nextAttempted by remember(state.step, state.mode, state.target) { mutableStateOf(false) }
     Column(modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
         // 创建目标：Daemon / 本机
         Text("创建目标", style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("daemon" to "远程 Daemon", "local" to "本机").forEach { (value, label) ->
-                FilterChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = { Text(label) })
+                SelectChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = label)
             }
         }
         // 远程目标：选择实例落到哪台 Daemon（去主连接后不再隐含“当前连接”）
         if (!isLocal) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             if (state.availableDaemons.size > 1) {
                 Text("目标服务端", style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(6.dp))
@@ -334,10 +347,10 @@ private fun FormContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     state.availableDaemons.forEach { daemon ->
-                        FilterChip(
+                        SelectChip(
                             selected = state.selectedDaemonId == daemon.id,
                             onClick = { onDaemonChange(daemon.id) },
-                            label = { Text(daemon.name.ifBlank { daemon.id }) },
+                            label = daemon.name.ifBlank { daemon.id },
                         )
                     }
                 }
@@ -351,9 +364,11 @@ private fun FormContent(
         }
         Spacer(Modifier.height(12.dp))
         // 模式选择
+        Text("创建模式", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(6.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             visibleModes.forEach { (value, label) ->
-                FilterChip(selected = state.mode == value, onClick = { onModeChange(value) }, label = { Text(label) })
+                SelectChip(selected = state.mode == value, onClick = { onModeChange(value) }, label = label)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -364,7 +379,7 @@ private fun FormContent(
         // 注意：weight 必须交给 AnimatedContent 自身（它是外层 Column 的直接子项，
         // ColumnScope.weight 才会被消费）；写在内部的 Column 上会因父级不消费而失效，
         // 导致面板按内容固有高度撑开、把底部“上一步/下一步”按钮挤压变扁。
-        androidx.compose.animation.AnimatedContent(
+        AnimatedContent(
             targetState = state.step,
             modifier = Modifier
                 .fillMaxWidth()
@@ -385,7 +400,7 @@ private fun FormContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 when (paneStep?.key) {
-                    "basic" -> BasicStep(state, onUpdate, onSelectStorage)
+                    "basic" -> BasicStep(state, onUpdate, onSelectStorage, showNameError = nextAttempted && state.name.isBlank())
                     "core" -> CoreStep(state, onUpdate, onOpenCoreSelector, onClearCore, onRemoveUpload, onPickJar)
                     "package" -> PackageStep(state, onUpdate, onOpenCoreSelector, onClearCore, onPickPackage)
                     "java" -> JavaStep(state, onUpdate, onSelectLocalRuntime)
@@ -397,7 +412,13 @@ private fun FormContent(
         }
 
         Spacer(Modifier.height(12.dp))
-        // 底部按钮行：固定最小高度，任何步骤面板都不会把它压缩变扁
+        // 核心分类/版本/上传失败只写进 state.error，不显示就是静默失败；放在按钮上方保证任何滚动位置都可见
+        if (state.error != null) {
+            WizardErrorCard(message = state.error.orEmpty(), onDismiss = { onUpdate { it.copy(error = null) } })
+            Spacer(Modifier.height(12.dp))
+        }
+        // 底部按钮行：固定最小高度；首步没有「上一步」时用等宽占位，
+        // 保证主按钮在任何步骤都停在同一位置、同一宽度。
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -406,17 +427,34 @@ private fun FormContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.step > 0) {
-                OutlinedButton(onClick = onPrev, modifier = Modifier.weight(1f).height(48.dp)) { Text("上一步") }
+                OutlinedButton(onClick = onPrev, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("上一步") }
+            } else {
+                Spacer(Modifier.weight(1f))
             }
             if (current?.key == "confirm") {
-                Button(onClick = onSubmit, enabled = !state.submitting, modifier = Modifier.weight(1f).height(48.dp)) {
+                Button(
+                    onClick = onSubmit,
+                    enabled = !state.submitting,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) {
                     if (state.submitting) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.width(8.dp))
                     }
                     Text(if (state.submitting) "提交中..." else "确认创建", fontWeight = FontWeight.SemiBold)
                 }
             } else {
-                Button(onClick = onNext, modifier = Modifier.weight(1f).height(48.dp)) { Text("下一步") }
+                Button(
+                    onClick = {
+                        nextAttempted = true
+                        onNext()
+                    },
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) { Text("下一步") }
             }
         }
     }
@@ -429,8 +467,25 @@ private fun StepIndicator(steps: List<WizardStep>, current: Int) {
             Text("步骤 ${current + 1} / ${steps.size}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
             Text(steps.getOrNull(current)?.title.orEmpty(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(6.dp))
-        LinearProgressIndicator(progress = { (current + 1).toFloat() / steps.size }, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        // 分段进度：单条进度条看不出总步数，分段后能直接看到已完成/剩余步骤
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            steps.forEachIndexed { index, _ ->
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(5.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (index <= current) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
+                            },
+                        ),
+                )
+            }
+        }
     }
 }
 
@@ -440,21 +495,37 @@ private fun BasicStep(
     state: CreateInstanceUiState,
     onUpdate: ((CreateInstanceUiState) -> CreateInstanceUiState) -> Unit,
     onSelectStorage: (InstanceStorage) -> Unit,
+    showNameError: Boolean,
 ) {
     SectionCard("基本信息") {
-        OutlinedTextField(value = state.name, onValueChange = { v -> onUpdate { it.copy(name = v) } }, label = { Text("实例名称") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Spacer(Modifier.height(8.dp))
+        val nameErrorText: (@Composable () -> Unit)? = if (showNameError) {
+            { Text("请填写实例名称") }
+        } else {
+            null
+        }
+        OutlinedTextField(
+            value = state.name,
+            onValueChange = { v -> onUpdate { it.copy(name = v) } },
+            label = { Text("实例名称") },
+            singleLine = true,
+            shape = MaterialTheme.shapes.medium,
+            isError = showNameError,
+            supportingText = nameErrorText,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(12.dp))
         if (state.target == "local") {
             LocalStoragePicker(state, onSelectStorage)
         } else {
-            OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(value = state.path, onValueChange = { v -> onUpdate { it.copy(path = v) } }, label = { Text("实例路径（选填，Daemon 上的绝对路径）") }, placeholder = { Text("例如: /home/user/下载/") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
             Text("留空时默认创建在 Daemon 数据目录下的 Server 文件夹中", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(12.dp))
             Text("常用 Daemon 路径", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("/home/user/下载/", "/home/user/", "/opt/servers/").forEach { path ->
-                    FilterChip(selected = state.path == path, onClick = { onUpdate { it.copy(path = path) } }, label = { Text(path) })
+                    SelectChip(selected = state.path == path, onClick = { onUpdate { it.copy(path = path) } }, label = path)
                 }
             }
         }
@@ -473,18 +544,19 @@ private fun LocalStoragePicker(
 ) {
     Text("实例目录", style = MaterialTheme.typography.labelMedium)
     Spacer(Modifier.height(6.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // 两个选项文案较长，用 FlowRow 以便窄屏换行而不是被挤出屏幕
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         InstanceStorage.entries.forEach { storage ->
             val blocked = storage == InstanceStorage.PUBLIC && !state.publicStorageSupported
-            FilterChip(
+            SelectChip(
                 selected = state.localInstanceStorage == storage,
                 enabled = !blocked,
                 onClick = { onSelectStorage(storage) },
-                label = { Text(if (storage == InstanceStorage.PUBLIC) "公共目录（推荐）" else "应用私有目录") },
+                label = if (storage == InstanceStorage.PUBLIC) "公共目录（推荐）" else "应用私有目录",
             )
         }
     }
-    Spacer(Modifier.height(6.dp))
+    Spacer(Modifier.height(8.dp))
     val preview = when {
         state.localInstanceStorage == InstanceStorage.PUBLIC && state.publicStorageGranted ->
             "服务端文件将落在 ${LocalStorage.publicRoot().path}${File.separator}servers${File.separator}${LocalStorage.sanitizeName(state.name)}，" +
@@ -544,25 +616,29 @@ private fun CoreStep(
         if (state.mode != 3 && state.target != "local") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("online" to "在线下载", "manual" to "本地上传", "custom" to "自定义文件名").forEach { (value, label) ->
-                    FilterChip(selected = state.downloadType == value, onClick = { onUpdate { it.copy(downloadType = value) } }, label = { Text(label) })
+                    SelectChip(selected = state.downloadType == value, onClick = { onUpdate { it.copy(downloadType = value) } }, label = label)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
         }
         if (state.target == "local") {
             Text("本机开服仅支持 MSLAPI 在线核心，下载后经 SHA-256 校验落地到上一步选定的实例目录。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
         }
         if (state.mode == 3) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("online" to "在线下载", "url" to "远程下载", "manual" to "本地上传").forEach { (value, label) ->
-                    FilterChip(selected = state.downloadType == value, onClick = { onUpdate { it.copy(downloadType = value) } }, label = { Text(label) })
+                    SelectChip(selected = state.downloadType == value, onClick = { onUpdate { it.copy(downloadType = value) } }, label = label)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             when (state.downloadType) {
-                "online" -> if (state.core.isNotBlank()) SelectedCoreCard(state.core, onClearCore) else OutlinedButton(onClick = onOpenCoreSelector, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Filled.Build, null); Text("选择基岩版在线核心") }
-                "url" -> OutlinedTextField(state.coreUrl, { v -> onUpdate { it.copy(coreUrl = v, coreFileKey = "") } }, label = { Text("基岩版核心远程下载地址") }, placeholder = { Text("https://...") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                "online" -> if (state.core.isNotBlank()) {
+                    SelectedCoreCard(state.core, onClearCore)
+                } else {
+                    CorePickerButton(label = "选择基岩版在线核心", onClick = onOpenCoreSelector)
+                }
+                "url" -> OutlinedTextField(state.coreUrl, { v -> onUpdate { it.copy(coreUrl = v, coreFileKey = "") } }, label = { Text("基岩版核心远程下载地址") }, placeholder = { Text("https://...") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
                 else -> UploadRow(state.uploading, state.uploadProgress, state.uploadedFileName, state.coreFileKey.isNotBlank(), onPickJar, onRemoveUpload)
             }
         } else when (state.downloadType) {
@@ -570,10 +646,7 @@ private fun CoreStep(
                 if (state.core.isNotBlank()) {
                     SelectedCoreCard(state.core, onClearCore)
                 } else {
-                    OutlinedButton(onClick = onOpenCoreSelector, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Filled.Build, null)
-                        Text("点击打开服务端核心选择库")
-                    }
+                    CorePickerButton(label = "点击打开服务端核心选择库", onClick = onOpenCoreSelector)
                 }
             }
             "manual" -> UploadRow(
@@ -590,8 +663,49 @@ private fun CoreStep(
                 label = { Text("核心文件名") },
                 placeholder = { Text("例如: server.jar") },
                 singleLine = true,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+/** 打开核心选择库的次级按钮：统一 48dp 触控高度与图标/文字间距。 */
+@Composable
+private fun CorePickerButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+        Icon(Icons.Filled.Build, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** 向导错误条：下载/上传类失败没有 Snackbar，只能靠这里告知用户。 */
+@Composable
+private fun WizardErrorCard(message: String, onDismiss: () -> Unit) {
+    MslxCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = message,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, contentDescription = "关闭提示") }
         }
     }
 }
@@ -602,25 +716,26 @@ private fun PackageStep(state: CreateInstanceUiState, onUpdate: ((CreateInstance
     SectionCard("整合包") {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("upload" to "本地上传", "url" to "远程下载", "local" to "Daemon 路径").forEach { (value, label) ->
-                FilterChip(selected = state.packageType == value, onClick = { onUpdate { it.copy(packageType = value) } }, label = { Text(label) })
+                SelectChip(selected = state.packageType == value, onClick = { onUpdate { it.copy(packageType = value) } }, label = label)
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         when (state.packageType) {
             "upload" -> UploadRow(state.uploading, state.uploadProgress, state.uploadedFileName, state.packageFileKey.isNotBlank(), onPickPackage) { onUpdate { it.copy(packageFileKey = "") } }
-            "url" -> OutlinedTextField(state.packageUrl, { v -> onUpdate { it.copy(packageUrl = v) } }, label = { Text("整合包下载地址") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            else -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(state.packageLocalPath, { v -> onUpdate { it.copy(packageLocalPath = v) } }, label = { Text("Daemon 上的绝对路径") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            "url" -> OutlinedTextField(state.packageUrl, { v -> onUpdate { it.copy(packageUrl = v) } }, label = { Text("整合包下载地址") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
+            else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(state.packageLocalPath, { v -> onUpdate { it.copy(packageLocalPath = v) } }, label = { Text("Daemon 上的绝对路径") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("/home/user/下载/", "/home/user/", "/opt/servers/").forEach { path ->
-                        FilterChip(selected = state.packageLocalPath == path, onClick = { onUpdate { it.copy(packageLocalPath = path) } }, label = { Text(path) })
+                        SelectChip(selected = state.packageLocalPath == path, onClick = { onUpdate { it.copy(packageLocalPath = path) } }, label = path)
                     }
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         Text("可选：同时下载服务端核心", style = MaterialTheme.typography.labelLarge)
-        if (state.core.isNotBlank()) SelectedCoreCard(state.core, onClearCore) else OutlinedButton(onClick = onOpenCoreSelector, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Filled.Build, null); Text("选择服务端核心") }
+        Spacer(Modifier.height(6.dp))
+        if (state.core.isNotBlank()) SelectedCoreCard(state.core, onClearCore) else CorePickerButton(label = "选择服务端核心", onClick = onOpenCoreSelector)
     }
 }
 
@@ -635,20 +750,20 @@ private fun JavaStep(
     if (state.target == "local") {
         SectionCard("Java 运行时（本机）") {
             recommended?.let { Text("当前核心建议使用 Java $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             if (state.localRuntimes.isEmpty()) {
                 Text("当前设备 ABI 无可用本机运行时。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     state.localRuntimes.forEach { rt ->
-                        FilterChip(
+                        SelectChip(
                             selected = state.selectedRuntimeId == rt.id,
                             onClick = { onSelectLocalRuntime(rt.id) },
-                            label = { Text("${rt.label}${if (rt.installed) "" else " · 未安装"}") },
+                            label = "${rt.label}${if (rt.installed) "" else " · 未安装"}",
                         )
                     }
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
                 Text("未安装的运行时请到「设置 → 本机运行时与开服设置」安装；启动时会自动校验。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -657,16 +772,73 @@ private fun JavaStep(
     var pending by remember { mutableStateOf<PendingJava?>(null) }
     SectionCard("Java 环境") {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("online" to "在线下载", "local" to "电脑上的 Java", "env" to "环境变量", "custom" to "自定义路径", "docker" to "Docker").forEach { (value, label) -> FilterChip(state.javaType == value, { onUpdate { it.copy(javaType = value) } }, label = { Text(label) }) }
+            listOf(
+                "online" to "在线下载",
+                "local" to "电脑上的 Java",
+                "env" to "环境变量",
+                "custom" to "自定义路径",
+                "docker" to "Docker",
+            ).forEach { (value, label) ->
+                SelectChip(selected = state.javaType == value, onClick = { onUpdate { it.copy(javaType = value) } }, label = label)
+            }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         recommended?.let { Text("当前核心建议使用 Java $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        Spacer(Modifier.height(8.dp))
         when (state.javaType) {
-            "online" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { state.onlineJavaVersions.forEach { version -> FilterChip(state.selectedJavaVersion == version, { if (recommended != null && version.toIntOrNull() != recommended) pending = PendingJava("online", version) else onUpdate { it.copy(selectedJavaVersion = version) } }, label = { Text("Java $version") }) } }
-            "local" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { state.localJavas.forEach { java -> val major = parseJavaMajorVersion(java.version); FilterChip(state.customJavaPath == java.path, { if (recommended != null && major != recommended) pending = PendingJava("local", java.version, java.path) else onUpdate { it.copy(customJavaPath = java.path) } }, label = { Text("Java ${java.version} (${java.vendor ?: "未知"})") }) } }
+            "online" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.onlineJavaVersions.forEach { version ->
+                    SelectChip(
+                        selected = state.selectedJavaVersion == version,
+                        onClick = {
+                            // 与建议版本不一致时先确认，再写回选择
+                            if (recommended != null && version.toIntOrNull() != recommended) {
+                                pending = PendingJava("online", version)
+                            } else {
+                                onUpdate { it.copy(selectedJavaVersion = version) }
+                            }
+                        },
+                        label = "Java $version",
+                    )
+                }
+            }
+            "local" -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.localJavas.forEach { java ->
+                    val major = parseJavaMajorVersion(java.version)
+                    SelectChip(
+                        selected = state.customJavaPath == java.path,
+                        onClick = {
+                            if (recommended != null && major != recommended) {
+                                pending = PendingJava("local", java.version, java.path)
+                            } else {
+                                onUpdate { it.copy(customJavaPath = java.path) }
+                            }
+                        },
+                        label = "Java ${java.version} (${java.vendor ?: "未知"})",
+                    )
+                }
+            }
             "env" -> Text("将使用系统环境变量中的 java 命令", style = MaterialTheme.typography.bodySmall)
-            "custom" -> OutlinedTextField(state.customJavaPath, { v -> onUpdate { it.copy(customJavaPath = v) } }, label = { Text("Java 可执行文件路径") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            "docker" -> if (state.dockerImageType == "preset") FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf("25", "21", "17", "11", "8").forEach { version -> FilterChip(state.dockerImagePresetVersion == version, { if (recommended != null && version.toIntOrNull() != recommended) pending = PendingJava("docker", version) else onUpdate { it.copy(dockerImagePresetVersion = version) } }, label = { Text("Java $version") }) } } else OutlinedTextField(state.dockerCustomImage, { v -> onUpdate { it.copy(dockerCustomImage = v) } }, label = { Text("自定义镜像") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            "custom" -> OutlinedTextField(state.customJavaPath, { v -> onUpdate { it.copy(customJavaPath = v) } }, label = { Text("Java 可执行文件路径") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
+            "docker" -> if (state.dockerImageType == "preset") {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("25", "21", "17", "11", "8").forEach { version ->
+                        SelectChip(
+                            selected = state.dockerImagePresetVersion == version,
+                            onClick = {
+                                if (recommended != null && version.toIntOrNull() != recommended) {
+                                    pending = PendingJava("docker", version)
+                                } else {
+                                    onUpdate { it.copy(dockerImagePresetVersion = version) }
+                                }
+                            },
+                            label = "Java $version",
+                        )
+                    }
+                }
+            } else {
+                OutlinedTextField(state.dockerCustomImage, { v -> onUpdate { it.copy(dockerCustomImage = v) } }, label = { Text("自定义镜像") }, singleLine = true, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth())
+            }
         }
     }
     pending?.let { p -> AlertDialog(
@@ -711,20 +883,34 @@ private fun McdrStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanceUiS
             onValueChange = { v -> onUpdate { it.copy(mcdrPython = v) } },
             label = { Text("Python 可执行文件") },
             singleLine = true,
+            shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = state.mcdrHandler,
             onValueChange = { v -> onUpdate { it.copy(mcdrHandler = v) } },
             label = { Text("Handler（选填，自动推断）") },
             singleLine = true,
+            shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = state.mcdrInstall, onCheckedChange = { v -> onUpdate { it.copy(mcdrInstall = v) } })
-            Text("自动安装 MCDReforged", modifier = Modifier.padding(start = 8.dp))
+        Spacer(Modifier.height(12.dp))
+        // 整行可切换：点文字也能开关，且保证 48dp 触控高度
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .toggleable(
+                    value = state.mcdrInstall,
+                    role = Role.Switch,
+                    onValueChange = { v -> onUpdate { it.copy(mcdrInstall = v) } },
+                )
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Switch(checked = state.mcdrInstall, onCheckedChange = null)
+            Text("自动安装 MCDReforged", modifier = Modifier.padding(start = 12.dp))
         }
     }
 }
@@ -735,20 +921,32 @@ private fun ResourceStep(state: CreateInstanceUiState, onUpdate: ((CreateInstanc
     var maxUnit by remember { mutableStateOf("GB") }
     SectionCard("资源配置") {
         MemoryField("最小内存", state.minM, minUnit, state.resetGeneration, { minUnit = it }, { mb -> onUpdate { it.copy(minM = mb) } })
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         MemoryField("最大内存", state.maxM, maxUnit, state.resetGeneration, { maxUnit = it }, { mb -> onUpdate { it.copy(maxM = mb) } })
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = state.args,
             onValueChange = { v -> onUpdate { it.copy(args = v) } },
             label = { Text("JVM 启动参数（选填）") },
             singleLine = true,
+            shape = MaterialTheme.shapes.medium,
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(checked = state.ignoreEula, onCheckedChange = { v -> onUpdate { it.copy(ignoreEula = v) } })
-            Text("自动同意 EULA", modifier = Modifier.padding(start = 8.dp))
+        Spacer(Modifier.height(12.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .toggleable(
+                    value = state.ignoreEula,
+                    role = Role.Switch,
+                    onValueChange = { v -> onUpdate { it.copy(ignoreEula = v) } },
+                )
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Switch(checked = state.ignoreEula, onCheckedChange = null)
+            Text("自动同意 EULA", modifier = Modifier.padding(start = 12.dp))
         }
     }
 }
@@ -809,7 +1007,15 @@ private fun ConfirmStep(state: CreateInstanceUiState) {
 private fun SummaryRow(label: String, value: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
         Text(label, modifier = Modifier.width(96.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+        // 路径/URL 可能很长：限行省略，避免把确认卡片撑成一片文字墙
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -833,18 +1039,22 @@ private fun UploadRow(
 ) {
     if (uploading) {
         Column(Modifier.fillMaxWidth()) {
-            Text("正在上传: $fileName", fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
+            Text("正在上传: $fileName", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
         }
     } else if (hasKey) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(fileName, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-            IconButton(onClick = onRemove) { Icon(Icons.Filled.Delete, "移除") }
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(fileName, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = onRemove) { Icon(Icons.Filled.Delete, "移除已选文件") }
         }
     } else {
-        OutlinedButton(onClick = onPick, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Add, null)
+        OutlinedButton(onClick = onPick, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
             Text("选择文件并上传")
         }
     }
@@ -853,11 +1063,44 @@ private fun UploadRow(
 @Composable
 private fun SelectedCoreCard(core: String, onClear: () -> Unit) {
     MslxCard(highlighted = true) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(core, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-            IconButton(onClick = onClear) { Icon(Icons.Filled.Delete, "移除") }
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(core, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            IconButton(onClick = onClear) { Icon(Icons.Filled.Delete, "移除已选核心") }
         }
     }
+}
+
+/** 统一选择项：选中态额外显示对勾，标签单行省略，避免长核心名/长路径把芯片撑变形。 */
+@Composable
+private fun SelectChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val leading: (@Composable () -> Unit)? = if (selected) {
+        {
+            Icon(
+                imageVector = Icons.Filled.Check,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    } else {
+        null
+    }
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        label = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        leadingIcon = leading,
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -903,12 +1146,13 @@ private fun MemoryField(
                     }
                 },
                 singleLine = true,
+                shape = MaterialTheme.shapes.medium,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f),
             )
-            FlowRow(modifier = Modifier.padding(start = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(modifier = Modifier.padding(start = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("GB", "MB").forEach { u ->
-                    FilterChip(selected = unit == u, onClick = { onUnitChange(u) }, label = { Text(u) })
+                    SelectChip(selected = unit == u, onClick = { onUnitChange(u) }, label = u)
                 }
             }
         }
@@ -937,7 +1181,7 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     MslxCard {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             content()
         }
     }
@@ -958,19 +1202,26 @@ private fun CreatingContent(
         label = "creationProgress",
     )
     Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("正在创建实例 ($serverId)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("正在创建实例 ($serverId)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(16.dp))
         LinearProgressIndicator(progress = { animatedProgress }, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
         Text("${progress.toInt()}%", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // 日志区必须 weight(1f)：否则它会吃掉剩余高度，把「取消创建」按钮挤出屏幕
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             logs.takeLast(20).forEach { log ->
                 Text(log.message, style = MaterialTheme.typography.bodySmall, color = if (log.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             }
         }
         Spacer(Modifier.height(16.dp))
-        OutlinedButton(onClick = onCancel) { Text("取消创建") }
+        OutlinedButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text("取消创建") }
     }
 }
 
@@ -986,13 +1237,13 @@ private fun SuccessContent(
     Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("🎉 创建成功", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text(if (isLocal) "本机实例「$serverId」已创建成功" else "服务器 ($serverId) 已创建成功", style = MaterialTheme.typography.bodyMedium)
+        Text(if (isLocal) "本机实例「$serverId」已创建成功" else "服务器 ($serverId) 已创建成功", style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(24.dp))
-        Button(onClick = onOpenConsole, modifier = Modifier.fillMaxWidth()) { Text("进入控制台") }
+        Button(onClick = onOpenConsole, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("进入控制台") }
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onBackToList, modifier = Modifier.fillMaxWidth()) { Text("返回实例列表") }
+        OutlinedButton(onClick = onBackToList, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("返回实例列表") }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onReset) { Text("继续创建新实例") }
+        TextButton(onClick = onReset, modifier = Modifier.heightIn(min = 48.dp)) { Text("继续创建新实例") }
     }
 }
 

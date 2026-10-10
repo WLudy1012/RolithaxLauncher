@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -26,10 +25,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.wludy.rolithax.launcher.R
 import com.wludy.rolithax.launcher.ui.theme.BrandSulfur
 import kotlinx.coroutines.delay
+
+/** 硫磺底色上的正文色：白色在该底色上对比度仅约 2.6:1，改用深色以保证可读。 */
+private val OnBrandSulfur = Color(0xFF161A08)
 
 /**
  * 应用内品牌开屏动画(承接系统 SplashScreen 的硫磺史莱姆黄绿背景，
@@ -56,6 +59,7 @@ fun SplashScreen(onFinished: () -> Unit) {
         onFinished()
     }
 
+    // 纯品牌底色铺满整屏（含状态栏/导航栏区域），内容居中，不会被系统栏遮挡
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -79,13 +83,16 @@ fun SplashScreen(onFinished: () -> Unit) {
                 text = "Rolithax Launcher",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White.copy(alpha = alpha),
+                textAlign = TextAlign.Center,
+                color = OnBrandSulfur.copy(alpha = alpha),
             )
             Spacer(Modifier.height(8.dp))
             Text(
                 text = "Minecraft Server Launcher X",
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f * alpha),
+                textAlign = TextAlign.Center,
+                // 次级文字压到约 4.7:1，既弱化又保持可读
+                color = OnBrandSulfur.copy(alpha = 0.76f * alpha),
             )
         }
     }

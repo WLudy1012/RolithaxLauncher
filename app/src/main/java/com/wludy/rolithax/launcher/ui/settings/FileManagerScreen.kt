@@ -1,28 +1,27 @@
 package com.wludy.rolithax.launcher.ui.settings
 
 import android.app.Application
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +53,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.model.FileItem
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxEmptyState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,7 +90,7 @@ fun FileManagerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = viewModel::refresh) {
+                    IconButton(onClick = viewModel::refresh, enabled = !state.loading) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
                 },
@@ -112,6 +114,7 @@ fun FileManagerScreen(
                 onEnterDir = viewModel::enterDir,
                 onGoUp = viewModel::goUp,
                 onOpenFile = viewModel::openFile,
+                onRetry = viewModel::refresh,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
@@ -126,6 +129,7 @@ private fun ListContent(
     onEnterDir: (FileItem) -> Unit,
     onGoUp: () -> Unit,
     onOpenFile: (FileItem) -> Unit,
+    onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -133,12 +137,13 @@ private fun ListContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = if (state.currentPath.isBlank()) "/" else "/${state.currentPath}",
                 style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -151,37 +156,63 @@ private fun ListContent(
 
         when {
             state.loading -> {
-                CircularProgressIndicator(
+                Column(
                     modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(top = 48.dp),
-                )
+                        .fillMaxWidth()
+                        .padding(top = 56.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        text = "正在加载目录…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             state.error != null -> {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                        .padding(horizontal = 16.dp, vertical = 24.dp),
                 ) {
-                    Text(
-                        text = state.error.orEmpty(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
+                    MslxEmptyState(
+                        icon = Icons.Filled.Warning,
+                        title = "加载失败",
+                        description = state.error.orEmpty(),
+                        actionLabel = "重试",
+                        onAction = onRetry,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = onGoUp) { Text("返回上级") }
+                    if (state.currentPath.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            onClick = onGoUp,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        ) { Text("返回上级") }
+                    }
                 }
+            }
+
+            state.items.isEmpty() -> {
+                MslxEmptyState(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    title = "空目录",
+                    description = if (state.currentPath.isBlank()) {
+                        "实例根目录下没有文件"
+                    } else {
+                        "该目录下没有文件"
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 24.dp),
+                )
             }
 
             else -> {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 16.dp, end = 16.dp, bottom = 32.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     items(state.items, key = { it.name }) { item ->
                         FileRow(item = item, onClick = {
@@ -196,19 +227,17 @@ private fun ListContent(
 
 @Composable
 private fun FileRow(item: FileItem, onClick: () -> Unit) {
-    Card(
+    MslxCard(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-        ),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Icon(
                 imageVector = if (item.isFolder) Icons.AutoMirrored.Filled.List else Icons.Filled.Create,
@@ -219,7 +248,6 @@ private fun FileRow(item: FileItem, onClick: () -> Unit) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
-            Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = item.name,
@@ -232,6 +260,8 @@ private fun FileRow(item: FileItem, onClick: () -> Unit) {
                         text = formatSize(item.size),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -247,16 +277,39 @@ private fun EditorContent(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 编辑基线：只在内容加载完成时取一次，用于判断未保存改动；保存成功后本页会退出编辑态
+    var baseline by remember(state.editingPath) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.loadingContent) {
+        if (baseline == null && !state.loadingContent) baseline = state.editingContent
+    }
+    val dirty = baseline != null && state.editingContent != baseline
+
     Column(modifier = modifier.padding(16.dp)) {
         Text(
             text = state.editingPath,
             style = MaterialTheme.typography.titleSmall,
+            fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(12.dp))
         if (state.loadingContent) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 48.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                CircularProgressIndicator()
+                Text(
+                    text = "正在读取文件…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         } else {
             OutlinedTextField(
                 value = state.editingContent,
@@ -264,21 +317,28 @@ private fun EditorContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                shape = RoundedCornerShape(12.dp),
-                textStyle = MaterialTheme.typography.bodyMedium,
+                shape = RoundedCornerShape(16.dp),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             )
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Text(
+                    text = if (dirty) "有未保存的改动" else "",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
                 TextButton(onClick = onClose, enabled = !state.saving) { Text("取消") }
-                Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onSave, enabled = !state.saving) {
+                Button(onClick = onSave, enabled = !state.saving && dirty) {
                     if (state.saving) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("保存", fontWeight = FontWeight.SemiBold)
+                        Text("保存")
                     }
                 }
             }

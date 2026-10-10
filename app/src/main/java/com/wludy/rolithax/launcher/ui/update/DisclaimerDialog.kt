@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.wludy.rolithax.launcher.data.AppSettings
 import kotlinx.coroutines.delay
 
@@ -72,6 +73,7 @@ internal val DISCLAIMER_TEXT = """
 /**
  * 首次开屏免责协议弹窗：未同意时强制展示，5 秒后可点击确认。
  * 同意后持久化，之后不再弹出。
+ * 弹窗位于独立窗口（Haze 取不到主窗口背景），因此保持 Material 默认容器。
  */
 @Composable
 fun DisclaimerDialog(
@@ -99,19 +101,21 @@ fun DisclaimerDialog(
             )
         },
         text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-            ) {
+            Column(Modifier.fillMaxWidth()) {
                 Text(
                     text = DISCLAIMER_TEXT,
-                    style = MaterialTheme.typography.bodySmall,
+                    // 正文行高放宽，长段落才可读
+                    style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 22.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // 限制阅读区高度：正文滚动，确认按钮始终可见
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Text(
                     text = "请仔细阅读以上声明。",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -120,6 +124,7 @@ fun DisclaimerDialog(
             TextButton(
                 onClick = onAccept,
                 enabled = countdown <= 0,
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
                 Text(
                     if (countdown > 0) "请等待 $countdown 秒" else "我已阅读并同意",

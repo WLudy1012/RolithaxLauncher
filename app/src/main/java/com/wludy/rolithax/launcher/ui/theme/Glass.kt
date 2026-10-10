@@ -1,8 +1,8 @@
 package com.wludy.rolithax.launcher.ui.theme
 
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.os.Build
+import android.view.View
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,247 +10,239 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeDefaults
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.haze
+import dev.chrisbanes.haze.hazeChild
 import java.io.File
 import kotlin.math.max
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/**
- * 毛玻璃档位（按系统版本自动判定）：
- * - [NONE]：Android 13 (API 33) 以下不可用；
- * - [BASIC]：Android 13–16（API 33–36）基础档 —— 降采样静态模糊背景 + 半透明面板 + 描边；
- * - [FULL]：Android 17+（API 37+）全量档 —— 高质量静态模糊背景 + 高光层。
- *
- * 注：compileSdk 35 没有 API 37 常量，系统版本比较直接用数字。
- */
-enum class GlassLevel(val label: String, val detail: String) {
-    NONE("不可用", "需要 Android 13（API 33）及以上系统"),
-    BASIC("基础档", "静态模糊背景 + 半透明面板 + 描边"),
-    FULL("全量档", "实时模糊 + 高光层 + 过渡增强"),
-}
+/** 统一卡片圆角。 */
+val GlassCardShape = RoundedCornerShape(20.dp)
 
-/** 当前设备实际生效的毛玻璃档位（系统版本固定，无需 recomposition 监听）。 */
-fun currentGlassLevel(): GlassLevel = when {
-    Build.VERSION.SDK_INT < 33 -> GlassLevel.NONE
-    Build.VERSION.SDK_INT >= 37 -> GlassLevel.FULL
-    else -> GlassLevel.BASIC
-}
+/** 玻璃面板不透明度；由 [GlassHost] 按用户设置提供。 */
+val LocalGlassAlpha = staticCompositionLocalOf { DEFAULT_GLASS_ALPHA }
 
-/** 玻璃面板的不透明度；由 MainActivity 按用户设置提供，未提供时按不透明处理。 */
-val LocalGlassAlpha = staticCompositionLocalOf { 1f }
+/** 当前可供面板模糊的背景层；为 null 时面板只绘制半透明表面色。 */
+val LocalGlassBackdrop = compositionLocalOf<GlassBackdrop?> { null }
+
+@Immutable
+data class GlassBackdrop(
+    internal val hazeState: HazeState,
+    /** 注册模糊源所在的窗口 View；弹窗位于独立窗口，坐标不可复用，需据此降级。 */
+    internal val ownerView: View,
+    val hasImage: Boolean,
+)
+
+/** 设备是否支持实时背景模糊（Haze 在 Android 12L 以下降级为半透明着色）。 */
+fun isRealtimeBlurSupported(): Boolean = HazeDefaults.blurEnabled()
 
 /**
- * 页面背景层：铺满可用空间，自下而上由 主题色柔和渐变 → 自定义背景图（按档位模糊）→ 全量档高光 组成。
- * 未设置背景图时只保留渐变，保证任何档位都有协调底色。
+ * 背景层宿主：绘制背景（自定义图片或主题色柔光），并把它注册为 Haze 模糊源，
+ * [content] 中的 [GlassSurface] / [glass] 面板会实时模糊其后方的这层背景。
+ * 页面 Scaffold 需保持透明才能透出背景。
  */
 @Composable
-fun GlassBackground(
+fun GlassHost(
     config: ThemeConfig,
     modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
 ) {
     val dark = LocalRolithaxDarkTheme.current
-    val level = remember { currentGlassLevel() }
     val path = if (dark) config.darkBackground else config.lightBackground
-    val bitmap by rememberGlassBitmap(path = path, level = level)
+    val bitmap by rememberBackdropBitmap(path)
+    val hazeState = remember { HazeState() }
+    val hasImage = bitmap != null
+    val ownerView = LocalView.current
+    val backdrop = remember(hazeState, hasImage, ownerView) {
+        GlassBackdrop(hazeState, ownerView, hasImage)
+    }
 
-    Box(modifier = modifier.fillMaxSize()) {
-        val scheme = MaterialTheme.colorScheme
-        // 1) 柔和渐变底：让面板即使没有背景图也有层次
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            scheme.primary.copy(alpha = 0.16f),
-                            scheme.background,
-                            scheme.tertiary.copy(alpha = 0.10f),
-                        ),
-                    ),
-                ),
+    Box(modifier) {
+        BackdropLayer(
+            bitmap = bitmap,
+            dark = dark,
+            modifier = Modifier
+                .matchParentSize()
+                .haze(hazeState),
         )
-        // 2) 自定义背景图（按档位处理模糊）
+        CompositionLocalProvider(
+            LocalGlassAlpha provides config.glassAlpha,
+            LocalGlassBackdrop provides backdrop,
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun BackdropLayer(bitmap: ImageBitmap?, dark: Boolean, modifier: Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    Box(modifier.background(scheme.background)) {
         if (bitmap != null) {
             Image(
-                bitmap = bitmap!!,
+                bitmap = bitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            // 自定义背景先压暗，避免高亮图片穿透面板后吞掉正文对比度。
+            // 压一层底色，避免高亮图片吞掉面板外的标题与分区文字。
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
-                        if (dark) Color.Black.copy(alpha = 0.30f)
-                        else Color.White.copy(alpha = 0.06f),
+                        if (dark) Color.Black.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.18f),
                     ),
             )
-        }
-        // 3) 全量档额外高光层：左上大范围柔光，增强玻璃质感
-        if (level == GlassLevel.FULL && bitmap != null) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.14f),
-                                Color.Transparent,
-                            ),
-                            radius = 1400f,
-                        ),
+        } else {
+            val primary = scheme.primary.copy(alpha = if (dark) 0.20f else 0.18f)
+            val tertiary = scheme.tertiary.copy(alpha = if (dark) 0.12f else 0.12f)
+            Canvas(Modifier.fillMaxSize()) {
+                val reach = size.maxDimension
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(primary, Color.Transparent),
+                        center = Offset(size.width * 0.08f, size.height * 0.02f),
+                        radius = reach * 0.62f,
                     ),
-            )
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(tertiary, Color.Transparent),
+                        center = Offset(size.width * 0.96f, size.height * 0.78f),
+                        radius = reach * 0.55f,
+                    ),
+                )
+            }
         }
     }
 }
 
+/** 解析后的玻璃外观；由 [rememberGlassStyle] 生成，交给 [glass] 绘制。 */
+@Immutable
+class GlassStyle internal constructor(
+    internal val hazeState: HazeState?,
+    internal val hazeStyle: HazeStyle,
+    val fill: Color,
+    internal val border: Brush,
+) {
+    val isBlurring: Boolean get() = hazeState != null
+}
+
 /**
- * 玻璃面板：半透明表面色 + 细描边；全量档附顶部高光。
- * 面板之外的内容（页面 Scaffold）应保持透明，才能透出其后的 [GlassBackground]。
+ * 计算面板外观：有背景图且设备支持时走实时模糊，否则退化为半透明表面色。
+ * 不透明度下限按场景收紧，保证无模糊时正文仍有足够对比度。
  */
+@Composable
+fun rememberGlassStyle(
+    tint: Color = Color.Unspecified,
+    alpha: Float = LocalGlassAlpha.current,
+): GlassStyle {
+    val scheme = MaterialTheme.colorScheme
+    val dark = LocalRolithaxDarkTheme.current
+    val backdrop = LocalGlassBackdrop.current
+    val base = if (tint.isSpecified) tint else scheme.surface
+    // 弹窗等独立窗口的坐标与模糊源不一致，只做半透明填充，避免画出错位的模糊内容。
+    val sameWindow = backdrop != null && backdrop.ownerView === LocalView.current
+    val blur = backdrop != null && sameWindow && backdrop.hasImage &&
+        alpha < 0.995f && isRealtimeBlurSupported()
+    val minAlpha = when {
+        blur -> if (dark) 0.42f else 0.32f
+        backdrop?.hasImage == true -> 0.86f
+        else -> 0.55f
+    }
+    val effective = alpha.coerceIn(minAlpha, 1f)
+    val highlight = Color.White.copy(alpha = if (dark) 0.12f else 0.55f)
+    val edge = scheme.outlineVariant.copy(alpha = if (dark) 0.45f else 0.6f)
+    return remember(base, effective, blur, dark, backdrop, scheme.background, highlight, edge) {
+        GlassStyle(
+            hazeState = if (blur) backdrop?.hazeState else null,
+            hazeStyle = HazeStyle(
+                backgroundColor = scheme.background,
+                tints = listOf(HazeTint(base.copy(alpha = effective))),
+                blurRadius = 28.dp,
+                noiseFactor = 0.06f,
+                fallbackTint = HazeTint(base.copy(alpha = max(effective, 0.9f))),
+            ),
+            fill = base.copy(alpha = effective),
+            border = Brush.verticalGradient(listOf(highlight, edge)),
+        )
+    }
+}
+
+/** 按 [style] 绘制玻璃底：裁剪、模糊或半透明填充、顶部高光描边。 */
+fun Modifier.glass(style: GlassStyle, shape: Shape = GlassCardShape): Modifier {
+    val clipped = clip(shape)
+    val filled = style.hazeState?.let { clipped.hazeChild(it, style.hazeStyle) }
+        ?: clipped.background(style.fill)
+    return filled.border(1.dp, style.border, shape)
+}
+
+/** 通用玻璃面板。面板外的页面容器应保持透明，才能透出 [GlassHost] 的背景。 */
 @Composable
 fun GlassSurface(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(22.dp),
+    shape: Shape = GlassCardShape,
+    tint: Color = Color.Unspecified,
     alpha: Float = LocalGlassAlpha.current,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val level = remember { currentGlassLevel() }
-    val dark = LocalRolithaxDarkTheme.current
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(scheme.surface.copy(alpha = if (dark) maxOf(alpha, 0.94f) else (alpha * 0.92f).coerceIn(0f, 1f)))
-            .border(1.dp, scheme.outlineVariant.copy(alpha = 0.58f), shape),
-    ) {
-        if (level == GlassLevel.FULL) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.09f),
-                            0.4f to Color.Transparent,
-                        ),
-                    ),
-            )
-        }
-        content()
+    val style = rememberGlassStyle(tint = tint, alpha = alpha)
+    val contentColor = if (tint.isSpecified) {
+        MaterialTheme.colorScheme.contentColorFor(tint).takeIf { it.isSpecified } ?: LocalContentColor.current
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    CompositionLocalProvider(LocalContentColor provides contentColor) {
+        Box(modifier = modifier.glass(style, shape), content = content)
     }
 }
 
-/** 背景图描边圆角（与面板一致的视觉语言可用）。 */
-val GlassCardShape = RoundedCornerShape(22.dp)
-
-/** 面板描边宽度。 */
-val GlassBorderWidth: Dp = 1.dp
-
-/**
- * 记忆化加载背景图：
- * - 全量档：解码到长边 ≤ 960，后台预处理为静态模糊图，避免每帧执行全屏 GPU 模糊；
- * - 基础档：解码后降采样到长边 ≤ 200 并做两轮箱式模糊，作为静态模糊背景。
- */
-// 当前 Compose/Lint 组合误报：下方 producer 已在加载完成后明确写入 value，仅在此处抑制。
+// 当前 Compose/Lint 组合误报：下方 producer 已在加载完成后明确写入 value。
 @Suppress("ProduceStateDoesNotAssignValue")
 @Composable
-private fun rememberGlassBitmap(path: String, level: GlassLevel) = produceState<ImageBitmap?>(
-    initialValue = null,
-    path,
-    level,
-) {
-    value = if (path.isBlank() || level == GlassLevel.NONE) {
-        null
-    } else {
-        withContext(Dispatchers.IO) { loadGlassBitmap(path, level) }
-    }
+private fun rememberBackdropBitmap(path: String) = produceState<ImageBitmap?>(initialValue = null, path) {
+    value = if (path.isBlank()) null else withContext(Dispatchers.IO) { loadBackdropBitmap(path) }
 }
 
-private fun loadGlassBitmap(path: String, level: GlassLevel): ImageBitmap? {
-    return try {
-        val file = File(path)
-        if (!file.exists()) return null
-        val maxSide = if (level == GlassLevel.FULL) 960 else 480
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        val opts = BitmapFactory.Options().apply {
-            inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight, maxSide)
-        }
-        val decoded = BitmapFactory.decodeFile(path, opts) ?: return null
-        val prepared = downsampleAndBlur(decoded, if (level == GlassLevel.FULL) 480 else 200)
-        prepared.asImageBitmap()
-    } catch (_: Throwable) {
-        null
-    }
-}
+private const val BACKDROP_MAX_SIDE = 1600
 
-private fun sampleSizeFor(width: Int, height: Int, maxSide: Int): Int {
+private fun loadBackdropBitmap(path: String): ImageBitmap? = runCatching {
+    if (!File(path).exists()) return null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(path, bounds)
     var sample = 1
-    var longest = max(width, height)
-    while (longest / 2 >= maxSide) {
+    var longest = max(bounds.outWidth, bounds.outHeight)
+    while (longest / 2 >= BACKDROP_MAX_SIDE) {
         longest /= 2
         sample *= 2
     }
-    return sample
-}
-
-/** 降采样到目标长边 + 两轮 3x3 箱式模糊（静态模糊背景，基础档使用）。 */
-private fun downsampleAndBlur(src: Bitmap, targetSide: Int): Bitmap {
-    val scale = targetSide.toFloat() / max(src.width, src.height)
-    val w = max(1, (src.width * scale).roundToInt())
-    val h = max(1, (src.height * scale).roundToInt())
-    val small = Bitmap.createScaledBitmap(src, w, h, true)
-    var current = small
-    repeat(2) { current = boxBlur3x3(current) }
-    return current
-}
-
-private fun boxBlur3x3(src: Bitmap): Bitmap {
-    val w = src.width
-    val h = src.height
-    if (w < 3 || h < 3) return src
-    val pixels = IntArray(w * h)
-    src.getPixels(pixels, 0, w, 0, 0, w, h)
-    val out = IntArray(w * h)
-    for (y in 0 until h) {
-        for (x in 0 until w) {
-            var a = 0; var r = 0; var g = 0; var b = 0; var n = 0
-            for (dy in -1..1) {
-                val ny = y + dy
-                if (ny < 0 || ny >= h) continue
-                for (dx in -1..1) {
-                    val nx = x + dx
-                    if (nx < 0 || nx >= w) continue
-                    val p = pixels[ny * w + nx]
-                    a += (p ushr 24) and 0xFF
-                    r += (p ushr 16) and 0xFF
-                    g += (p ushr 8) and 0xFF
-                    b += p and 0xFF
-                    n++
-                }
-            }
-            out[y * w + x] = ((a / n) shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
-        }
-    }
-    return Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
-}
+    BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+}.getOrNull()

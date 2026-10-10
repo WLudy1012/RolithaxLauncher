@@ -3,33 +3,29 @@ package com.wludy.rolithax.launcher.ui.settings
 import android.app.Application
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.runtime.getValue
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -48,9 +44,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +61,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.ServerRef
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxEmptyState
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 
 enum class PmFilter { ALL, ENABLED, DISABLED, CLIENT }
 
@@ -104,7 +108,7 @@ fun PluginsModsScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = viewModel::load) {
+                    IconButton(onClick = viewModel::load, enabled = !state.busy) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }
                     TextButton(
@@ -149,52 +153,72 @@ fun PluginsModsScreen(
             when {
                 state.loading -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            CircularProgressIndicator()
+                            Text(
+                                text = "正在读取文件列表…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
 
                 state.error != null && state.data == null -> {
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = state.error.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
+                        MslxEmptyState(
+                            icon = Icons.Filled.Warning,
+                            title = "加载失败",
+                            description = state.error.orEmpty(),
+                            actionLabel = "重试",
+                            onAction = viewModel::load,
                         )
-                        TextButton(onClick = viewModel::load) { Text("重试") }
                     }
                 }
 
                 else -> {
                     val data = state.data
                     if (data != null && data.totalCount == 0) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "没有找到任何${if (state.mode == "plugins") "插件" else "模组"}",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            MslxEmptyState(
+                                icon = Icons.AutoMirrored.Filled.List,
+                                title = "没有找到任何${if (state.mode == "plugins") "插件" else "模组"}",
+                                description = "点击右上角「上传」从设备选择文件",
                             )
                         }
                     } else if (data != null) {
                         val enabledFiles = if (filter == PmFilter.DISABLED || filter == PmFilter.CLIENT) emptyList() else data.jarFiles
                         val clientFiles = if (filter == PmFilter.DISABLED || filter == PmFilter.ENABLED) emptyList() else data.clientJarFiles
                         val disabledFiles = if (filter == PmFilter.ENABLED || filter == PmFilter.CLIENT) emptyList() else data.disableJarFiles
+                        val visibleCount = enabledFiles.size + clientFiles.size + disabledFiles.size
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             item {
                                 StatsRow(data, filter, onFilter = { filter = it }, onLongPress = { showBatchDialog = true })
                             }
 
+                            if (state.error != null) {
+                                item(key = "error_banner") { ErrorBanner(state.error.orEmpty()) }
+                            }
+
                             if (enabledFiles.isNotEmpty() || clientFiles.isNotEmpty()) {
-                                item { GroupTitle("已启用") }
+                                item { GroupTitle("已启用", enabledFiles.size + clientFiles.size) }
                                 items(enabledFiles, key = { "enabled_$it" }) { f ->
                                     PmRow(
                                         fileName = f,
@@ -218,7 +242,7 @@ fun PluginsModsScreen(
                             }
 
                             if (disabledFiles.isNotEmpty()) {
-                                item { GroupTitle("已禁用") }
+                                item { GroupTitle("已禁用", disabledFiles.size) }
                                 items(disabledFiles, key = { "disabled_$it" }) { f ->
                                     PmRow(
                                         fileName = f,
@@ -227,6 +251,18 @@ fun PluginsModsScreen(
                                         onToggle = { viewModel.toggle(f, currentlyDisabled = true) },
                                         onDelete = { viewModel.delete(f) },
                                         toggleLabel = "启用",
+                                    )
+                                }
+                            }
+
+                            if (visibleCount == 0) {
+                                item(key = "empty_filter") {
+                                    MslxEmptyState(
+                                        icon = Icons.Filled.Info,
+                                        title = "当前筛选下没有文件",
+                                        description = "点击上方统计卡片可切换筛选条件",
+                                        actionLabel = "显示全部",
+                                        onAction = { filter = PmFilter.ALL },
                                     )
                                 }
                             }
@@ -270,16 +306,25 @@ private fun StatsRow(data: com.wludy.rolithax.launcher.data.model.PmListData, se
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StatChip(label: String, value: Int, selected: Boolean, modifier: Modifier, onClick: () -> Unit, onLongPress: () -> Unit) {
-    Card(
-        modifier = modifier.combinedClickable(onClick = onClick, onLongClick = onLongPress),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+    // 长按批量操作：MslxCard 只接管单击，这里自绘玻璃底 + 组合手势，clip 保证水波纹不越出圆角
+    MslxCard(
+        modifier = modifier
+            .heightIn(min = 64.dp)
+            .clip(GlassCardShape)
+            .combinedClickable(
+                role = Role.Button,
+                onLongClickLabel = "批量操作",
+                onClick = onClick,
+                onLongClick = onLongPress,
+            ),
+        highlighted = selected,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp),
+                .padding(vertical = 12.dp, horizontal = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
                 text = "$value",
@@ -289,21 +334,48 @@ private fun StatChip(label: String, value: Int, selected: Boolean, modifier: Mod
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (selected) {
+                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
 }
 
 @Composable
-private fun GroupTitle(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 6.dp),
-    )
+private fun GroupTitle(title: String, count: Int) {
+    MslxSectionHeader(title = title, subtitle = "$count 个文件")
+}
+
+@Composable
+private fun ErrorBanner(message: String) {
+    MslxCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
 }
 
 @Composable
@@ -315,18 +387,20 @@ private fun PmRow(
     onDelete: () -> Unit,
     toggleLabel: String?,
 ) {
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    MslxCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .heightIn(min = 48.dp)
+                // 结束侧留 4dp：IconButton 自带 12dp 内边距，图标视觉边距为 16dp
+                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
                 Text(
                     text = fileName,
                     style = MaterialTheme.typography.bodyMedium,
@@ -339,13 +413,14 @@ private fun PmRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = if (accent) MaterialTheme.colorScheme.tertiary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (onToggle != null && toggleLabel != null) {
                 OutlinedButton(onClick = onToggle) {
                     Text(toggleLabel)
                 }
-                Spacer(Modifier.width(6.dp))
             }
             IconButton(onClick = onDelete) {
                 Icon(

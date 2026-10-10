@@ -11,16 +11,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -46,9 +50,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -163,6 +171,8 @@ fun ConnectScreen(
                 placeholder = { Text("例如：家里的服务器") },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
+                // IME 走「下一项」，键盘上可直接逐项填写，不用手动收起键盘
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
                     focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
@@ -178,6 +188,8 @@ fun ConnectScreen(
                 placeholder = { Text("https://192.168.1.100:1027") },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
+                // 地址输入不自动首字母大写、不做拼写纠正
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
                     focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
@@ -194,6 +206,8 @@ fun ConnectScreen(
                 minLines = 2,
                 maxLines = 4,
                 shape = RoundedCornerShape(16.dp),
+                // 多行地址：保留回车换行，不设 ImeAction.Next
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
                     focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
@@ -209,6 +223,7 @@ fun ConnectScreen(
                 placeholder = { Text("请输入 API Key") },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                 colors = OutlinedTextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
                     focusedContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
@@ -223,23 +238,30 @@ fun ConnectScreen(
             )
             Spacer(Modifier.height(4.dp))
 
-            // 允许 HTTP 明文连接勾选框
+            // 允许 HTTP 明文连接勾选框：整行可点（48dp 触控目标），点标签也能触发同一警告流程
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .toggleable(
+                        value = state.allowHttp,
+                        role = Role.Checkbox,
+                        onValueChange = { checked ->
+                            if (checked) {
+                                // 勾选时弹警告，5 秒后可确认；取消则保持不勾选
+                                showHttpWarning = true
+                            } else {
+                                viewModel.onAllowHttpChange(false)
+                            }
+                        },
+                    )
+                    .heightIn(min = 48.dp)
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Checkbox(
                     checked = state.allowHttp,
-                    onCheckedChange = { checked ->
-                        if (checked) {
-                            // 勾选时弹警告，5 秒后可确认；取消则保持不勾选
-                            showHttpWarning = true
-                        } else {
-                            viewModel.onAllowHttpChange(false)
-                        }
-                    },
+                    onCheckedChange = null,
                 )
                 Text(
                     text = "允许 HTTP 明文连接（不推荐）",
@@ -253,11 +275,13 @@ fun ConnectScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
                         verticalAlignment = Alignment.Top,
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.Info,
+                            imageVector = Icons.Filled.Warning,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(20.dp),
@@ -354,7 +378,9 @@ fun ConnectScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
                     Icon(

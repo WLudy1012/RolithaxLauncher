@@ -3,7 +3,7 @@ package com.wludy.rolithax.launcher.ui.settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wludy.rolithax.launcher.data.model.LocalJava
 
@@ -55,7 +56,7 @@ fun JavaEnvironmentSelector(
 
         when (javaType) {
             JavaType.ONLINE -> {
-                Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
                 if (onlineVersions.isEmpty()) {
                     // 在线版本列表获取失败时，允许手动输入版本号兜底
                     OutlinedTextField(
@@ -80,7 +81,7 @@ fun JavaEnvironmentSelector(
             }
 
             JavaType.LOCAL -> {
-                Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
                 SelectorField(
                     label = "本地 Java",
                     options = localJavas.map { it.path to "Java ${it.version} (${it.path})" },
@@ -90,7 +91,7 @@ fun JavaEnvironmentSelector(
             }
 
             JavaType.CUSTOM -> {
-                Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = java,
                     onValueChange = onJavaChanged,
@@ -103,7 +104,7 @@ fun JavaEnvironmentSelector(
             }
 
             JavaType.DOCKER_JAVA, JavaType.MCDR_DOCKER_JAVA -> {
-                Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
                 SelectorField(
                     label = "容器内 Java 运行时版本",
                     options = DOCKER_JAVA_VERSIONS.map { it to "MSLX Docker 镜像 [Java $it]" },
@@ -113,7 +114,7 @@ fun JavaEnvironmentSelector(
             }
 
             JavaType.DOCKER_CUSTOM, JavaType.MCDR_DOCKER_CUSTOM -> {
-                Spacer(Modifier.padding(top = 8.dp))
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = dockerImage.orEmpty(),
                     onValueChange = onDockerImageChanged,
@@ -141,7 +142,8 @@ private fun SelectorField(
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { expanded = it },
+        // 无候选项时不展开空菜单
+        onExpandedChange = { if (options.isNotEmpty()) expanded = it },
     ) {
         OutlinedTextField(
             value = options.firstOrNull { it.first == selectedValue }?.second ?: selectedValue,
@@ -161,7 +163,13 @@ private fun SelectorField(
         ) {
             options.forEach { (value, labelText) ->
                 DropdownMenuItem(
-                    text = { Text(labelText) },
+                    text = {
+                        Text(
+                            text = labelText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
                     onClick = {
                         onSelect(value)
                         expanded = false

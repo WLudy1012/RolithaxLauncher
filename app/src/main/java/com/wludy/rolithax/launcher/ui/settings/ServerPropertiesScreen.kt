@@ -8,14 +8,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -41,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,6 +62,9 @@ import com.wludy.rolithax.launcher.data.model.PropOption
 import com.wludy.rolithax.launcher.data.model.PropSchema
 import com.wludy.rolithax.launcher.data.model.PropType
 import com.wludy.rolithax.launcher.data.model.SERVER_PROPERTIES_SCHEMA
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxEmptyState
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 
 /** 静态 schema 的派生索引：避免每次重组都重建 Set / 分组 Map。 */
 private val KNOWN_PROPERTY_KEYS: Set<String> = SERVER_PROPERTIES_SCHEMA.map { it.key }.toSet()
@@ -78,6 +87,13 @@ fun ServerPropertiesScreen(
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    // 未保存改动基线：只在加载完成时取一次，之后与用户编辑后的值比较
+    var baseline by remember { mutableStateOf<Map<String, String>?>(null) }
+    val dirty = baseline != null && state.values != baseline
+
+    LaunchedEffect(state.loading) {
+        if (!state.loading && baseline == null) baseline = state.values
+    }
 
     LaunchedEffect(Unit) {
         viewModel.message.collect { snackbarHostState.showSnackbar(it) }
@@ -96,12 +112,13 @@ fun ServerPropertiesScreen(
                 },
                 actions = {
                     if (!state.loading) {
+                        // 无改动时禁用，避免误触重复写盘；文件缺失时仍允许保存以创建文件
                         TextButton(
                             onClick = viewModel::save,
-                            enabled = !state.saving,
+                            enabled = !state.saving && (dirty || state.missing),
                         ) {
                             if (state.saving) {
-                                CircularProgressIndicator(modifier = Modifier.padding(2.dp), strokeWidth = 2.dp)
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             } else {
                                 Text("保存", fontWeight = FontWeight.SemiBold)
                             }
@@ -122,6 +139,12 @@ fun ServerPropertiesScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     CircularProgressIndicator()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "正在读取 server.properties…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
 
@@ -134,30 +157,68 @@ fun ServerPropertiesScreen(
                         .fillMaxSize()
                         .padding(innerPadding),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    item {
+                    item(key = "path") {
                         Text(
                             text = state.path,
                             style = MaterialTheme.typography.bodySmall,
                             fontFamily = FontFamily.Monospace,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
+
+                    if (dirty) {
+                        item(key = "dirty_hint") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = "有未保存的改动",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
+
                     if (state.missing) {
-                        item {
-                            Text(
-                                text = "未找到该文件，保存后会自动创建。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
+                        item(key = "missing_hint") {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = "未找到该文件，保存后会自动创建。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
 
                     PROPERTY_GROUPS.forEach { (group, props) ->
                         val visible = props.filter { values.containsKey(it.key) }
                         if (visible.isNotEmpty()) {
-                            item(key = "group_$group") { SectionTitle(group) }
+                            item(key = "group_$group") { MslxSectionHeader(title = group) }
                             visible.forEach { prop ->
                                 item(key = "known_${prop.key}") {
                                     PropCard(
@@ -171,7 +232,7 @@ fun ServerPropertiesScreen(
                     }
 
                     if (unknownKeys.isNotEmpty()) {
-                        item(key = "group_unknown") { SectionTitle("未收录配置项") }
+                        item(key = "group_unknown") { MslxSectionHeader(title = "未收录配置项") }
                         unknownKeys.forEach { key ->
                             item(key = "unknown_$key") {
                                 PropCard(
@@ -188,6 +249,16 @@ fun ServerPropertiesScreen(
                             }
                         }
                     }
+
+                    if (values.isEmpty() && !state.missing) {
+                        item(key = "empty") {
+                            MslxEmptyState(
+                                icon = Icons.Filled.Info,
+                                title = "没有可编辑的配置项",
+                                description = "文件已读取，但其中没有解析到任何键值对",
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -201,84 +272,96 @@ private fun detectType(v: String): PropType = when {
 }
 
 @Composable
-private fun SectionTitle(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
-    )
-}
-
-@Composable
 private fun PropCard(
     prop: PropSchema,
     value: String,
     onValueChange: (String) -> Unit,
 ) {
-    Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
+    val checked = value == "true"
+    MslxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(16.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(prop.label, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                if (prop.type == PropType.BOOLEAN) {
-                    Switch(checked = value == "true", onCheckedChange = { onValueChange(it.toString()) })
+            if (prop.type == PropType.BOOLEAN) {
+                // 整行可切换：开关自身不再单独响应点击，避免重复语义
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .toggleable(
+                            value = checked,
+                            role = Role.Switch,
+                            onValueChange = { onValueChange(it.toString()) },
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PropLabel(prop, Modifier.weight(1f))
+                    Switch(checked = checked, onCheckedChange = null)
+                }
+            } else {
+                PropLabel(prop, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
+                when (prop.type) {
+                    PropType.SELECT -> SelectDropdown(prop.options, value, onValueChange)
+
+                    // detectType 允许小数，因此用 Decimal 键盘（仍可输入整数）
+                    PropType.NUMBER -> OutlinedTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    PropType.STRING -> OutlinedTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    PropType.BOOLEAN -> Unit
                 }
             }
-            if (prop.desc.isNotBlank()) {
-                Spacer(Modifier.padding(top = 2.dp))
-                Text(
-                    text = prop.desc,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    softWrap = true,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.padding(top = 4.dp))
-            Text(
-                text = prop.key,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.outline,
-            )
-            Spacer(Modifier.padding(top = 8.dp))
-
-            when (prop.type) {
-                PropType.BOOLEAN -> Unit
-
-                PropType.SELECT -> SelectDropdown(prop.options, value, onValueChange)
-
-                PropType.NUMBER -> OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                PropType.STRING -> OutlinedTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
         }
+    }
+}
+
+@Composable
+private fun PropLabel(prop: PropSchema, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = prop.label,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (prop.desc.isNotBlank()) {
+            Text(
+                text = prop.desc,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            text = prop.key,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.outline,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -299,7 +382,7 @@ private fun SelectDropdown(
             onValueChange = {},
             readOnly = true,
             singleLine = true,
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable)

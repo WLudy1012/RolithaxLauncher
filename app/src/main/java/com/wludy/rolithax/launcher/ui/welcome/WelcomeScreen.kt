@@ -1,6 +1,6 @@
 package com.wludy.rolithax.launcher.ui.welcome
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,28 +10,26 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,10 +47,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.Image
-import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.R
+import com.wludy.rolithax.launcher.RolithaxApplication
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -140,14 +140,22 @@ fun WelcomeScreen(onStart: () -> Unit) {
                         text = "首次使用引导",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = "快速了解 Rolithax Launcher",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-                TextButton(onClick = ::finishGuide, enabled = !finishing) {
+                TextButton(
+                    onClick = ::finishGuide,
+                    enabled = !finishing,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
                     Text("跳过")
                 }
             }
@@ -160,10 +168,14 @@ fun WelcomeScreen(onStart: () -> Unit) {
                 GuideStepCard(guideSteps[page], page + 1)
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     guideSteps.indices.forEach { index ->
                         Box(
@@ -181,11 +193,12 @@ fun WelcomeScreen(onStart: () -> Unit) {
                         )
                     }
                 }
+                Spacer(Modifier.width(12.dp))
                 Text(
                     text = "第" + (currentPage + 1) + "步，共" + guideSteps.size + "步",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    maxLines = 1,
                 )
             }
 
@@ -196,7 +209,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
                 OutlinedButton(
                     onClick = { scope.launch { pagerState.animateScrollToPage(currentPage - 1) } },
                     enabled = currentPage > 0 && !finishing,
-                    modifier = Modifier.weight(1f).height(52.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
                 ) {
                     Text("上一步")
                 }
@@ -209,7 +222,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
                         }
                     },
                     enabled = !finishing,
-                    modifier = Modifier.weight(1f).height(52.dp),
+                    modifier = Modifier.weight(1f).heightIn(min = 52.dp),
                 ) {
                     if (finishing) {
                         CircularProgressIndicator(
@@ -227,7 +240,8 @@ fun WelcomeScreen(onStart: () -> Unit) {
                     text = "未能保存引导状态，请重试。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
             Text(
@@ -241,17 +255,10 @@ fun WelcomeScreen(onStart: () -> Unit) {
     }
 }
 
+// 本页位于 GlassHost 内，卡片使用项目统一玻璃底（圆角 20dp，内部小元素 16dp）
 @Composable
 private fun GuideStepCard(step: GuideStep, index: Int) {
-    Card(
-        modifier = Modifier.fillMaxSize(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
+    MslxCard(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -259,26 +266,31 @@ private fun GuideStepCard(step: GuideStep, index: Int) {
                 .padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Surface(
-                modifier = Modifier.size(108.dp),
-                shape = RoundedCornerShape(34.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+            GlassSurface(
+                modifier = Modifier.size(96.dp),
+                shape = RoundedCornerShape(16.dp),
+                tint = MaterialTheme.colorScheme.primaryContainer,
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = step.icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(44.dp),
                     )
                 }
             }
             Spacer(Modifier.height(20.dp))
+            // 序号做底色药丸：品牌色直接作前景在浅色底上对比度不足
             Text(
                 text = "0" + index,
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 12.dp, vertical = 3.dp),
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -296,11 +308,10 @@ private fun GuideStepCard(step: GuideStep, index: Int) {
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(22.dp))
-            Surface(
+            GlassSurface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                shape = RoundedCornerShape(16.dp),
+                tint = MaterialTheme.colorScheme.secondaryContainer,
             ) {
                 Text(
                     text = step.hint,

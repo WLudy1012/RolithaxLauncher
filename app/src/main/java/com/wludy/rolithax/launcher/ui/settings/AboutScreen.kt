@@ -1,7 +1,7 @@
 package com.wludy.rolithax.launcher.ui.settings
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,10 +20,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,21 +30,26 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.wludy.rolithax.launcher.R
 import com.wludy.rolithax.launcher.data.remote.GitHubContributor
+import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.MslxSectionHeader
 
 /** 关于二级页：版本号 → 服务署名 → 合规与许可 → 最近 release 更新说明 → 贡献者。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -64,10 +69,14 @@ fun AboutScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("关于") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -86,10 +95,10 @@ fun AboutScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
             // 版本号
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Rolithax Launcher", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
@@ -108,9 +117,9 @@ fun AboutScreen(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -124,24 +133,34 @@ fun AboutScreen(
                     Column(Modifier.weight(1f)) {
                         Text("下载服务", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         Text("本服务由MSL开服器提供", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        TextButton(onClick = { runCatching { uriHandler.openUri("https://mslmc.cn") } }) {
+                        TextButton(
+                            onClick = { runCatching { uriHandler.openUri("https://mslmc.cn") } },
+                            // 去掉按钮左右内边距，与上方文字左对齐；高度补足到 48dp 触控目标
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 8.dp),
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        ) {
                             Text("https://mslmc.cn")
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
             // 合规与许可：许可清单正本随 APK 打包，离线也能查
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("合规与许可", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    MslxSectionHeader(title = "合规与许可")
                     Spacer(Modifier.height(8.dp))
                     LegalEntryRow(
                         title = LegalDoc.NOTICES.title,
                         summary = "第三方组件与 Java 运行时的来源、版本与许可证",
                         onClick = { onOpenLegal(LegalDoc.NOTICES.key) },
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 4.dp),
+                        // 与外观页分隔线同色同透明度，避免深浅色下过亮/过暗
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                     )
                     LegalEntryRow(
                         title = LegalDoc.DISCLAIMER.title,
@@ -151,12 +170,12 @@ fun AboutScreen(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
             // 最近 release 更新说明
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("最近更新", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    MslxSectionHeader(title = "最近更新")
                     Spacer(Modifier.height(8.dp))
                     when {
                         state.loading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -184,12 +203,12 @@ fun AboutScreen(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
             // 贡献者
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+            MslxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("贡献者", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    MslxSectionHeader(title = "贡献者")
                     Spacer(Modifier.height(8.dp))
                     if (state.contributors.isEmpty() && !state.loading) {
                         Text(
@@ -210,19 +229,22 @@ fun AboutScreen(
 
 @Composable
 private fun LegalEntryRow(title: String, summary: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(0.dp),
+    // 用整行可点的容器替代 TextButton：避免按钮内边距造成的左对齐错位
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
     ) {
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            Text(
-                text = summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+        Text(
+            text = summary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -231,12 +253,13 @@ private fun ContributorRow(contributor: GitHubContributor) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .heightIn(min = 48.dp)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         AsyncImage(
             model = contributor.avatarUrl,
-            contentDescription = null,
+            contentDescription = contributor.login?.let { "$it 的头像" },
             modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape),
@@ -247,12 +270,15 @@ private fun ContributorRow(contributor: GitHubContributor) {
                 text = contributor.login ?: "unknown",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Text(
             text = "${contributor.contributions} 次提交",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
         )
     }
 }

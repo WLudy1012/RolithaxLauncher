@@ -20,6 +20,7 @@ shizuku = "13.1.5"
 zxingEmbedded = "4.3.0"
 room = "2.6.1"
 paging = "3.3.2"
+haze = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -59,6 +60,8 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 androidx-room-paging = { group = "androidx.room", name = "room-paging", version.ref = "room" }
 androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime-ktx", version.ref = "paging" }
 androidx-paging-compose = { group = "androidx.paging", name = "paging-compose", version.ref = "paging" }
+# 毛玻璃：真实背景模糊（API 32+ RenderEffect，低版本降级为半透明着色）
+haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

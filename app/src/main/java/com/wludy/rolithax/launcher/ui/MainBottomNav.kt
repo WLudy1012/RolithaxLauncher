@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +21,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Build
+import com.wludy.rolithax.launcher.ui.theme.LocalGlassAlpha
+import com.wludy.rolithax.launcher.ui.theme.glass
+import com.wludy.rolithax.launcher.ui.theme.rememberGlassStyle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,7 +54,7 @@ enum class TopPage(val label: String, val icon: ImageVector) {
     HOME("主页", Icons.Filled.Home),
     INSTANCES("实例", Icons.AutoMirrored.Filled.List),
     NEW_INSTANCE("新建", Icons.Filled.Add),
-    RESOURCES("资源", Icons.Filled.Info),
+    RESOURCES("资源", Icons.Filled.Build),
     SETTINGS("设置", Icons.Filled.Settings),
 }
 
@@ -63,12 +65,11 @@ fun MainBottomNav(
     onNavigate: (TopPage) -> Unit,
 ) {
     val shape = RoundedCornerShape(28.dp)
+    val style = rememberGlassStyle(alpha = maxOf(LocalGlassAlpha.current, 0.72f))
     NavigationBar(
         modifier = Modifier
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f), shape),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .glass(style, shape),
         containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
@@ -91,9 +92,10 @@ fun MainNavigationRail(
     modifier: Modifier = Modifier,
     showLabels: Boolean = true,
 ) {
+    val style = rememberGlassStyle(alpha = maxOf(LocalGlassAlpha.current, 0.72f))
     NavigationRail(
-        modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        modifier = modifier.glass(style, RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)),
+        containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface,
         windowInsets = NavigationRailDefaults.windowInsets,
     ) {
@@ -152,7 +154,8 @@ private fun RowScope.DockItem(
     )
     // 指示 pill 淡入淡出
     val indicatorAlpha by animateFloatAsState(
-        targetValue = if (selected) 1f else 0f,
+        // “新建”是常驻主操作按钮，未选中时也要保留底色，否则白色图标会消失在面板上
+        targetValue = if (selected || page == TopPage.NEW_INSTANCE) 1f else 0f,
         animationSpec = tween(durationMillis = 220),
         label = "dockIndicatorAlpha",
     )

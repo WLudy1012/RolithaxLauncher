@@ -1,8 +1,6 @@
 package com.wludy.rolithax.launcher.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -22,49 +19,37 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
+import com.wludy.rolithax.launcher.ui.theme.glass
+import com.wludy.rolithax.launcher.ui.theme.rememberGlassStyle
 
-private val MslxCardShape = RoundedCornerShape(20.dp)
-
+/** 项目统一卡片：玻璃底（实时模糊或半透明表面）+ Material Card 交互语义。 */
 @Composable
 fun MslxCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     highlighted: Boolean = false,
+    shape: Shape = GlassCardShape,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val style = rememberGlassStyle(tint = if (highlighted) scheme.primaryContainer else Color.Unspecified)
     val colors = CardDefaults.cardColors(
-        containerColor = if (highlighted) {
-            scheme.primaryContainer.copy(alpha = 0.84f)
-        } else {
-            scheme.surface.copy(alpha = 0.84f)
-        },
+        containerColor = Color.Transparent,
+        contentColor = if (highlighted) scheme.onPrimaryContainer else scheme.onSurface,
     )
-    val border = BorderStroke(
-        width = 1.dp,
-        color = if (highlighted) scheme.primary.copy(alpha = 0.38f) else scheme.outlineVariant.copy(alpha = 0.55f),
-    )
+    val glassModifier = modifier.glass(style, shape)
     if (onClick == null) {
-        Card(
-            modifier = modifier,
-            shape = MslxCardShape,
-            colors = colors,
-            border = border,
-            content = content,
-        )
+        Card(modifier = glassModifier, shape = shape, colors = colors, content = content)
     } else {
-        Card(
-            onClick = onClick,
-            modifier = modifier,
-            shape = MslxCardShape,
-            colors = colors,
-            border = border,
-            content = content,
-        )
+        Card(onClick = onClick, modifier = glassModifier, shape = shape, colors = colors, content = content)
     }
 }
 
@@ -159,11 +144,17 @@ fun MslxEmptyState(
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(42.dp),
             )
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
             )
             if (!actionLabel.isNullOrBlank() && onAction != null) {
                 TextButton(onClick = onAction) { Text(actionLabel) }

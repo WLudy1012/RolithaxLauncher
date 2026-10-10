@@ -6,30 +6,42 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-val Typography = Typography().copy(
-    displaySmall = Typography().displaySmall.copy(
+private val baseTypography = Typography()
+
+/** 全局字型：统一字重与行高，让标题层级和正文可读性在深浅色下保持一致。 */
+val Typography = baseTypography.copy(
+    displaySmall = baseTypography.displaySmall.copy(
         fontWeight = FontWeight.Bold,
         letterSpacing = (-0.4).sp,
     ),
-    headlineSmall = Typography().headlineSmall.copy(
+    headlineSmall = baseTypography.headlineSmall.copy(
         fontWeight = FontWeight.Bold,
         letterSpacing = (-0.2).sp,
     ),
-    titleLarge = Typography().titleLarge.copy(
+    titleLarge = baseTypography.titleLarge.copy(
         fontWeight = FontWeight.SemiBold,
         letterSpacing = (-0.1).sp,
     ),
-    titleMedium = Typography().titleMedium.copy(
-        fontWeight = FontWeight.Medium,
+    titleMedium = baseTypography.titleMedium.copy(
+        fontWeight = FontWeight.SemiBold,
     ),
-    bodyLarge = Typography().bodyLarge.copy(
+    titleSmall = baseTypography.titleSmall.copy(
+        fontWeight = FontWeight.SemiBold,
+    ),
+    bodyLarge = baseTypography.bodyLarge.copy(
         lineHeight = 24.sp,
     ),
-    bodyMedium = Typography().bodyMedium.copy(
+    bodyMedium = baseTypography.bodyMedium.copy(
         lineHeight = 21.sp,
     ),
-    labelLarge = Typography().labelLarge.copy(
+    bodySmall = baseTypography.bodySmall.copy(
+        lineHeight = 18.sp,
+    ),
+    labelLarge = baseTypography.labelLarge.copy(
         fontWeight = FontWeight.SemiBold,
+    ),
+    labelMedium = baseTypography.labelMedium.copy(
+        fontWeight = FontWeight.Medium,
     ),
 )
 

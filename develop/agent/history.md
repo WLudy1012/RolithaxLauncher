@@ -13,6 +13,8 @@
 7. **CI 与发布**：GitHub Actions、CNB 和 Release notes 规则逐步统一，工作流步骤改为中文为主，缓存和镜像同步保留远端提交安全边界。
 8. **界面稳定性**：Dock 提升到导航容器外部，快速点击切换加锁；暗色主题提高对比度；扫码页使用窗口 Insets；资源和设置页面补充错误、空态、重试和无障碍语义。
 9. **大屏导航**：顶层导航按可用窗口宽高切换底部 Dock 与左侧导航轨；短横屏窗口优先保留底部栏，较矮导航轨收起未选中标签。
+10. **毛玻璃重写**：移除按系统版本划分的伪档位与 CPU 箱式预模糊，改用 Haze（`dev.chrisbanes.haze`）对背景层做实时模糊；背景图不再限制 Android 13+；各页面卡片统一到 `MslxCard` / `GlassSurface`。DataStore 中 `glass_alpha` 与背景图路径字段保持不变，备份格式兼容。弹窗位于独立窗口，玻璃面板在其中自动降级为半透明填充。
+11. **界面统一与可读性**：全站页面统一到 `MslxCard`/`GlassSurface` 卡片、`MslxSectionHeader` 分区标题与 `MslxEmptyState` 空/错误态；页面边距 16–20dp、卡片间距 12dp、卡内边距 16dp 成为默认；触控目标统一到 48dp，开关/单选改为整行可点；长文本补 `maxLines` + 省略。`StatusUi` 状态色、浅色主题 `primary/secondary/tertiary` 前景色按 WCAG AA 对比度派生（`ensureContrast`），并补齐 `MSLXShapes.extraSmall`。日志/终端等区域保持不透明自绘，不参与玻璃。
 
 ## 当前实现依据
 
@@ -26,6 +28,7 @@
 
 - Android 真机上的扫码、状态栏、公共存储、前台服务、唤醒锁、热点和防火墙权限。
 - 平板和横屏设备上的导航轨切换、短窗口布局与真实触控行为。
+- 毛玻璃实时模糊在不同 GPU 上的帧率与发热，以及 API 31 及以下设备的降级外观。
 - 不同设备上的进程内 JVM、Java 运行时、Shizuku、多实例和服务端核心兼容性。
 - GitHub Actions、CNB 镜像同步、Release 资产下载和 Issue 自动评审的远端端到端结果。
 - 跨设备加密备份恢复、旧版本迁移、异常中断后的临时文件清理。

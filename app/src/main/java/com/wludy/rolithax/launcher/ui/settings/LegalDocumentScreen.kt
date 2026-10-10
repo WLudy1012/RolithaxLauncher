@@ -3,6 +3,7 @@ package com.wludy.rolithax.launcher.ui.settings
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -16,13 +17,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.update.DISCLAIMER_TEXT
 
 /**
@@ -67,10 +71,14 @@ fun LegalDocumentScreen(
 
     Scaffold(
         // 页面透明：透出全局毛玻璃背景层
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text(doc.title, fontWeight = FontWeight.SemiBold) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                ),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -84,9 +92,14 @@ fun LegalDocumentScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
-            LegalDocText(content)
+            // 长文本直接压在背景图上对比度不稳，统一放进玻璃面板
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    LegalDocText(content)
+                }
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -102,9 +115,27 @@ private fun LegalDocText(source: String) {
     source.lines().forEach { raw ->
         val line = raw.trimEnd()
         when {
-            line.startsWith("### ") -> Text(line.removePrefix("### "), style = typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            line.startsWith("## ") -> Text(line.removePrefix("## "), style = typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            line.startsWith("# ") -> Text(line.removePrefix("# "), style = typography.headlineSmall, fontWeight = FontWeight.Bold)
+            line.startsWith("### ") -> Text(
+                text = line.removePrefix("### "),
+                style = typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+            )
+
+            line.startsWith("## ") -> Text(
+                text = line.removePrefix("## "),
+                style = typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+            )
+
+            line.startsWith("# ") -> Text(
+                text = line.removePrefix("# "),
+                style = typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+
             line.startsWith("|") -> Text(line, style = typography.bodySmall, fontFamily = FontFamily.Monospace)
             line.startsWith("- ") -> Text(line, style = typography.bodyMedium, modifier = Modifier.padding(start = 6.dp))
             line.isBlank() -> Spacer(Modifier.height(8.dp))

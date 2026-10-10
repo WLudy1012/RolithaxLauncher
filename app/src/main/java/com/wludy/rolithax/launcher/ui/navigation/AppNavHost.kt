@@ -164,7 +164,7 @@ fun AppNavHost(
         }
     }
 
-    // 根容器保持透明：底色由 MainActivity 的 GlassBackground 提供（毛玻璃背景层）
+    // 根容器保持透明：底色由 MainActivity 的 GlassHost 提供（毛玻璃模糊源）
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val useNavigationRail = maxWidth >= 600.dp && maxHeight >= 360.dp
         val showRailLabels = maxHeight >= 480.dp
