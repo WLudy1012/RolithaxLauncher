@@ -32,7 +32,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.wludy.rolithax.launcher.data.remote.ApiClient
 import com.wludy.rolithax.launcher.data.remote.ConsoleHubClient
-import com.wludy.rolithax.launcher.data.remote.MslxApi
+import com.wludy.rolithax.launcher.data.remote.DaemonApi
 import com.wludy.rolithax.launcher.data.remote.SystemMonitorClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -52,7 +52,7 @@ private const val MAX_INSTANCE_ICON_BYTES = 2 * 1024 * 1024
 class InstanceRepository {
 
     @Volatile
-    private var api: MslxApi? = null
+    private var api: DaemonApi? = null
 
     @Volatile
     private var httpClient: OkHttpClient? = null
@@ -116,7 +116,7 @@ class InstanceRepository {
         hubClients += client
     }
 
-    private fun requireApi(): MslxApi =
+    private fun requireApi(): DaemonApi =
         api ?: throw IllegalStateException("尚未配置连接信息")
 
     private suspend fun <T> daemonResult(block: suspend () -> T): Result<T> = runCatching {

@@ -98,7 +98,7 @@ function Inspect-Apk {
     param([string]$ApkPath, [bool]$ExpectJre)
     $entries = tar -tf $ApkPath 2>$null
     $jreEntry = $entries | Where-Object { $_ -like "assets/jre/*.tar.xz" }
-    $soEntry = $entries | Where-Object { $_ -like "lib/*/libmslxvm.so" }
+    $soEntry = $entries | Where-Object { $_ -like "lib/*/librolithaxvm.so" }
     if ($ExpectJre) {
         if ($jreEntry) { Write-Host "      embedded JRE : $($jreEntry -join ', ')" -ForegroundColor DarkGray }
         else { Write-Warning "APK 内没有 assets/jre/*.tar.xz：完整版缺内嵌运行时！" }
@@ -106,7 +106,7 @@ function Inspect-Apk {
         Write-Warning "精简版里出现了内嵌 JRE：$($jreEntry -join ', ')"
     }
     if ($soEntry) { Write-Host "      native vm    : $($soEntry -join ', ')" -ForegroundColor DarkGray }
-    else { Write-Warning "APK 内没有 lib/*/libmslxvm.so：进程内 JVM 不可用" }
+    else { Write-Warning "APK 内没有 lib/*/librolithaxvm.so：进程内 JVM 不可用" }
 }
 
 function Publish-Artifact {

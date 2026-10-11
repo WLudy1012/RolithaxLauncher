@@ -70,9 +70,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.SubcomposeAsyncImage
 import com.wludy.rolithax.launcher.data.model.UserInfo
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -173,11 +173,11 @@ fun UserCenterScreen(
                         item {
                             ProfileCard(user = user, onEdit = { showSelfEditor = true }, canEdit = !isSystemUser)
                         }
-                        item { MslxSectionHeader(title = "账号安全") }
+                        item { RolithaxSectionHeader(title = "账号安全") }
                         item {
                             val clipboard = LocalClipboardManager.current
                             val apiKey = user.apiKey
-                            MslxCard {
+                            RolithaxCard {
                                 Column(
                                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -215,7 +215,7 @@ fun UserCenterScreen(
                         }
                         if (user.role.equals("admin", ignoreCase = true) || isSystemUser) {
                             item {
-                                MslxSectionHeader(
+                                RolithaxSectionHeader(
                                     title = "用户管理",
                                     actionLabel = "创建用户",
                                     onAction = { showCreateEditor = true },
@@ -223,7 +223,7 @@ fun UserCenterScreen(
                             }
                             if (state.users.isEmpty()) {
                                 item {
-                                    MslxEmptyState(
+                                    RolithaxEmptyState(
                                         icon = Icons.Filled.Person,
                                         title = "暂无其他用户",
                                         description = "当前只有一个账号，可在上方「创建用户」新增成员。",
@@ -361,7 +361,7 @@ private fun LetteredAvatar(
 
 @Composable
 private fun ProfileCard(user: UserInfo, onEdit: () -> Unit, canEdit: Boolean) {
-    MslxCard(
+    RolithaxCard(
         highlighted = true,
     ) {
         Column(
@@ -417,7 +417,7 @@ private fun ProfileCard(user: UserInfo, onEdit: () -> Unit, canEdit: Boolean) {
 
 @Composable
 private fun ManagedUserCard(user: UserInfo, currentUserId: String?, onEdit: () -> Unit, onDelete: () -> Unit) {
-    MslxCard {
+    RolithaxCard {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -585,7 +585,7 @@ private fun BoxLoading(modifier: Modifier) {
 @Composable
 private fun ErrorContent(message: String, modifier: Modifier, onRetry: () -> Unit) {
     Box(modifier.padding(24.dp), contentAlignment = Alignment.Center) {
-        MslxEmptyState(
+        RolithaxEmptyState(
             icon = Icons.Filled.Warning,
             title = "加载失败",
             description = message,

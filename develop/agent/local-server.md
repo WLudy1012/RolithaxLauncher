@@ -2,18 +2,20 @@
 
 ## 存储布局
 
-本机数据以 `filesDir/mslx/` 为私有根目录，公共实例可放在设备的 `MSLX/servers/` 目录。实例目录名在两个存储根之间保持全局唯一，路由和通知只传递安全的目录名，不用显示名称反推路径。
+本机数据以 `filesDir/rolithax/` 为私有根目录，公共实例可放在设备的 `Rolithax/servers/` 目录。实例目录名在两个存储根之间保持全局唯一，路由和通知只传递安全的目录名，不用显示名称反推路径。
 
 ```text
-filesDir/mslx/
+filesDir/rolithax/
 ├── runtime/<运行时 ID>/     Java 运行时
 ├── servers/<实例目录>/      server.jar、配置、元数据、世界与日志
 └── cache/                   下载和暂存文件
 
-公共存储/MSLX/servers/<实例目录>/
+公共存储/Rolithax/servers/<实例目录>/
 ```
 
 私有目录不需要额外授权，公共目录需要 Android 11 及以上的“所有文件访问”授权。没有权限时创建流程应回退或明确提示，不能假装公共目录写入成功。旧布局迁移必须保留用户数据，失败只影响迁移项，不阻断应用启动。
+
+品牌迁移前的 `filesDir/mslx` 和公共目录 `MSLX` 由 `LocalStorage` 在启动时并入新目录（同名目标保留，不覆盖）；公共目录需要“所有文件访问”授权，授权后首次访问时迁移。Shizuku 暂存区改用 `/data/local/tmp/rolithax`，旧的 `/data/local/tmp/mslx` 不再使用，可在 adb shell 里手动删除。
 
 ## 实例文件
 

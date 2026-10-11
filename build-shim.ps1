@@ -1,11 +1,11 @@
 ﻿<#
 .SYNOPSIS
-    Rebuild the heap-tagging shim (libmslxnotag.so) shipped in app assets.
+    Rebuild the heap-tagging shim (librolithaxnotag.so) shipped in app assets.
 
 .DESCRIPTION
-    源文件：app\src\main\cpp\shim\mslxnotag.c（用途与约束见该文件头注释）。
-    产物：app\src\main\assets\mslx\libmslxnotag-<abi>.so —— 随 APK 打包，运行时由
-    ShizukuController.ensureShimStaged 推到 /data/local/tmp/mslx/lib 后作 LD_PRELOAD 用。
+    源文件：app\src\main\cpp\shim\rolithaxnotag.c（用途与约束见该文件头注释）。
+    产物：app\src\main\assets\rolithax\librolithaxnotag-<abi>.so —— 随 APK 打包，运行时由
+    ShizukuController.ensureShimStaged 推到 /data/local/tmp/rolithax/lib 后作 LD_PRELOAD 用。
 
     编译到临时目录并校验（ELF 架构 / 引用 mallopt / 未导出 Agent_OnLoad）后才覆盖，
     避免把坏垫片提交进仓库。NDK 路径取自 local.properties 的 sdk.dir。
@@ -22,8 +22,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
-$Src = Join-Path $Root "app\src\main\cpp\shim\mslxnotag.c"
-$Dest = Join-Path $Root "app\src\main\assets\mslx"
+$Src = Join-Path $Root "app\src\main\cpp\shim\rolithaxnotag.c"
+$Dest = Join-Path $Root "app\src\main\assets\rolithax"
 
 # local.properties 是 java properties 格式：路径被转义成 C\:\\Users\\...，需先反转义
 $line = Get-Content (Join-Path $Root "local.properties") |
@@ -48,7 +48,7 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 foreach ($abi in $Abis) {
     $cc = Join-Path $toolchain $abi.cc
     if (-not (Test-Path $cc)) { throw "找不到编译器：$cc" }
-    $out = Join-Path $tmp ("libmslxnotag-" + $abi.name + ".so")
+    $out = Join-Path $tmp ("librolithaxnotag-" + $abi.name + ".so")
     # -ffunction-sections/-Wl,--gc-sections/-s：产物越小，LD_PRELOAD 注入面越小
     # （带逗号的参数必须整体加引号，否则 PowerShell 把逗号当数组运算符）
     & $cc -shared -fPIC -Os -ffunction-sections -fdata-sections -fvisibility=hidden `

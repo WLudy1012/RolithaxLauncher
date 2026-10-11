@@ -73,7 +73,7 @@ object ServerNotificationHelper {
         val body = if (isOpened) "$instanceName 已进入运行状态" else "$instanceName 已停止运行"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.mslx_logo)
+            .setSmallIcon(R.drawable.rolithax_logo)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))

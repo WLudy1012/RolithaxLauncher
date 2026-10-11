@@ -57,7 +57,7 @@ object LocalServerRuntime {
     var currentServerName: String = ""
         private set
 
-    /** 当前运行实例的目录名（`mslx/servers/<dirName>`）；未启动为空。 */
+    /** 当前运行实例的目录名（`rolithax/servers/<dirName>`）；未启动为空。 */
     @Volatile
     var currentDirName: String = ""
         private set
@@ -205,7 +205,7 @@ object LocalServerRuntime {
         if (wakeLock?.isHeld == true) return
         val manager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
         wakeLock = runCatching {
-            manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MSLX:LocalServer").apply {
+            manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Rolithax:LocalServer").apply {
                 setReferenceCounted(false)
                 acquire()
             }

@@ -209,7 +209,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 下载 APK 到 filesDir/apks/mslx-update.apk（带进度回调）。 */
+    /** 下载 APK 到 filesDir/apks/rolithax-update.apk（带进度回调）。 */
     private suspend fun downloadToFile(context: Context, url: String, expectedSha256: String): File {
         val request = okhttp3.Request.Builder().url(url).build()
         val client = okhttp3.OkHttpClient.Builder()
@@ -224,8 +224,8 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 val body = response.body ?: throw IllegalStateException("响应为空")
                 val total = body.contentLength()
                 val dir = File(context.filesDir, "apks").apply { mkdirs() }
-                val target = File(dir, "mslx-update.apk")
-                val partial = File(dir, "mslx-update.apk.part")
+                val target = File(dir, "rolithax-update.apk")
+                val partial = File(dir, "rolithax-update.apk.part")
                 partial.delete()
                 val digest = MessageDigest.getInstance("SHA-256")
                 try {

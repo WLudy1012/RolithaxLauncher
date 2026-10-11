@@ -2,7 +2,7 @@
 =====================================
 
 本目录下的归档会在构建时打进「完整版」APK（传 -PwithoutJre=true 的精简版不含），
-由 LocalJreManager 按 SHA-256 校验后解压到 filesDir/mslx/runtime/jre17/ 使用。
+由 LocalJreManager 按 SHA-256 校验后解压到 filesDir/rolithax/runtime/jre17/ 使用。
 
 来源构建
 --------

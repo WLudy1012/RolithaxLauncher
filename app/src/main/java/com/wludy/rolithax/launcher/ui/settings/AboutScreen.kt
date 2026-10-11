@@ -48,8 +48,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.wludy.rolithax.launcher.R
 import com.wludy.rolithax.launcher.data.remote.GitHubContributor
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 
 /** 关于二级页：版本号 → 服务署名 → 合规与许可 → 最近 release 更新说明 → 贡献者。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -98,7 +98,7 @@ fun AboutScreen(
                 .padding(horizontal = 20.dp, vertical = 10.dp),
         ) {
             // 版本号
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Rolithax Launcher", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
@@ -119,7 +119,7 @@ fun AboutScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -148,9 +148,9 @@ fun AboutScreen(
             Spacer(Modifier.height(12.dp))
 
             // 合规与许可：许可清单正本随 APK 打包，离线也能查
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    MslxSectionHeader(title = "合规与许可")
+                    RolithaxSectionHeader(title = "合规与许可")
                     Spacer(Modifier.height(8.dp))
                     LegalEntryRow(
                         title = LegalDoc.NOTICES.title,
@@ -173,9 +173,9 @@ fun AboutScreen(
             Spacer(Modifier.height(12.dp))
 
             // 最近 release 更新说明
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    MslxSectionHeader(title = "最近更新")
+                    RolithaxSectionHeader(title = "最近更新")
                     Spacer(Modifier.height(8.dp))
                     when {
                         state.loading -> CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
@@ -206,9 +206,9 @@ fun AboutScreen(
             Spacer(Modifier.height(12.dp))
 
             // 贡献者
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    MslxSectionHeader(title = "贡献者")
+                    RolithaxSectionHeader(title = "贡献者")
                     Spacer(Modifier.height(8.dp))
                     if (state.contributors.isEmpty() && !state.loading) {
                         Text(

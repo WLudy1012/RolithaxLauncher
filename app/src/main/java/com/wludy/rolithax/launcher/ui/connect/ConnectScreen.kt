@@ -71,7 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.RolithaxCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,7 +146,7 @@ fun ConnectScreen(
             if (onBack == null) {
                 Image(
                     painter = painterResource(R.drawable.slime_logo),
-                    contentDescription = "MSLX",
+                    contentDescription = "Rolithax",
                     modifier = Modifier.size(92.dp),
                 )
                 Spacer(Modifier.height(18.dp))
@@ -271,7 +271,7 @@ fun ConnectScreen(
 
             if (state.error != null) {
                 Spacer(Modifier.height(8.dp))
-                MslxCard(
+                RolithaxCard(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Row(
@@ -374,7 +374,7 @@ fun ConnectScreen(
             }
 
             Spacer(Modifier.height(28.dp))
-            MslxCard(
+            RolithaxCard(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(

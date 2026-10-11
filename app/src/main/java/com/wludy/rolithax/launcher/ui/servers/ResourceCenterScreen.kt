@@ -73,9 +73,9 @@ import com.wludy.rolithax.launcher.data.resources.ResourceProject
 import com.wludy.rolithax.launcher.data.resources.ResourceVersion
 import com.wludy.rolithax.launcher.data.resources.hasCompleteCompatibilityMetadata
 import com.wludy.rolithax.launcher.data.resources.isCompatibleWith
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import java.text.NumberFormat
@@ -163,7 +163,7 @@ fun ResourceCenterScreen(
                     onCategoryChange = viewModel::setCategory,
                 )
 
-                MslxSectionHeader(
+                RolithaxSectionHeader(
                     title = when (state.category) {
                         "plugin" -> "适合此服务端的插件"
                         "modpack" -> "可以直接部署的整合包"
@@ -438,7 +438,7 @@ private fun ScanningHint(text: String) {
 
 @Composable
 private fun ResourceRow(project: ResourceProject, onClick: () -> Unit) {
-    MslxCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -611,7 +611,7 @@ private fun TargetSelector(
     onClick: () -> Unit,
 ) {
     val selected = servers.firstOrNull { it.key == selectedKey }
-    MslxCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -656,7 +656,7 @@ private fun TargetSelector(
 
 @Composable
 private fun TargetRow(server: ManagedServer, selected: Boolean, onClick: () -> Unit) {
-    MslxCard(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), highlighted = selected) {
+    RolithaxCard(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), highlighted = selected) {
         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(server.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -781,7 +781,7 @@ private fun InstallProgressBar(progress: Float, message: String, onCancel: () ->
 
 @Composable
 private fun MslApiBanner(count: Int, onOpenCreate: () -> Unit) {
-    MslxCard(Modifier.fillMaxWidth()) {
+    RolithaxCard(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -813,7 +813,7 @@ private fun MslApiBanner(count: Int, onOpenCreate: () -> Unit) {
 @Composable
 private fun ColumnScope.EmptyState(title: String, description: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
     Box(Modifier.fillMaxWidth().weight(1f, fill = false), contentAlignment = Alignment.Center) {
-        MslxEmptyState(
+        RolithaxEmptyState(
             icon = Icons.Filled.Info,
             title = title,
             description = description,

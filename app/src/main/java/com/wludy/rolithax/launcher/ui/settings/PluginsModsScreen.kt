@@ -61,9 +61,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.ServerRef
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 
 enum class PmFilter { ALL, ENABLED, DISABLED, CLIENT }
@@ -174,7 +174,7 @@ fun PluginsModsScreen(
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        MslxEmptyState(
+                        RolithaxEmptyState(
                             icon = Icons.Filled.Warning,
                             title = "加载失败",
                             description = state.error.orEmpty(),
@@ -193,7 +193,7 @@ fun PluginsModsScreen(
                                 .padding(horizontal = 16.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            MslxEmptyState(
+                            RolithaxEmptyState(
                                 icon = Icons.AutoMirrored.Filled.List,
                                 title = "没有找到任何${if (state.mode == "plugins") "插件" else "模组"}",
                                 description = "点击右上角「上传」从设备选择文件",
@@ -257,7 +257,7 @@ fun PluginsModsScreen(
 
                             if (visibleCount == 0) {
                                 item(key = "empty_filter") {
-                                    MslxEmptyState(
+                                    RolithaxEmptyState(
                                         icon = Icons.Filled.Info,
                                         title = "当前筛选下没有文件",
                                         description = "点击上方统计卡片可切换筛选条件",
@@ -306,8 +306,8 @@ private fun StatsRow(data: com.wludy.rolithax.launcher.data.model.PmListData, se
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StatChip(label: String, value: Int, selected: Boolean, modifier: Modifier, onClick: () -> Unit, onLongPress: () -> Unit) {
-    // 长按批量操作：MslxCard 只接管单击，这里自绘玻璃底 + 组合手势，clip 保证水波纹不越出圆角
-    MslxCard(
+    // 长按批量操作：RolithaxCard 只接管单击，这里自绘玻璃底 + 组合手势，clip 保证水波纹不越出圆角
+    RolithaxCard(
         modifier = modifier
             .heightIn(min = 64.dp)
             .clip(GlassCardShape)
@@ -348,12 +348,12 @@ private fun StatChip(label: String, value: Int, selected: Boolean, modifier: Mod
 
 @Composable
 private fun GroupTitle(title: String, count: Int) {
-    MslxSectionHeader(title = title, subtitle = "$count 个文件")
+    RolithaxSectionHeader(title = title, subtitle = "$count 个文件")
 }
 
 @Composable
 private fun ErrorBanner(message: String) {
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -387,7 +387,7 @@ private fun PmRow(
     onDelete: () -> Unit,
     toggleLabel: String?,
 ) {
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

@@ -45,7 +45,7 @@ private const val ROLITHAX_PLUGIN_ROUTE = "api/plugin/mslx-plugin-rolithax"
  * MSLX Daemon 的 REST API。
  * 认证通过 OkHttp 拦截器统一附加 `x-api-key` 请求头完成。
  */
-interface MslxApi {
+interface DaemonApi {
 
     @GET("api/status")
     suspend fun status(): ApiResponse<StatusData>

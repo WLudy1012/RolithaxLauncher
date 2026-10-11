@@ -68,8 +68,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.ui.statusColor
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.theme.LocalRolithaxDarkTheme
 import java.text.SimpleDateFormat
@@ -186,7 +186,7 @@ fun HomeScreen(
                 }
 
                 item {
-                    MslxSectionHeader(
+                    RolithaxSectionHeader(
                         title = "开服通知",
                         actionLabel = if (state.notifications.isNotEmpty()) "清空" else null,
                         onAction = viewModel::clearNotifications,
@@ -194,7 +194,7 @@ fun HomeScreen(
                 }
                 if (state.notifications.isEmpty()) {
                     item {
-                        MslxCard(modifier = Modifier.fillMaxWidth()) {
+                        RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -318,7 +318,7 @@ private fun DaemonPagerSection(
 /** 尚未配置任何服务端时的空态：只保留「添加服务端」入口（连接向导在连接页里）。 */
 @Composable
 private fun AddDaemonEmptyCard(loading: Boolean, onAddDaemon: () -> Unit) {
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -512,7 +512,7 @@ private fun ServerRow(
     modifier: Modifier = Modifier,
 ) {
     val statusCode = server.status
-    MslxCard(
+    RolithaxCard(
         onClick = onClick,
         highlighted = highlighted,
         modifier = modifier.fillMaxWidth(),
@@ -589,7 +589,7 @@ private fun ServerRow(
 
 @Composable
 private fun EmptyServersCard(state: HomeUiState, onOpenInstances: () -> Unit) {
-    MslxCard(
+    RolithaxCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -628,7 +628,7 @@ private fun OnlineDot(online: Boolean?) {
 /** 每日一言卡：加载失败时展示兜底文案（不崩溃、不空白）。 */
 @Composable
 private fun QuoteCard(state: HomeUiState) {
-    MslxCard(
+    RolithaxCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -713,7 +713,7 @@ private fun NotificationRow(notification: ServerNotification, onClick: () -> Uni
     val timeText = remember(notification.time) {
         SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(notification.time))
     }
-    MslxCard(
+    RolithaxCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {

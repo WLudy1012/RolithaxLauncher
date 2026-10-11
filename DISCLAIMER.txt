@@ -5,7 +5,7 @@ Rolithax Launcher 第三方免责声明
 最近更新: 2026-09-24
 
 说明: 应用内首次开屏的「第三方免责声明」文本与本文件保持一致,
-源码位置 app/src/main/java/com/mslx/console/ui/update/DisclaimerDialog.kt(DISCLAIMER_TEXT)。
+源码位置 app/src/main/java/com/wludy/rolithax/launcher/ui/update/DisclaimerDialog.kt(DISCLAIMER_TEXT)。
 
 一、第三方项目声明
 
@@ -30,7 +30,7 @@ Rolithax Launcher 第三方免责声明
 5. 本机开服会在您自己的手机上下载并运行服务端:需要联网获取服务端核心与 Java 运行时,
    会占用存储、内存与网络带宽,并可能明显增加发热与耗电;后台保活依赖前台服务与常驻通知,
    受系统省电策略影响可能被系统回收。
-6. 建在公共目录(/storage/emulated/0/MSLX)的本机实例需要"所有文件访问"权限,本应用仅在该
+6. 建在公共目录(/storage/emulated/0/Rolithax)的本机实例需要"所有文件访问"权限,本应用仅在该
    目录下读写服务端文件;授权后您在文件管理器里对这些文件的自行改动同样由您本人负责。
 7. 开启增强模式(Shizuku / ADB)后,本应用会以 shell 权限 exec 真正的 java 子进程。该权限高于
    普通应用权限,请确认您了解其含义后再开启;未授权时本应用会自动退回普通模式。

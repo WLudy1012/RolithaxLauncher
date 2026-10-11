@@ -69,8 +69,8 @@ import com.wludy.rolithax.launcher.data.localengine.InstanceStorage
 import com.wludy.rolithax.launcher.data.localengine.LocalInstanceStore
 import com.wludy.rolithax.launcher.data.localengine.LocalStorage
 import com.wludy.rolithax.launcher.data.localengine.ServerFiles
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import kotlinx.coroutines.launch
 
 /**
@@ -402,7 +402,7 @@ fun LocalInstancePendingScreen(
                     TextButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            clipboard?.setPrimaryClip(ClipData.newPlainText("MSLX 实例目录", dirPath))
+                            clipboard?.setPrimaryClip(ClipData.newPlainText("Rolithax 实例目录", dirPath))
                             scope.launch { snackbarHostState.showSnackbar("已复制目录路径") }
                         },
                         modifier = Modifier.heightIn(min = 48.dp),
@@ -454,7 +454,7 @@ private fun openPublicDirInFileManager(
 ): Boolean {
     if (copyOnly) {
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        clipboard?.setPrimaryClip(ClipData.newPlainText("MSLX 实例目录", dirPath))
+        clipboard?.setPrimaryClip(ClipData.newPlainText("Rolithax 实例目录", dirPath))
         return true
     }
     val externalRoot = runCatching { android.os.Environment.getExternalStorageDirectory().absolutePath }.getOrDefault("")
@@ -472,7 +472,7 @@ private fun openPublicDirInFileManager(
 
 // ==================== 可复用小组件 ====================
 
-/** 分区：统一标题层级（[MslxSectionHeader]）+ 玻璃卡片，卡片内边距 16dp、行间距 12dp。 */
+/** 分区：统一标题层级（[RolithaxSectionHeader]）+ 玻璃卡片，卡片内边距 16dp、行间距 12dp。 */
 @Composable
 private fun SettingSection(
     title: String,
@@ -480,8 +480,8 @@ private fun SettingSection(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MslxSectionHeader(title = title, subtitle = subtitle)
-        MslxCard(modifier = Modifier.fillMaxWidth()) {
+        RolithaxSectionHeader(title = title, subtitle = subtitle)
+        RolithaxCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

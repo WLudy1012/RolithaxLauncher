@@ -62,9 +62,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.DaemonConfig
 import com.wludy.rolithax.launcher.data.UpdateChannel
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.update.UpdateViewModel
 
@@ -147,7 +147,7 @@ fun SettingsScreen(
         ) {
             // ---- 账号 ----
             SectionTitle("账号")
-            MslxCard(
+            RolithaxCard(
                 onClick = onOpenUserCenter,
                 modifier = Modifier.fillMaxWidth(),
                 highlighted = true,
@@ -294,7 +294,7 @@ fun SettingsScreen(
                 }
             }
             if (settings.daemons.isEmpty()) {
-                MslxEmptyState(
+                RolithaxEmptyState(
                     icon = Icons.Filled.Add,
                     title = "尚未添加任何 Daemon",
                     description = "添加连接后可在这里选择与管理",
@@ -368,7 +368,7 @@ fun SettingsScreen(
                     enabled = backupPassword.length >= 8,
                     onClick = {
                         if (mode == "export") {
-                            createBackup.launch("mslx-backup.mslxb")
+                            createBackup.launch("rolithax-backup.rlxb")
                         } else {
                             importUri?.let { viewModel.importBackup(it, backupPassword) }
                             backupMode = null
@@ -384,7 +384,7 @@ fun SettingsScreen(
 
 @Composable
 private fun SectionTitle(text: String) {
-    MslxSectionHeader(
+    RolithaxSectionHeader(
         title = text,
         modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
     )

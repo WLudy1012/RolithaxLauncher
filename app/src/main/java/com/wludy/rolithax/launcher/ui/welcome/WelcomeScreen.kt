@@ -51,7 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wludy.rolithax.launcher.R
 import com.wludy.rolithax.launcher.RolithaxApplication
-import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.RolithaxCard
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -66,7 +66,7 @@ private data class GuideStep(
 private val guideSteps = listOf(
     GuideStep(
         title = "连接你的 Daemon",
-        description = "从主页打开连接入口，可以扫描 MSLX 配对二维码，也可以手动填写地址和 API Key。",
+        description = "从主页打开连接入口，可以扫描 Rolithax 配对二维码，也可以手动填写地址和 API Key。",
         hint = "还没有远程 Daemon？可以直接使用手机本机开服。",
         icon = Icons.Filled.Info,
     ),
@@ -131,7 +131,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
             ) {
                 Image(
                     painter = painterResource(R.drawable.slime_logo),
-                    contentDescription = "MSLX",
+                    contentDescription = "Rolithax",
                     modifier = Modifier.size(42.dp),
                 )
                 Spacer(Modifier.width(12.dp))
@@ -258,7 +258,7 @@ fun WelcomeScreen(onStart: () -> Unit) {
 // 本页位于 GlassHost 内，卡片使用项目统一玻璃底（圆角 20dp，内部小元素 16dp）
 @Composable
 private fun GuideStepCard(step: GuideStep, index: Int) {
-    MslxCard(modifier = Modifier.fillMaxSize()) {
+    RolithaxCard(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()

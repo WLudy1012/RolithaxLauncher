@@ -85,7 +85,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.localengine.InstanceStorage
 import com.wludy.rolithax.launcher.data.localengine.LocalStorage
-import com.wludy.rolithax.launcher.ui.MslxCard
+import com.wludy.rolithax.launcher.ui.RolithaxCard
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -569,7 +569,7 @@ private fun LocalStoragePicker(
             "当前系统（Android 11 以下）不支持应用访问共享存储根目录，只能用私有目录。"
 
         else ->
-            "服务端文件在应用私有目录（filesDir/mslx/servers）下，随应用卸载消失，无需任何权限。"
+            "服务端文件在应用私有目录（filesDir/rolithax/servers）下，随应用卸载消失，无需任何权限。"
     }
     Text(preview, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (state.localInstanceStorage == InstanceStorage.PUBLIC && !state.publicStorageGranted && state.publicStorageSupported) {
@@ -590,7 +590,7 @@ private fun PublicStorageRationaleDialog(
         title = { Text("为什么需要「所有文件访问」") },
         text = {
             Text(
-                "MSLX 只会把服务端文件读写在 /storage/emulated/0/MSLX 下，目的是：\n" +
+                "Rolithax 只会把服务端文件读写在 /storage/emulated/0/Rolithax 下，目的是：\n" +
                     "• 你能用系统文件管理器直接放核心、装插件、备份存档；\n" +
                     "• 增强模式（Shizuku）下直接在公共目录跑，不再复制到系统临时目录，启动明显更快。\n\n" +
                     "该权限不会用于读取其它私人文件；不授权也可直接改用应用私有目录开服。",
@@ -683,7 +683,7 @@ private fun CorePickerButton(label: String, onClick: () -> Unit) {
 /** 向导错误条：下载/上传类失败没有 Snackbar，只能靠这里告知用户。 */
 @Composable
 private fun WizardErrorCard(message: String, onDismiss: () -> Unit) {
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1062,7 +1062,7 @@ private fun UploadRow(
 
 @Composable
 private fun SelectedCoreCard(core: String, onClear: () -> Unit) {
-    MslxCard(highlighted = true) {
+    RolithaxCard(highlighted = true) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -1178,7 +1178,7 @@ private fun formatMemory(valueMb: Int, unit: String): String {
 
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    MslxCard {
+    RolithaxCard {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))

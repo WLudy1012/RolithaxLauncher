@@ -62,8 +62,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.ServerRef
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -431,15 +431,15 @@ fun InstanceSettingsScreen(
 
 // ==================== 可复用小组件 ====================
 
-/** 分区：统一标题层级（[MslxSectionHeader]）+ 玻璃卡片，卡片内边距 16dp、行间距 12dp。 */
+/** 分区：统一标题层级（[RolithaxSectionHeader]）+ 玻璃卡片，卡片内边距 16dp、行间距 12dp。 */
 @Composable
 private fun SettingSection(
     title: String,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        MslxSectionHeader(title = title)
-        MslxCard(modifier = Modifier.fillMaxWidth()) {
+        RolithaxSectionHeader(title = title)
+        RolithaxCard(modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -656,7 +656,7 @@ private fun EntryCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    MslxCard(
+    RolithaxCard(
         modifier = modifier,
         onClick = onClick,
         highlighted = true,

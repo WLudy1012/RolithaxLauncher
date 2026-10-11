@@ -19,7 +19,7 @@ import java.io.InputStream
 import java.io.OutputStream
 
 /**
- * Shizuku/ADB exec 引擎（增强）：把 JRE stage 到 `/data/local/tmp/mslx` 后，
+ * Shizuku/ADB exec 引擎（增强）：把 JRE stage 到 `/data/local/tmp/rolithax` 后，
  * 经 [ShizukuController] 在 shell 权限下 exec 真正的 `bin/java` 子进程。
  *
  * 相比进程内 JVM（[InProcessJvmEngine]）：
@@ -29,7 +29,7 @@ import java.io.OutputStream
  *  - 官方 bundler 壳可直接 `java -jar`（真 launcher 能 fork 子进程）。
  *
  * 工作目录分两种：
- *  - **私有目录实例**：权威副本在 `filesDir/mslx/servers/<dir>`，shell 读不到，所以启动前
+ *  - **私有目录实例**：权威副本在 `filesDir/rolithax/servers/<dir>`，shell 读不到，所以启动前
  *    [ShizukuController.pushInstance] 全量推一次、退出后 [ShizukuController.syncInstanceBack] 回同步；
  *  - **公共目录实例**：目录本身 shell 可读写，**直接以公共路径为 cwd exec**，省掉两遍全量复制
  *    （大存档启动时间从数十秒降到秒级）；仅 tmp/user.home 等临时项落在 `/data/local/tmp` 的
@@ -175,7 +175,7 @@ class ShizukuShellEngine(
         return true
     }
 
-    /** 把实例全量 stage 到 `/data/local/tmp/mslx/servers/<dir>`，返回远端目录（失败返回 null，原因已进日志）。 */
+    /** 把实例全量 stage 到 `/data/local/tmp/rolithax/servers/<dir>`，返回远端目录（失败返回 null，原因已进日志）。 */
     private suspend fun stageInstanceOrFail(): String? {
         emit("同步实例文件到运行目录…")
         return ShizukuController.pushInstance(localInstanceDir, dirName).getOrElse {

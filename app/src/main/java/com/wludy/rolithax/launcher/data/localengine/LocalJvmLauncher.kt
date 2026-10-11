@@ -16,7 +16,7 @@ import java.io.FileOutputStream
  * 为什么不是 `ProcessBuilder("java", "-jar", ...)`：Android 10+ 禁止 targetSdk≥29 的应用
  * exec 自己 data 目录里的文件（SELinux），所以"解压 JRE 后 fork/exec bin/java"这条路
  * 在现代 targetSdk 下走不通。PojavLauncher 的做法是 dlopen(libjvm.so) + JNI_CreateJavaVM，
- * 这里沿用同一路线（native 实现在 src/main/cpp/mslxvm.c）。
+ * 这里沿用同一路线（native 实现在 src/main/cpp/rolithaxvm.c）。
  *
  * 代价与语义：
  *  - JVM 一旦在本进程创建就无法真正销毁/重建 → 停止后需**完全重启 App** 才能再次启动服务端；
@@ -79,7 +79,7 @@ class LocalJvmLauncher(
         workDir.mkdirs()
         writeEula()
 
-        val resolved = ServerEntrypoint.resolve(serverJar, File(workDir, ".mslx-runtime")) { emit(it) }
+        val resolved = ServerEntrypoint.resolve(serverJar, File(workDir, ".rolithax-runtime")) { emit(it) }
             .getOrElse { e ->
                 emit("解析核心入口失败：${e.message}")
                 return false
@@ -138,7 +138,7 @@ class LocalJvmLauncher(
                 emit(if (code == 0) "服务端已退出" else "服务端异常退出（rc=$code）")
                 AppLogger.i("LocalEngine", "服务端线程结束 rc=$code")
                 onExit?.invoke(code)
-            }, "mslx-server").apply {
+            }, "rolithax-server").apply {
                 isDaemon = true
                 start()
             }
@@ -224,7 +224,7 @@ class LocalJvmLauncher(
                     _logs.trySend(line)
                 }
             }.onFailure { AppLogger.w("LocalEngine", "读取服务端输出中断", it) }
-        }, "mslx-server-log").apply {
+        }, "rolithax-server-log").apply {
             isDaemon = true
             start()
         }

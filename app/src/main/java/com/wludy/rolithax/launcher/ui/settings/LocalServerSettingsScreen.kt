@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.localengine.ShizukuStatus
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 
 /**
  * 本机开服的入口设置页（设置列表里叫「本机运行时与开服设置」）：
@@ -88,9 +88,9 @@ fun LocalServerSettingsScreen(
             )
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MslxSectionHeader(
+                    RolithaxSectionHeader(
                         title = "局域网连接诊断",
                         actionLabel = "刷新",
                         onAction = viewModel::refreshNetwork,
@@ -112,9 +112,9 @@ fun LocalServerSettingsScreen(
             Spacer(Modifier.height(12.dp))
 
             // 本机 Java 运行时（JRE 安装/版本）
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MslxSectionHeader(title = "本机运行时（${state.jreAbi.ifBlank { "当前设备" }}）")
+                    RolithaxSectionHeader(title = "本机运行时（${state.jreAbi.ifBlank { "当前设备" }}）")
                     state.runtimeOptions.forEach { rt ->
                         Row(
                             modifier = Modifier
@@ -157,9 +157,9 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MslxSectionHeader(title = "内存")
+                    RolithaxSectionHeader(title = "内存")
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(
                             value = state.minMem,
@@ -188,9 +188,9 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MslxSectionHeader(title = "JVM 参数")
+                    RolithaxSectionHeader(title = "JVM 参数")
                     OutlinedTextField(
                         value = state.jvmArgs,
                         onValueChange = { v -> viewModel.update { it.copy(jvmArgs = v) } },
@@ -209,9 +209,9 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MslxSectionHeader(title = "后台运行")
+                    RolithaxSectionHeader(title = "后台运行")
                     SwitchRow(
                         title = "保活（前台服务 + 常驻通知）",
                         subtitle = "开启后退出 App / 划掉最近任务，服务端仍继续运行（通知栏可停止）；关闭则只在 App 前台时运行。",
@@ -229,9 +229,9 @@ fun LocalServerSettingsScreen(
 
             Spacer(Modifier.height(12.dp))
 
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MslxSectionHeader(title = "增强模式（Shizuku）")
+                    RolithaxSectionHeader(title = "增强模式（Shizuku）")
                     SwitchRow(
                         title = "以 shell 权限运行真正的 java 子进程",
                         subtitle = "开启后服务端跑在独立子进程：可多实例并发、停止后无需重启 App 即可再起、支持 Java 8 / 17 / 21 / 25。需先安装并授权 Shizuku；不可用时启动会自动回退到进程内 JVM。",

@@ -41,7 +41,7 @@ data class ExecResult(val code: Int, val out: String, val err: String) {
 
 /**
  * Shizuku/ADB 增强引擎的底座：绑定状态、权限申请、`exec` 子进程、以及经「tar 管道」在
- * 应用私有目录与 `/data/local/tmp/mslx`（shell 可执行区）之间双向搬运文件。
+ * 应用私有目录与 `/data/local/tmp/rolithax`（shell 可执行区）之间双向搬运文件。
  *
  * 为什么需要搬运：Android 10+ 禁止 targetSdk≥29 的应用 exec 自己 data 目录里的文件，
  * 而 shell(2000) 用户又读不到应用私有目录 —— 所以 exec 模式必须把 JRE 与实例 stage 到
@@ -54,14 +54,14 @@ object ShizukuController {
     private const val TAG = "Shizuku"
     private const val REQUEST_CODE = 0x4D53 // "MS"
 
-    /** shell 可执行区的数据根（与私有 `filesDir/mslx` 布局对应）。 */
-    const val REMOTE_BASE = "/data/local/tmp/mslx"
+    /** shell 可执行区的数据根（与私有 `filesDir/rolithax` 布局对应）。 */
+    const val REMOTE_BASE = "/data/local/tmp/rolithax"
 
     private val JAVA_BIN_CANDIDATES = listOf("bin/java", "jre/bin/java")
 
     /** 堆打标签垫片的 assets 目录与远端路径（用途见 [ensureShimStaged]）。 */
-    private const val SHIM_ASSET_DIR = "mslx"
-    val remoteShimPath = "$REMOTE_BASE/lib/libmslxnotag.so"
+    private const val SHIM_ASSET_DIR = "rolithax"
+    val remoteShimPath = "$REMOTE_BASE/lib/librolithaxnotag.so"
 
     private val _status = MutableStateFlow(ShizukuStatus.DEAD)
     val status: StateFlow<ShizukuStatus> = _status.asStateFlow()
@@ -204,13 +204,13 @@ object ShizukuController {
      * 不能则退回传统的「stage 到 /data/local/tmp」路径，不让用户对着一个执不起来的报错发呆。
      */
     suspend fun canWriteRemotePath(path: String): Boolean = withContext(Dispatchers.IO) {
-        val probe = "$path/.mslx-shizuku-probe"
+        val probe = "$path/.rolithax-shizuku-probe"
         val res = exec(arrayOf("sh", "-c", "mkdir -p ${q(path)} && : > ${q(probe)} && rm -f ${q(probe)} && echo OK || echo NO"))
         res.out.trim() == "OK"
     }
 
     /**
-     * 确保 JRE 已 stage 到 `/data/local/tmp/mslx/runtime/<id>`（一次性，带完成标记）。
+     * 确保 JRE 已 stage 到 `/data/local/tmp/rolithax/runtime/<id>`（一次性，带完成标记）。
      * 返回远端 JRE 根目录；失败返回原因。
      */
     suspend fun ensureRuntimeStaged(
@@ -225,7 +225,7 @@ object ShizukuController {
             ?: return@withContext Result.failure(IllegalStateException("${runtime.label} 缺少 bin/java"))
         val remote = remoteRuntimeDir(runtime.id)
         val javaBin = "$remote/$rel"
-        val marker = "$remote/.mslx-ok"
+        val marker = "$remote/.rolithax-ok"
         val probe = exec(
             arrayOf("sh", "-c", "[ -x ${q(javaBin)} ] && [ -f ${q(marker)} ] && echo OK || echo NO"),
         )
@@ -267,7 +267,7 @@ object ShizukuController {
      */
     suspend fun ensureShimStaged(context: Context): String? = withContext(Dispatchers.IO) {
         val abi = LocalJreManager.currentAbi()
-        val assetName = "libmslxnotag-$abi.so"
+        val assetName = "librolithaxnotag-$abi.so"
         if (!context.assets.list(SHIM_ASSET_DIR).orEmpty().contains(assetName)) {
             AppLogger.i(TAG, "无 $abi 的堆打标签垫片，跳过（旧 JRE 可能因 tagged pointers 退出）")
             return@withContext null
@@ -278,7 +278,7 @@ object ShizukuController {
             // 不做“已存在就跳过”：垫片只有几 KB，而且旧版本 APK 可能残留不兼容的
             // 副本（曾经因多导出一个 Agent_OnLoad 而插入 libinstrument 的同名符号，
             // 导致 Paper 启动 SIGSEGV），每次启动重推最便宜也最可靠。
-            val tmp = File(context.cacheDir, "mslx-shim/libmslxnotag.so")
+            val tmp = File(context.cacheDir, "rolithax-shim/librolithaxnotag.so")
             tmp.parentFile?.mkdirs()
             context.assets.open("$SHIM_ASSET_DIR/$assetName").use { input ->
                 tmp.outputStream().use { input.copyTo(it) }
@@ -292,7 +292,7 @@ object ShizukuController {
             .getOrNull()
     }
 
-    /** 把实例目录整体 stage 到 `/data/local/tmp/mslx/servers/<dirName>`（每次启动，权威副本在私有目录）。 */
+    /** 把实例目录整体 stage 到 `/data/local/tmp/rolithax/servers/<dirName>`（每次启动，权威副本在私有目录）。 */
     suspend fun pushInstance(localDir: File, dirName: String): Result<String> =
         withContext(Dispatchers.IO) {
             if (!localDir.isDirectory) {

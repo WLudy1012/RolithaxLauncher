@@ -39,7 +39,7 @@ data class LocalInstancePlacement(val dirName: String, val dir: File, val storag
 
 /**
  * 本机实例仓库：一个目录一个实例，分别住在
- * `filesDir/mslx/servers/`（私有）与 `/storage/emulated/0/MSLX/servers/`（公共）两个根下。
+ * `filesDir/rolithax/servers/`（私有）与 `/storage/emulated/0/Rolithax/servers/`（公共）两个根下。
  * 只做文件层读写（列表/加载/删除/统计），不持有运行状态——运行状态见 [LocalServerRuntime]。
  *
  * 目录名经 [LocalStorage.allocateDirName] 在两个根之间分配为**唯一**，所以按目录名寻址就够，

@@ -62,9 +62,9 @@ import com.wludy.rolithax.launcher.data.model.PropOption
 import com.wludy.rolithax.launcher.data.model.PropSchema
 import com.wludy.rolithax.launcher.data.model.PropType
 import com.wludy.rolithax.launcher.data.model.SERVER_PROPERTIES_SCHEMA
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 
 /** 静态 schema 的派生索引：避免每次重组都重建 Set / 分组 Map。 */
 private val KNOWN_PROPERTY_KEYS: Set<String> = SERVER_PROPERTIES_SCHEMA.map { it.key }.toSet()
@@ -218,7 +218,7 @@ fun ServerPropertiesScreen(
                     PROPERTY_GROUPS.forEach { (group, props) ->
                         val visible = props.filter { values.containsKey(it.key) }
                         if (visible.isNotEmpty()) {
-                            item(key = "group_$group") { MslxSectionHeader(title = group) }
+                            item(key = "group_$group") { RolithaxSectionHeader(title = group) }
                             visible.forEach { prop ->
                                 item(key = "known_${prop.key}") {
                                     PropCard(
@@ -232,7 +232,7 @@ fun ServerPropertiesScreen(
                     }
 
                     if (unknownKeys.isNotEmpty()) {
-                        item(key = "group_unknown") { MslxSectionHeader(title = "未收录配置项") }
+                        item(key = "group_unknown") { RolithaxSectionHeader(title = "未收录配置项") }
                         unknownKeys.forEach { key ->
                             item(key = "unknown_$key") {
                                 PropCard(
@@ -252,7 +252,7 @@ fun ServerPropertiesScreen(
 
                     if (values.isEmpty() && !state.missing) {
                         item(key = "empty") {
-                            MslxEmptyState(
+                            RolithaxEmptyState(
                                 icon = Icons.Filled.Info,
                                 title = "没有可编辑的配置项",
                                 description = "文件已读取，但其中没有解析到任何键值对",
@@ -278,7 +278,7 @@ private fun PropCard(
     onValueChange: (String) -> Unit,
 ) {
     val checked = value == "true"
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

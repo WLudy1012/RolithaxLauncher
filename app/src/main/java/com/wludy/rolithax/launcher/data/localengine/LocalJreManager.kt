@@ -416,7 +416,7 @@ object LocalJreManager {
     }
 
     private fun markerFile(context: Context, runtime: JavaRuntime): File =
-        File(jreHome(context, runtime), ".mslx-runtime")
+        File(jreHome(context, runtime), ".rolithax-runtime")
 
     /** Java 8 无 lib/modules，改看 rt.jar；9+ 看 lib/modules。 */
     private fun hasVersionMarker(context: Context, runtime: JavaRuntime): Boolean {
@@ -437,7 +437,9 @@ object LocalJreManager {
     /** 已安装运行时描述（供 UI 展示），未安装返回 null。 */
     fun installedInfo(context: Context, runtime: JavaRuntime): String? {
         if (!isInstalled(context, runtime)) return null
-        val marker = markerFile(context, runtime).takeIf { it.isFile }
+        // 品牌迁移前安装的运行时标记文件名为 .mslx-runtime
+        val marker = sequenceOf(markerFile(context, runtime), File(jreHome(context, runtime), ".mslx-runtime"))
+            .firstOrNull { it.isFile }
             ?.readText()?.trim()?.lineSequence()?.firstOrNull().orEmpty()
         val sizeMb = jreHome(context, runtime).walkTopDown().filter { it.isFile }
             .sumOf { it.length() } / 1024 / 1024

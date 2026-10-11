@@ -811,8 +811,8 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 
     /**
      * 本机创建：把已选定的 MSLAPI 核心（coreUrl/coreSha256/onlineGameVersion）下载到
-     * 实例目录下的 `server.jar`（位置由用户选：公共 `/storage/emulated/0/MSLX/servers/<名>`
-     * 或私有 `filesDir/mslx/servers/<名>`），并补全实例文件（eula/server.properties/instance.json），
+     * 实例目录下的 `server.jar`（位置由用户选：公共 `/storage/emulated/0/Rolithax/servers/<名>`
+     * 或私有 `filesDir/rolithax/servers/<名>`），并补全实例文件（eula/server.properties/instance.json），
      * 不经 Daemon / SignalR。成功后置 success + createdDirName，由界面跳统一本机控制台。
      */
     private fun submitLocal() {

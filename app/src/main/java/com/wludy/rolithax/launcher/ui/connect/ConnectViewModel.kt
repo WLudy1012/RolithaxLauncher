@@ -252,7 +252,7 @@ class ConnectViewModel(
                 }
                 .onFailure { e ->
                     val detail = when ((e as? HttpException)?.code()) {
-                        404 -> "服务端未安装 MSLX Android 扩展插件，或插件版本过旧。"
+                        404 -> "服务端未安装 Rolithax 插件，或插件版本过旧。"
                         else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
                     }
                     com.wludy.rolithax.launcher.data.AppLogger.w("Connect", "扫码配对失败", e)
@@ -286,7 +286,7 @@ class ConnectViewModel(
                 }
                 .onFailure { e ->
                     val detail = when ((e as? HttpException)?.code()) {
-                        404 -> "服务端未安装 MSLX Android 扩展插件，或插件版本过旧。"
+                        404 -> "服务端未安装 Rolithax 插件，或插件版本过旧。"
                         403 -> "当前 API Key 权限不足：生成配对码需要管理员权限。"
                         else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
                     }

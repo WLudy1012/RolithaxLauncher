@@ -338,7 +338,7 @@ class BackupManager(
 
     private fun readHeader(input: InputStream): Header {
         val magic = input.readExact(MAGIC.size)
-        require(magic.contentEquals(MAGIC)) { "不是 MSLX 加密备份" }
+        require(magic.contentEquals(MAGIC) || magic.contentEquals(LEGACY_MAGIC)) { "不是 Rolithax 加密备份" }
         require(input.read() == FORMAT_VERSION) { "不支持的备份版本" }
         val iterations = ByteBuffer.wrap(input.readExact(4)).int
         require(iterations in 100_000..1_000_000) { "备份参数不安全" }
@@ -382,6 +382,8 @@ class BackupManager(
         const val MAX_MANIFEST_BYTES = 16 * 1024
         const val MAX_SETTINGS_BYTES = 2 * 1024 * 1024
         const val BUFFER_BYTES = 64 * 1024
-        val MAGIC = "MSLX-BACKUP".toByteArray(Charsets.US_ASCII)
+        // 新旧魔数等长；导入同时接受品牌迁移前生成的 MSLX-BACKUP
+        val MAGIC = "RLTX-BACKUP".toByteArray(Charsets.US_ASCII)
+        val LEGACY_MAGIC = "MSLX-BACKUP".toByteArray(Charsets.US_ASCII)
     }
 }

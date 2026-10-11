@@ -15,7 +15,7 @@ import javax.net.ssl.X509TrustManager
 object ApiClient {
 
     data class DaemonConnection(
-        val api: MslxApi,
+        val api: DaemonApi,
         val client: OkHttpClient,
     )
 
@@ -25,7 +25,7 @@ object ApiClient {
      */
     private val USER_AGENT = "Rolithax-Launcher/${BuildConfig.VERSION_NAME}"
 
-    fun build(baseUrl: String, apiKey: String): MslxApi {
+    fun build(baseUrl: String, apiKey: String): DaemonApi {
         return buildDaemonConnection(baseUrl, apiKey).api
     }
 
@@ -53,7 +53,7 @@ object ApiClient {
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(MslxApi::class.java)
+            .create(DaemonApi::class.java)
         return DaemonConnection(api, client)
     }
 

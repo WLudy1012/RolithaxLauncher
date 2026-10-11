@@ -20,6 +20,7 @@
 
 - 当前代码使用 `com.wludy.rolithax.launcher` 和系统显示名 `Rolithax Launcher`。
 - 当前插件路由使用 `mslx-plugin-rolithax`；旧的第三方 Android 整合插件路由不应重新引入。
+- 代码、资源和 Native 库已完成 Rolithax 命名（`RolithaxUi`、`DaemonApi`、`librolithaxvm.so` 等）。保留的 `mslx`/`MSLX` 标识均为外部契约或兼容读取：插件路由、`mslxp1:` 配对前缀、`MSLX://` 协议 URI、Keystore 别名、CI 变量 `MSLX_MAVEN_*`，以及导入时仍接受的旧备份魔数 `MSLX-BACKUP`（新备份使用 `RLTX-BACKUP` 和 `.rlxb`）。
 - 当前本机引擎包含进程内 JVM 和 Shizuku 增强模式，运行时、实例和资源安装均以当前源码为准。
 - 当前资源中心以 Modrinth Provider、MSLAPI 核心接口和 Room/Paging 缓存为首期能力，Provider 扩展点保留给后续站点。
 - 当前版本号、构建号、依赖和发布资产以 Gradle 配置与工作流运行结果为准，不在本文件固定写死。

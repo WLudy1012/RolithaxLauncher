@@ -25,7 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define TAG "MslxVm"
+#define TAG "RolithaxVm"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
@@ -44,7 +44,7 @@ typedef jint (*CreateJavaVM_t)(JavaVM **pvm, void **penv, void *args);
 
 typedef int (*mallopt_t)(int, int);
 
-static int mslx_disable_heap_tagging(void) {
+static int rolithax_disable_heap_tagging(void) {
     mallopt_t opt = (mallopt_t) dlsym(RTLD_DEFAULT, "mallopt");
     if (opt == NULL) return -1;
     return opt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
@@ -56,28 +56,28 @@ static int g_savedStdin = -1;
 static int g_savedStdout = -1;
 static int g_savedStderr = -1;
 
-static void mslx_close_fd(int *fd) {
+static void rolithax_close_fd(int *fd) {
     if (*fd >= 0) {
         close(*fd);
         *fd = -1;
     }
 }
 
-static jboolean mslx_restore_stdio(void) {
+static jboolean rolithax_restore_stdio(void) {
     fflush(stdout);
     fflush(stderr);
     int restored = 1;
     if (g_savedStdin >= 0) {
         if (dup2(g_savedStdin, STDIN_FILENO) < 0) restored = 0;
-        else mslx_close_fd(&g_savedStdin);
+        else rolithax_close_fd(&g_savedStdin);
     }
     if (g_savedStdout >= 0) {
         if (dup2(g_savedStdout, STDOUT_FILENO) < 0) restored = 0;
-        else mslx_close_fd(&g_savedStdout);
+        else rolithax_close_fd(&g_savedStdout);
     }
     if (g_savedStderr >= 0) {
         if (dup2(g_savedStderr, STDERR_FILENO) < 0) restored = 0;
-        else mslx_close_fd(&g_savedStderr);
+        else rolithax_close_fd(&g_savedStderr);
     }
     clearerr(stdin);
     clearerr(stdout);
@@ -125,11 +125,11 @@ Java_com_wludy_rolithax_launcher_localengine_NativeVm_setupStdio(JNIEnv *env, jc
 
 fail: {
         int error = errno;
-        mslx_restore_stdio();
-        mslx_close_fd(&inPipe[0]);
-        mslx_close_fd(&inPipe[1]);
-        mslx_close_fd(&outPipe[0]);
-        mslx_close_fd(&outPipe[1]);
+        rolithax_restore_stdio();
+        rolithax_close_fd(&inPipe[0]);
+        rolithax_close_fd(&inPipe[1]);
+        rolithax_close_fd(&outPipe[0]);
+        rolithax_close_fd(&outPipe[1]);
         LOGE("stdio setup failed: %s", strerror(error));
         return NULL;
     }
@@ -137,7 +137,7 @@ fail: {
 
 JNIEXPORT jboolean JNICALL
 Java_com_wludy_rolithax_launcher_localengine_NativeVm_restoreStdio(JNIEnv *env, jclass clazz) {
-    return mslx_restore_stdio();
+    return rolithax_restore_stdio();
 }
 
 /* ---------- 创建 JVM ---------- */
@@ -162,7 +162,7 @@ Java_com_wludy_rolithax_launcher_localengine_NativeVm_createJvm(JNIEnv *env, jcl
        "Pointer tag ... was truncated" → SIGABRT（真机实测连 keytool 都跑不完）。
        创建 VM 前关掉本进程的堆打标签；不支持该选项的系统无副作用。
        代价：本进程失去 MTE/tag 这层内存安全缓解，仅在本机开服时生效。 */
-    LOGI("disable heap tagging: mallopt=%d", mslx_disable_heap_tagging());
+    LOGI("disable heap tagging: mallopt=%d", rolithax_disable_heap_tagging());
 
     /* libjvm 的依赖库（libjava/libjli/...）在 jre/lib 与 jre/lib/server 下 */
     char libPath[4096];

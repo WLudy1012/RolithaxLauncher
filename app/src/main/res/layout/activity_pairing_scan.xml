@@ -102,7 +102,7 @@
             android:paddingTop="7dp"
             android:paddingEnd="12dp"
             android:paddingBottom="7dp"
-            android:text="仅支持 MSLX 配对码"
+            android:text="仅支持 Rolithax 配对码"
             android:textColor="@color/scan_primary"
             android:textSize="12sp" />
     </LinearLayout>

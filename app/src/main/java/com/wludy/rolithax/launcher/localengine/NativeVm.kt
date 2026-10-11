@@ -1,7 +1,7 @@
 package com.wludy.rolithax.launcher.localengine
 
 /**
- * 进程内 JVM 桥接（native，见 src/main/cpp/mslxvm.c）。
+ * 进程内 JVM 桥接（native，见 src/main/cpp/rolithaxvm.c）。
  *
  * Android 10+ 对 targetSdk >= 29 的应用禁止 exec 自己 data 目录中的文件，
  * 因此不能 fork `bin/java`，只能在 App 进程内 dlopen(libjvm.so) 并 JNI_CreateJavaVM。
@@ -9,7 +9,7 @@ package com.wludy.rolithax.launcher.localengine
 internal object NativeVm {
 
     init {
-        System.loadLibrary("mslxvm")
+        System.loadLibrary("rolithaxvm")
     }
 
     /**

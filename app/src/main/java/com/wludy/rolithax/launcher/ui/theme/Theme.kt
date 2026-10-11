@@ -173,7 +173,7 @@ private fun seedColorScheme(seed: Color, dark: Boolean): ColorScheme {
     }
 }
 
-private val MSLXShapes = Shapes(
+private val RolithaxShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
     small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
     medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
@@ -200,7 +200,7 @@ fun RolithaxTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,
-            shapes = MSLXShapes,
+            shapes = RolithaxShapes,
             content = content,
         )
     }

@@ -32,7 +32,7 @@ import com.wludy.rolithax.launcher.ui.theme.rememberGlassStyle
 
 /** 项目统一卡片：玻璃底（实时模糊或半透明表面）+ Material Card 交互语义。 */
 @Composable
-fun MslxCard(
+fun RolithaxCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     highlighted: Boolean = false,
@@ -54,7 +54,7 @@ fun MslxCard(
 }
 
 @Composable
-fun MslxSectionHeader(
+fun RolithaxSectionHeader(
     title: String,
     subtitle: String? = null,
     actionLabel: String? = null,
@@ -88,7 +88,7 @@ fun MslxSectionHeader(
 }
 
 @Composable
-fun MslxStatusPill(
+fun RolithaxStatusPill(
     label: String,
     color: Color,
     modifier: Modifier = Modifier,
@@ -122,7 +122,7 @@ fun StatusDot(
 }
 
 @Composable
-fun MslxEmptyState(
+fun RolithaxEmptyState(
     icon: ImageVector,
     title: String,
     description: String,
@@ -130,7 +130,7 @@ fun MslxEmptyState(
     onAction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    MslxCard(modifier = modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

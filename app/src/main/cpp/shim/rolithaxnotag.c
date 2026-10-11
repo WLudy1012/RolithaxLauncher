@@ -1,5 +1,5 @@
 /*
- * mslxnotag —— 堆打标签（heap tagging）垫片，仅供 LD_PRELOAD 注入 java 子进程使用。
+ * rolithaxnotag —— 堆打标签（heap tagging）垫片，仅供 LD_PRELOAD 注入 java 子进程使用。
  *
  * 背景：Android 12+ 的 bionic Scudo 分配器会给堆指针打上 top-byte tag 并在 free() 时校验
  * 标签；而上游自制旧 OpenJDK（PojavLauncher 2021 的 jre17 构建等）内部会截断指针高位，
@@ -14,8 +14,8 @@
  *  2. 必须 `-fvisibility=hidden` 且**不得导出任何可能与被注入进程重名的符号**：
  *     曾额外导出 Agent_OnLoad 做对照实验，LD_PRELOAD 的全局符号插入抢走了
  *     libinstrument.so 的同名实现，导致 Paper 启动 SIGSEGV。
- *  3. 产物按 ABI 命名放进 `app/src/main/assets/mslx/`，由 ShizukuController.ensureShimStaged
- *     推到 /data/local/tmp/mslx/lib/libmslxnotag.so 后作为 LD_PRELOAD 使用；
+ *  3. 产物按 ABI 命名放进 `app/src/main/assets/rolithax/`，由 ShizukuController.ensureShimStaged
+ *     推到 /data/local/tmp/rolithax/lib/librolithaxnotag.so 后作为 LD_PRELOAD 使用；
  *     重新编译请执行仓库根目录的 `.\build-shim.ps1`。
  */
 #include <malloc.h>
@@ -29,6 +29,6 @@
 #define M_HEAP_TAGGING_LEVEL_NONE (0)
 #endif
 
-__attribute__((constructor)) static void mslx_disable_heap_tagging(void) {
+__attribute__((constructor)) static void rolithax_disable_heap_tagging(void) {
     mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, M_HEAP_TAGGING_LEVEL_NONE);
 }

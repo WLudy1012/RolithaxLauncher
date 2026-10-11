@@ -53,8 +53,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.model.FileItem
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -178,7 +178,7 @@ private fun ListContent(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 24.dp),
                 ) {
-                    MslxEmptyState(
+                    RolithaxEmptyState(
                         icon = Icons.Filled.Warning,
                         title = "加载失败",
                         description = state.error.orEmpty(),
@@ -196,7 +196,7 @@ private fun ListContent(
             }
 
             state.items.isEmpty() -> {
-                MslxEmptyState(
+                RolithaxEmptyState(
                     icon = Icons.AutoMirrored.Filled.List,
                     title = "空目录",
                     description = if (state.currentPath.isBlank()) {
@@ -227,7 +227,7 @@ private fun ListContent(
 
 @Composable
 private fun FileRow(item: FileItem, onClick: () -> Unit) {
-    MslxCard(
+    RolithaxCard(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
     ) {

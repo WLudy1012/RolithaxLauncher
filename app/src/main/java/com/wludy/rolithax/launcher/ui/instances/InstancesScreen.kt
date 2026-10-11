@@ -66,8 +66,8 @@ import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.isStoppableStatus
 import com.wludy.rolithax.launcher.ui.StatusBadge
 import com.wludy.rolithax.launcher.ui.StatusDot
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxEmptyState
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
 import com.wludy.rolithax.launcher.ui.statusColor
 import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 
@@ -136,7 +136,7 @@ fun InstancesScreen(
                 }
 
                 state.error != null && state.servers.isEmpty() -> {
-                    MslxEmptyState(
+                    RolithaxEmptyState(
                         icon = Icons.Filled.Info,
                         title = "加载失败",
                         description = state.error.orEmpty(),
@@ -149,7 +149,7 @@ fun InstancesScreen(
                 }
 
                 state.servers.isEmpty() -> {
-                    MslxEmptyState(
+                    RolithaxEmptyState(
                         icon = Icons.Filled.Info,
                         title = "暂无实例",
                         description = "点「新建」创建云端或本机实例（本机实例直接在手机上开服）",
@@ -259,7 +259,7 @@ private fun InstanceCard(
     modifier: Modifier = Modifier,
 ) {
     val statusCode = server.status
-    MslxCard(
+    RolithaxCard(
         onClick = null,
         highlighted = server.running,
         // 先按卡片圆角裁剪再挂点击：长按/点击水波纹才不会被裁成直角

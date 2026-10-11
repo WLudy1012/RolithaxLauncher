@@ -46,8 +46,8 @@ import com.wludy.rolithax.launcher.data.DaemonStatus
 import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.StatusDot
 
 /**
@@ -103,12 +103,12 @@ fun ServersOverviewScreen(
             }
 
             // ---------- Daemon 连接 ----------
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    MslxSectionHeader(
+                    RolithaxSectionHeader(
                         title = "Daemon 连接（${state.daemons.size}）",
                         subtitle = "所有 Daemon 同时保持连接并并行探测状态，互不影响；各服务端完全对等，标「默认」的那台只影响新建实例的默认落点。",
                     )
@@ -132,12 +132,12 @@ fun ServersOverviewScreen(
             Spacer(Modifier.height(12.dp))
 
             // ---------- 统一服务端列表 ----------
-            MslxCard(modifier = Modifier.fillMaxWidth()) {
+            RolithaxCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    MslxSectionHeader(title = "服务端（本机 + 各 Daemon，共 ${state.servers.size}）")
+                    RolithaxSectionHeader(title = "服务端（本机 + 各 Daemon，共 ${state.servers.size}）")
                     if (state.servers.isEmpty()) {
                         Text(
                             "暂无服务端。可以用下面的按钮新建本机实例或云端实例。",

@@ -31,7 +31,7 @@
   `SHA-256` 校验后解压使用（校验值写死在 `LocalJreManager` 与 `fetch-jre-assets.ps1`）。
 - Java 8 的类库以 pack200 压缩格式（`lib/*.jar.pack`，Java 9 起已废弃）分发，安装时由随 APK
   分发的 `libunpack200.so`（OpenJDK 8 的 unpack200 工具，见下表）在设备上还原为 `.jar`。
-- 每台设备的运行时安装位置：`filesDir/mslx/runtime/<运行时标识>`（应用私有目录）。
+- 每台设备的运行时安装位置：`filesDir/rolithax/runtime/<运行时标识>`（应用私有目录）。
 
 ## 三、随包分发的第三方库
 
@@ -55,7 +55,7 @@
 
 | 组件 | 说明 | 许可 |
 | --- | --- | --- |
-| `app/src/main/cpp/mslxvm.c`、`app/src/main/cpp/shim/mslxnotag.c`（后者由 `build-shim.ps1` 产出 `libmslxnotag-*.so`） | 进程内 JVM 桥接（`dlopen libjvm.so` + `JNI_CreateJavaVM`）、stdio 接管，以及关 Scudo 堆标签的 `LD_PRELOAD` 垫片 | AGPL-3.0（属本应用源码） |
+| `app/src/main/cpp/rolithaxvm.c`、`app/src/main/cpp/shim/rolithaxnotag.c`（后者由 `build-shim.ps1` 产出 `librolithaxnotag-*.so`） | 进程内 JVM 桥接（`dlopen libjvm.so` + `JNI_CreateJavaVM`）、stdio 接管，以及关 Scudo 堆标签的 `LD_PRELOAD` 垫片 | AGPL-3.0（属本应用源码） |
 
 ## 五、获取完整许可证文本
 

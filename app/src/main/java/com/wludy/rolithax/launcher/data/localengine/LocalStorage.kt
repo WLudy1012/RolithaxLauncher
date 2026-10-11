@@ -15,8 +15,8 @@ import java.util.Locale
 /**
  * 本机实例的存放位置。
  *
- *  - [PRIVATE]：`filesDir/mslx/servers/<目录名>`，随应用卸载消失、无需任何权限；
- *  - [PUBLIC]：`/storage/emulated/0/MSLX/servers/<目录名>`，用户可用文件管理器直接看到
+ *  - [PRIVATE]：`filesDir/rolithax/servers/<目录名>`，随应用卸载消失、无需任何权限；
+ *  - [PUBLIC]：`/storage/emulated/0/Rolithax/servers/<目录名>`，用户可用文件管理器直接看到
  *    （换核心、放整合包、备份存档都在系统文件里操作），需要「所有文件访问」授权。
  *
  * 两者**目录名全局唯一**（创建时经 [allocateDirName] 分配），因此 `ServerRef.local(目录名)`
@@ -38,7 +38,7 @@ enum class InstanceStorage(val key: String, val label: String) {
  *
  * 布局：
  * ```
- * filesDir/mslx/                    <- 私有数据根目录（AppData）
+ * filesDir/rolithax/                    <- 私有数据根目录（AppData）
  *   runtime/jre17/                  <- Java 运行时（= java.home，含 lib/server/libjvm.so）
  *   servers/<实例名>/                <- 一个实例一个目录（对应 daemon 的 Servers/<id>）
  *     server.jar                    <- 服务端核心（下载后固定命名，同 daemon 约定）
@@ -48,7 +48,7 @@ enum class InstanceStorage(val key: String, val label: String) {
  *     ops.json / whitelist.json / banned-*.json
  *     logs/ plugins/ mods/ world/   <- 服务端运行期目录（按核心类型预建）
  *   cache/                          <- 下载临时文件
- * /storage/emulated/0/MSLX/servers/ <- 公共目录实例（仅服务器文件，运行时始终在私有目录）
+ * /storage/emulated/0/Rolithax/servers/ <- 公共目录实例（仅服务器文件，运行时始终在私有目录）
  * ```
  *
  * 之前把 JRE 直接放在 `filesDir/jre`、核心放在 `filesDir/worlds/` 是临时做法，
@@ -56,10 +56,15 @@ enum class InstanceStorage(val key: String, val label: String) {
  */
 object LocalStorage {
 
-    private const val ROOT_NAME = "mslx"
+    private const val ROOT_NAME = "rolithax"
+    private const val LEGACY_ROOT_NAME = "mslx"
 
-    /** 公共目录下用大写 MSLX：用户在文件管理器里更易识别。 */
-    private const val PUBLIC_ROOT_NAME = "MSLX"
+    /** 公共目录下首字母大写：用户在文件管理器里更易识别。 */
+    private const val PUBLIC_ROOT_NAME = "Rolithax"
+    private const val LEGACY_PUBLIC_ROOT_NAME = "MSLX"
+
+    @Volatile
+    private var publicRootMigrated = false
     private const val LEGACY_JRE_DIR = "jre"
     private const val LEGACY_WORLDS_DIR = "worlds"
 
@@ -78,8 +83,13 @@ object LocalStorage {
     /** 实例根目录（对应 daemon 的 Servers）：默认私有位置。 */
     fun serversDir(context: Context): File = serversDir(context, InstanceStorage.PRIVATE)
 
-    fun serversDir(context: Context, storage: InstanceStorage): File =
-        if (storage == InstanceStorage.PUBLIC) File(publicRoot(), "servers") else File(root(context), "servers")
+    fun serversDir(context: Context, storage: InstanceStorage): File {
+        if (storage == InstanceStorage.PUBLIC) {
+            migratePublicRoot()
+            return File(publicRoot(), "servers")
+        }
+        return File(root(context), "servers")
+    }
 
     /** 下载缓存目录（对应 daemon 的 Temp/Uploads）。 */
     fun cacheDir(context: Context): File = File(root(context), "cache")
@@ -91,9 +101,9 @@ object LocalStorage {
     fun serverDir(context: Context, name: String, storage: InstanceStorage): File =
         File(serversDir(context, storage), sanitizeName(name))
 
-    // —— 公共目录（/storage/emulated/0/MSLX）——
+    // —— 公共目录（/storage/emulated/0/Rolithax）——
 
-    /** 公共数据根（`/storage/emulated/0/MSLX`）：仅拼路径，真正读写前须已过权限检查。 */
+    /** 公共数据根（`/storage/emulated/0/Rolithax`）：仅拼路径，真正读写前须已过权限检查。 */
     fun publicRoot(): File =
         File(runCatching { Environment.getExternalStorageDirectory() }.getOrNull() ?: File("/storage/emulated/0"), PUBLIC_ROOT_NAME)
 
@@ -153,7 +163,7 @@ object LocalStorage {
         return candidate
     }
 
-    /** 公共目录下的实例根（`/storage/emulated/0/MSLX/servers`），拼路径不需要 Context。 */
+    /** 公共目录下的实例根（`/storage/emulated/0/Rolithax/servers`），拼路径不需要 Context。 */
     fun publicServersDir(): File = File(publicRoot(), "servers")
 
     /**
@@ -219,9 +229,61 @@ object LocalStorage {
     }
 
     /**
+     * 品牌迁移：把旧版 `filesDir/mslx` 并入 `filesDir/rolithax`。
+     * 应在读取任何本机数据之前调用；同名目标已存在时保留目标，不覆盖用户数据。
+     */
+    fun migrateRootName(context: Context) {
+        runCatching {
+            val legacy = File(context.filesDir, LEGACY_ROOT_NAME)
+            if (legacy.isDirectory && mergeInto(legacy, root(context))) {
+                AppLogger.i("LocalStorage", "已迁移旧数据目录 $LEGACY_ROOT_NAME → $ROOT_NAME")
+            }
+        }.onFailure { AppLogger.w("LocalStorage", "旧数据目录改名失败（忽略）", it) }
+    }
+
+    /**
+     * 公共目录品牌迁移：`/storage/emulated/0/MSLX` → `/storage/emulated/0/Rolithax`。
+     * 需要「所有文件访问」授权，未授权时不动作，授权后首次访问再迁移。
+     */
+    private fun migratePublicRoot() {
+        if (publicRootMigrated || !publicStorageGranted()) return
+        synchronized(this) {
+            if (publicRootMigrated) return
+            runCatching {
+                val parent = publicRoot().parentFile ?: return@runCatching
+                val legacy = File(parent, LEGACY_PUBLIC_ROOT_NAME)
+                if (legacy.isDirectory && mergeInto(legacy, publicRoot())) {
+                    AppLogger.i("LocalStorage", "已迁移公共目录 $LEGACY_PUBLIC_ROOT_NAME → $PUBLIC_ROOT_NAME")
+                }
+            }.onFailure { AppLogger.w("LocalStorage", "公共目录改名失败（忽略）", it) }
+            publicRootMigrated = true
+        }
+    }
+
+    /** 把 [src] 并入 [dst]：目标不存在则整体改名，否则逐项合并；同名文件保留目标。返回是否有内容被移动。 */
+    private fun mergeInto(src: File, dst: File): Boolean {
+        if (!dst.exists()) {
+            dst.parentFile?.mkdirs()
+            if (src.renameTo(dst)) return true
+        }
+        if (!dst.isDirectory) return false
+        var moved = false
+        src.listFiles()?.forEach { child ->
+            val target = File(dst, child.name)
+            moved = when {
+                !target.exists() -> child.renameTo(target)
+                child.isDirectory && target.isDirectory -> mergeInto(child, target)
+                else -> false
+            } || moved
+        }
+        src.delete()
+        return moved
+    }
+
+    /**
      * 旧布局迁移：
-     *  - `filesDir/jre/<runtimeId>` → `filesDir/mslx/runtime/<runtimeId>`
-     *  - `filesDir/worlds/<实例名>/` → `filesDir/mslx/servers/<实例名>/`（同名已存在则跳过）
+     *  - `filesDir/jre/<runtimeId>` → `filesDir/rolithax/runtime/<runtimeId>`
+     *  - `filesDir/worlds/<实例名>/` → `filesDir/rolithax/servers/<实例名>/`（同名已存在则跳过）
      *  - 旧 `filesDir/worlds` 根目录下的核心 jar → 移到对应实例目录并改名为 server.jar
      * 迁移失败只记日志，不影响启动。
      */

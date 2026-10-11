@@ -69,7 +69,7 @@ fun SplashScreen(onFinished: () -> Unit) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Image(
                 painter = painterResource(R.drawable.slime_logo),
-                contentDescription = "MSLX",
+                contentDescription = "Rolithax",
                 modifier = Modifier
                     .size(144.dp)
                     .graphicsLayer {

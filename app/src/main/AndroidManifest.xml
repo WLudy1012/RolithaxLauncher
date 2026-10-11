@@ -16,7 +16,7 @@
     <!-- 本机开服增强：Shizuku（ADB/root 权限）下 exec 真正的 java 子进程 -->
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <!--
-        本机开服「公共目录实例」：Android 11+ 的 All Files Access（仅用于 /storage/emulated/0/MSLX，
+        本机开服「公共目录实例」：Android 11+ 的 All Files Access（仅用于 /storage/emulated/0/Rolithax，
         让用户能在系统文件管理器里直接看到并编辑服务端文件）。不会用于读取用户其它私人文件，
         也未授权时一切功能仍按应用私有目录正常工作。
     -->
