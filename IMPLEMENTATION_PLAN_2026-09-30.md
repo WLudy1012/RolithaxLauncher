@@ -1,7 +1,7 @@
-# MSLX-Android 功能改造最终实施方案
+# Rolithax Launcher 功能改造最终实施方案
 
 日期：2026-09-30
-适用仓库：MSLX-Android（Android 客户端）
+适用仓库：RolithaxLauncher（Android 客户端）
 阶段：本地实现已完成；等待用户后续提交/推送和设备、远端流水线验收
 
 ## 目标与约束
@@ -19,7 +19,7 @@
 - Java 25 运行时的客户端和 CI/发布脚本存在来源配置不一致线索。运行时下载实现已有流末尾读取校验逻辑，不能把既有 EOF 修复重复当成根因；应对照准确的 Java 25 归档、可信 SHA-256、CNB/GitHub/FCL 实际响应逐项复现。FCL 对 HEAD 返回 404 不足以证明文件不可用：Range GET 曾返回 206 和 XZ 文件头。还需查清 CNB/GitHub 固定运行时地址与按版本发布的地址是否漂移。
 - 目前 Android 项目仍是单一 `:app`，顶层 Dock 有主页、实例、新建、设置四项；顶层导航已有切换锁。本机开服基于进程内 JVM，并提供前台服务和可选 Shizuku/ADB 能力。
 - 已确认的安全与生命周期风险见下文：Daemon URL/名称仍以明文放入设置 JSON，API Key 单独加密；崩溃堆栈和异常消息存在未经同等脱敏的落盘路径；HTTP 日志即使移除了 query，仍包含主机与路径；SignalR 的页面清理、后台重连 Job 和关闭回调没有统一、可靠的会话所有权。
-- GitHub CLI 已登录后读取到 [Actions run 36724200527](https://github.com/WLudy1012/MSLX_APP-Android/actions/runs/36724200527/job/109916734993) 完整日志。GitHub 开放 Issue 查询（2026-09-30）只返回 Issue #18。该 run 总体结论为 success，但「运行 AI 评审（GPT-5.4）」步骤退出码为 1；日志明确报错：`Model "gpt-5.4" from --model flag is not available.` 解析步骤随后读不到输出并发出「AI 评审未返回内容」警告，因此这次没有 AI 评论/自动标签。该步骤配置了 continue-on-error，故绿灯不代表评审成功。
+- GitHub CLI 已登录后读取到 [Actions run 36724200527](https://github.com/WLudy1012/RolithaxLauncher/actions/runs/36724200527/job/109916734993) 完整日志。GitHub 开放 Issue 查询（2026-09-30）只返回 Issue #18。该 run 总体结论为 success，但「运行 AI 评审（GPT-5.4）」步骤退出码为 1；日志明确报错：`Model "gpt-5.4" from --model flag is not available.` 解析步骤随后读不到输出并发出「AI 评审未返回内容」警告，因此这次没有 AI 评论/自动标签。该步骤配置了 continue-on-error，故绿灯不代表评审成功。
 - 上游已更新，但这次只读检查不代表 Android 与新 Daemon 认证契约已完成端到端兼容验证。受限 Token 的具体端点、有效期、错误码和刷新时机须在接入每条 Android 下载/媒体接口前逐一核对。
 
 ## 总体架构决策
@@ -61,7 +61,7 @@
 
 | 来源 | 内容 | 计划归属 | 完成标准 |
 |---|---|---|---|
-| [Issue #18：首次进入软件的使用引导](https://github.com/WLudy1012/MSLX_APP-Android/issues/18) | Issue 提交版本为 1.7.7，要求增加首次使用引导。当前已有 `WelcomeScreen` 首启欢迎页和 `markOnboarded()` 状态，不应再叠一套互相竞争的 onboarding。 | 已在本地把现有欢迎页改为四步导览：连接 Daemon、选择创建位置、管理实例与控制台、调整设置；跳过和完成共用状态保存，免责声明仍由原有门控负责。同步删除了过时 Actions 渠道介绍。 | 新安装按预期顺序看到免责声明和导览；跳过/完成后重启不重复弹出；重新连接/升级旧设置不被当成首次安装；TalkBack、字体缩放和窄屏下步骤仍可操作。远端交付和 Issue 关闭仍待用户推送/后续确认。 |
+| [Issue #18：首次进入软件的使用引导](https://github.com/WLudy1012/RolithaxLauncher/issues/18) | Issue 提交版本为 1.7.7，要求增加首次使用引导。当前已有 `WelcomeScreen` 首启欢迎页和 `markOnboarded()` 状态，不应再叠一套互相竞争的 onboarding。 | 已在本地把现有欢迎页改为四步导览：连接 Daemon、选择创建位置、管理实例与控制台、调整设置；跳过和完成共用状态保存，免责声明仍由原有门控负责。同步删除了过时 Actions 渠道介绍。 | 新安装按预期顺序看到免责声明和导览；跳过/完成后重启不重复弹出；重新连接/升级旧设置不被当成首次安装；TalkBack、字体缩放和窄屏下步骤仍可操作。远端交付和 Issue 关闭仍待用户推送/后续确认。 |
 | 工作流故障：run 36724200527 的「运行 AI 评审（GPT-5.4）」退出码 1 | 对应 Issue #18 的 `issues.opened` 工作流触发。AI 步骤因 `gpt-5.4` 对该次 Copilot CLI 不可用而失败；Issue 总体流程显示 success，但没有评审结果、评论或自动标签。原始日志已经通过已登录 GitHub CLI 取得。 | 已在本地修复 `.github/workflows/auto-issue-review.yml`：固定 Copilot CLI 1.0.89，使用其文档说明的 Claude Sonnet 4.5 默认模型，并关闭 CLI 自动升级；保留只读工具和标签白名单。推送后需检查首个真实 Issue 评审运行，再决定是否增加模型检查。 | 远端验证运行可产出有效评审 JSON 并按白名单评论/贴标；模型不可用时给出清楚诊断和降级状态；诊断中无 Token 或完整敏感 Issue 内容。 |
 
 ## 分阶段实施与退出条件
@@ -198,3 +198,9 @@
 - 修复 `.cnb.yml` 在流水线初始化阶段导入 `MSLX-secrets/-/blob/main/keystore.yml` 失败的问题。
 - tag 构建改为从 CNB 项目受保护变量读取 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；密钥文件、密码和 Base64 内容继续保持在仓库外。
 - `.cnb.yml` 已通过 PyYAML 解析；需要在 CNB 项目设置中补齐变量后，tag 构建才能恢复签名发布。
+
+## CNB 密钥仓库导入与版本升级（2026-10-11）
+
+- `.cnb.yml` 的 tag 流水线改为通过 `pipeline imports` 从 `WLudy/Rolithax-secrets` 的 `main/keystore.yml` 导入 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`，取代 2026-10-05 的项目受保护变量方案；密钥内容继续保持在仓库外。
+- 需要在密钥仓库的 `keystore.yml` 中通过 `allow_slugs` 授权 `WLudy/RolithaxLauncher`；2026-10-05 的 `GetResourceAccess not found` 属于同类授权/路径问题，未经远端运行不能宣称已修复。
+- 应用版本升至 `1.7.11` / `versionCode 43`，与本地已有的 `v1.7.11-Beta` tag 名称对齐。

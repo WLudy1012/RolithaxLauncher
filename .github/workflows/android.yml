@@ -141,7 +141,7 @@ jobs:
             echo "::warning::未配置 CNB_TOKEN，跳过 CNB main 源码同步。"
             exit 0
           fi
-          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/MSLX_APP-Android.git"
+          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/RolithaxLauncher.git"
           git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
           git merge --no-edit --no-ff refs/remotes/cnb/main
           git push cnb "HEAD:refs/heads/main"

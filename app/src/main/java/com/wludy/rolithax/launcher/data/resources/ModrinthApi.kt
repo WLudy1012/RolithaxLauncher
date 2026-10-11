@@ -47,7 +47,7 @@ object ModrinthApiFactory {
             .addInterceptor { chain ->
                 chain.proceed(
                     chain.request().newBuilder()
-                        .header("User-Agent", "Rolithax-Launcher/${BuildConfig.VERSION_NAME} (https://github.com/WLudy1012/MSLX_APP-Android)")
+                        .header("User-Agent", "Rolithax-Launcher/${BuildConfig.VERSION_NAME} (https://github.com/WLudy1012/RolithaxLauncher)")
                         .header("Accept", "application/json")
                         .build(),
                 )

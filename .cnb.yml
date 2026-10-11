@@ -1,7 +1,7 @@
 # CNB（cnb.cool）云构建配置：main push 构建 debug APK；v* tag 推送时构建签名 release APK 并发布 CNB Release。
-# tag 流水线从 CNB 项目受保护变量读取签名密钥
-# （KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_PASSWORD），未配置时安全失败，不发布未签名包。
-# 不在 pipeline imports 中跨仓库读取密钥文件，避免密钥仓库访问权限导致流水线初始化失败。
+# tag 流水线从密钥仓库 WLudy/Rolithax-secrets 的 keystore.yml 导入签名密钥
+# （KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_PASSWORD），未导入时安全失败，不发布未签名包。
+# 密钥仓库须为私有，且 keystore.yml 的 allow_slugs 需包含 WLudy/RolithaxLauncher。
 
 main:
   push:
@@ -72,7 +72,9 @@ main:
 
 $:
   tag_push:
-    - docker:
+    - imports:
+        - https://cnb.cool/WLudy/Rolithax-secrets/-/blob/main/keystore.yml
+      docker:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
@@ -123,7 +125,7 @@ $:
           script: |
             set -eu
             if [ -z "${KEYSTORE_BASE64:-}" ]; then
-              echo "ERROR: KEYSTORE_BASE64 未注入（请在 CNB 项目受保护变量中配置签名密钥）" >&2
+              echo "ERROR: KEYSTORE_BASE64 未注入（请检查密钥仓库 Rolithax-secrets 的 keystore.yml 及 allow_slugs）" >&2
               exit 1
             fi
             if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
@@ -200,7 +202,7 @@ $:
             fi
             echo "当前 tag=$CUR_TAG 上一版本=${PREV_TAG:-<无>} tag 总数=$(git tag --list 'v*' | wc -l)"
             {
-              echo "# MSLX_APP-Android $CUR_TAG"
+              echo "# Rolithax Launcher $CUR_TAG"
               echo ""
               if [ -n "$PREV_TAG" ]; then
                 echo "自 \`$PREV_TAG\` 以来的提交："

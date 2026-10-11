@@ -50,7 +50,7 @@ data class AppUpdateInfo(
 }
 
 /** CNB Release 资产下载地址前缀（形如 .../-/releases/download/v1.5/app-release.apk）。 */
-private const val CNB_RELEASE_DOWNLOAD_BASE = "https://cnb.cool/WLudy/MSLX_APP-Android/-/releases/download"
+private const val CNB_RELEASE_DOWNLOAD_BASE = "https://cnb.cool/WLudy/RolithaxLauncher/-/releases/download"
 
 /** 内嵌 JRE 运行时的包体积下限（arm64 运行时约 36MB，远大于无 JRE 的 ~10MB）。 */
 private const val EMBEDDED_JRE_MIN_BYTES = 30L * 1024 * 1024

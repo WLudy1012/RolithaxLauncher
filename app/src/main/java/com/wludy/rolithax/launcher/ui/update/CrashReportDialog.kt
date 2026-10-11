@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.wludy.rolithax.launcher.data.AppLogger
 
 /** GitHub Issue 提交地址（崩溃日志报告入口）。 */
-const val GITHUB_ISSUE_URL = "https://github.com/WLudy1012/MSLX_APP-Android/issues/new"
+const val GITHUB_ISSUE_URL = "https://github.com/WLudy1012/RolithaxLauncher/issues/new"
 
 /** 展示用日志上限：超长堆栈只截断显示，复制时仍是完整内容。 */
 private const val MAX_DISPLAY_CHARS = 20_000

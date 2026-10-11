@@ -47,7 +47,7 @@ git diff --check
 - Release 工作流只由 `v*` Tag 触发，生成签名发布物、SHA-256 校验信息、Release notes，并按约定同步 CNB。
 - CNB 工作流负责 main 构建和 Tag 发布；阶段名称、任务名称和关键输出以中文为主，保留 Gradle、Android、Release、CNB 等技术名词。
 - 签名和镜像认证只通过 CI 的受保护配置注入，具体凭据不进入仓库、脚本、文档或日志。
-- CNB tag 构建从项目受保护变量读取 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；不通过 `pipeline imports` 跨仓库读取密钥文件，避免密钥仓库资源权限阻断流水线初始化。
+- CNB tag 构建通过 `pipeline imports` 从私有密钥仓库 `WLudy/Rolithax-secrets` 的 `main/keystore.yml` 读取 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；该文件须用 `allow_slugs` 授权 `WLudy/RolithaxLauncher`，否则流水线初始化会因资源权限失败。
 - GitHub Actions 使用维护中的 Node 运行时和 Action 版本；缓存只保存可安全复用的依赖，不覆盖 runner 预装且可能无写权限的 Android SDK 目录。
 - Issue 自动评审使用固定版本的 Copilot CLI 和稳定模型配置；模型或 CLI 不可用时降级为警告，不阻断 Issue 流程。
 

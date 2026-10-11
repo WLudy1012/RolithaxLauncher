@@ -60,7 +60,7 @@ internal val DISCLAIMER_TEXT = """
 三、开源许可
 
 本应用基于 GNU Affero General Public License v3.0 (AGPL-3.0) 开源,
-源码见项目仓库 https://github.com/WLudy1012/MSLX_APP-Android。
+源码见项目仓库 https://github.com/WLudy1012/RolithaxLauncher。
 上游 MSLX 项目同样基于 AGPL-3.0 开源,详见其项目仓库 https://github.com/MSLTeam/MSLX。
 本应用随包/下载的第三方组件与 Java 运行时许可,见应用内"关于 → 合规与许可 → 第三方组件与许可"。
 运行 Minecraft 服务端还需遵守 Mojang Studios / Microsoft 的 Minecraft EULA。

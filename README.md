@@ -1,12 +1,12 @@
 # Rolithax Launcher
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Android CI](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/MSLX_APP-Android/actions/workflows/android.yml)
+[![Android CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml)
 
 MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 **Kotlin + Jetpack Compose** 构建，
 复刻了 MSLX Desktop 版「连接守护程序 → 管理实例」的核心能力，并针对手机触屏重新设计了操作流程。
 
-> 仓库地址：https://github.com/WLudy1012/MSLX_APP-Android
+> 仓库地址：https://github.com/WLudy1012/RolithaxLauncher
 > Android namespace / applicationId：`com.wludy.rolithax.launcher`。更换 applicationId 和签名后，旧版需全新安装；旧数据通过应用内加密导出/导入迁移。
 > 本应用为**第三方项目**，与 MSLTeam 无任何隶属/关联关系，使用前请阅读[免责声明](#免责声明)。
 
@@ -158,7 +158,7 @@ SIGABRT）；两者的细节注释在 `app/src/main/cpp/shim/mslxnotag.c` 与 `L
 - 设置页「更新渠道」可选 **稳定版**（默认）/ **测试版**：
   - 稳定渠道只接收正式版；测试渠道同时接收稳定版 + Beta 版。
 - **所有渠道均应用内下载并安装**（下载进度条 → 系统安装器），不再跳转浏览器。
-- **CNB 镜像（cnb.cool）为首选更新源**：应用优先从 `https://cnb.cool/WLudy/MSLX_APP-Android` 下载更新 APK，
+- **CNB 镜像（cnb.cool）为首选更新源**：应用优先从 `https://cnb.cool/WLudy/RolithaxLauncher` 下载更新 APK，
   失败时自动回退 GitHub Releases（大陆网络环境下载更快、更稳）。
 - Release 说明规则：正式版包含自上一正式版以来的全部更新（含中间 Beta）；Beta 版包含自上一 Beta 以来的全部更新。
 
@@ -182,8 +182,8 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 ## 🤖 持续集成（GitHub Actions / CNB）
 
 - **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release APK，并上传 debug APK 工件；main 构建通过后先合并 CNB main 再普通推送源码，不覆盖 CNB 独立提交。
-- **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/MSLX_APP-Android 上，main push 自动构建 debug APK；
-  `v*` tag 推送时从 CNB 项目受保护变量恢复签名、构建 release APK 并发布 CNB Release（应用首选更新源）。
+- **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/RolithaxLauncher 上，main push 自动构建 debug APK；
+  `v*` tag 推送时从密钥仓库导入签名配置、构建 release APK 并发布 CNB Release（应用首选更新源）。
 - **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release；完成后同步 main 源码和 tag 到 CNB。
 - **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
   （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
@@ -202,14 +202,14 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 | `KEYSTORE_PASSWORD` | 密钥库密码 |
 | `KEY_PASSWORD` | 密钥密码 |
 
-签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions Secrets 与 CNB 项目受保护变量都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
+签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions Secrets 与 CNB 密钥仓库都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
 
 > Windows 生成 `KEYSTORE_BASE64`：
 > `[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`
 
-### CNB 项目变量
+### CNB 密钥仓库
 
-在 CNB 仓库的项目设置中创建以下受保护变量，并让 tag 流水线可读取：
+tag 流水线通过 `pipeline imports` 从私有密钥仓库 `https://cnb.cool/WLudy/Rolithax-secrets` 导入 `main` 分支的 `keystore.yml`，文件需提供以下变量：
 
 | 变量 | 内容 |
 | --- | --- |
@@ -217,4 +217,4 @@ MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器
 | `KEYSTORE_PASSWORD` | 密钥库密码 |
 | `KEY_PASSWORD` | `wludy` 别名的密钥密码 |
 
-`.cnb.yml` 不再通过 `pipeline imports` 读取 `MSLX-secrets` 文件；这样即使密钥仓库不可访问，流水线也能正常初始化，缺少变量时才在签名阶段给出明确错误。
+`keystore.yml` 还需通过 `allow_slugs` 声明允许引用的仓库（包含 `WLudy/RolithaxLauncher`），否则导入会在流水线初始化阶段失败。变量未导入时，签名阶段会给出明确错误并拒绝发布未签名包。

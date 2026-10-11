@@ -33,14 +33,14 @@ data class GitHubContributor(
 interface GitHubReleaseApi {
 
     /** 获取最新正式 release。 */
-    @GET("repos/WLudy1012/MSLX_APP-Android/releases/latest")
+    @GET("repos/WLudy1012/RolithaxLauncher/releases/latest")
     suspend fun latestRelease(): GitHubRelease
 
     /** 获取最近一批 release（含历史强制更新版本，用于强制更新判定）。 */
-    @GET("repos/WLudy1012/MSLX_APP-Android/releases?per_page=30")
+    @GET("repos/WLudy1012/RolithaxLauncher/releases?per_page=30")
     suspend fun releases(): List<GitHubRelease>
 
     /** 获取仓库贡献者列表。 */
-    @GET("repos/WLudy1012/MSLX_APP-Android/contributors?per_page=30")
+    @GET("repos/WLudy1012/RolithaxLauncher/contributors?per_page=30")
     suspend fun contributors(): List<GitHubContributor>
 }

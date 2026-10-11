@@ -45,5 +45,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MSLX_APP-Android"
+rootProject.name = "RolithaxLauncher"
 include(":app")
