@@ -39,10 +39,14 @@ private const val LOG_BATCH_WINDOW_MS = 40L
 /** 单批最大行数：防止超长突发把单次合并放大到不可控。 */
 private const val LOG_BATCH_MAX_LINES = 512
 
-/** 日志行；[id] 供 UI 层 LazyColumn 用作稳定 item key（自动递增，不参与业务语义）。 */
+/**
+ * 日志行；[id] 供 UI 层 LazyColumn 用作稳定 item key（自动递增，不参与业务语义）。
+ * [segments] 非空时为已按跨消息 ANSI 状态解析好的片段，UI 直接使用；为空则由 UI 单行解析 [text]。
+ */
 data class LogLine(
     val text: String,
     val system: Boolean = false,
+    val segments: List<AnsiSegment>? = null,
     val id: Long = idGenerator.incrementAndGet(),
 ) {
     companion object {
@@ -95,6 +99,9 @@ class ConsoleViewModel(
     override val events = _events.asSharedFlow()
 
     private var client: ConsoleHubClient? = null
+
+    /** 远程日志的 ANSI 解析器：颜色状态与未完成的序列跨 ReceiveLog 消息继承。 */
+    private val ansiParser = AnsiStreamParser()
 
     /** 日志入队通道（无界、非阻断）：SignalR 回调线程 trySend，不阻塞网络回调。 */
     private val incomingLogs = Channel<LogLine>(Channel.UNLIMITED)
@@ -150,10 +157,16 @@ class ConsoleViewModel(
         return if (t.contains('.')) t.substringBefore('.') else t
     }
 
+    private fun parseRemoteLine(text: String): LogLine {
+        val segments = synchronized(ansiParser) { ansiParser.append(text) }
+        return LogLine(text, segments = segments.ifEmpty { listOf(AnsiSegment("")) })
+    }
+
     private suspend fun connectHub() {
+        synchronized(ansiParser) { ansiParser.reset() }
         val hubClient = repository.createConsoleClient(
             instanceId = instanceId,
-            onLog = { line -> enqueueLogs(listOf(LogLine(line))) },
+            onLog = { line -> enqueueLogs(listOf(parseRemoteLine(line))) },
             onCommandResult = { result ->
                 if (!result.success) {
                     enqueueLogs(listOf(LogLine(">>> ${result.message ?: "命令发送失败"}", system = true)))

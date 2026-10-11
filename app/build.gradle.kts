@@ -155,6 +155,8 @@ dependencies {
     implementation(libs.androidx.paging.compose)
     ksp(libs.androidx.room.compiler)
 
+    testImplementation(libs.junit)
+
     // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
     implementation(libs.xz)
     implementation(libs.commons.compress)

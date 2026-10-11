@@ -77,8 +77,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.wludy.rolithax.launcher.ui.MslxCard
-import com.wludy.rolithax.launcher.ui.MslxSectionHeader
+import com.wludy.rolithax.launcher.ui.RolithaxCard
+import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.StatusBadge
 import com.wludy.rolithax.launcher.ui.theme.ConsoleBackground
 import com.wludy.rolithax.launcher.ui.theme.ConsoleFont
@@ -307,7 +307,7 @@ fun ConsoleScreen(
 /** 状态总览：状态徽章 + 在线人数 / 运行时长 + 连接态（含失败重连入口）。 */
 @Composable
 private fun StatusOverviewCard(state: ConsoleUiState, onRetryConnect: () -> Unit) {
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -439,14 +439,14 @@ private fun ActionCard(
     val isRunning = status == 2
     val isStopped = status == 0
 
-    MslxCard(modifier = Modifier.fillMaxWidth()) {
+    RolithaxCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(CardInnerPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            MslxSectionHeader(title = "实例操作")
+            RolithaxSectionHeader(title = "实例操作")
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -588,7 +588,7 @@ private fun TerminalCard(
                     // key = 日志行稳定 id：列表裁剪/追加时保持条目身份，避免整表重组
                     items(items = logs, key = { it.id }) { line ->
                         // ANSI 原彩：按转义序列拆段着色，未着色段继承默认前景色
-                        val segments = remember(line.text) { parseAnsiLog(line.text) }
+                        val segments = line.segments ?: remember(line.text) { parseAnsiLog(line.text) }
                         val baseColor = if (line.system) ConsoleSystem else ConsoleText
                         Text(
                             text = buildAnnotatedString {
@@ -597,6 +597,7 @@ private fun TerminalCard(
                                         SpanStyle(
                                             color = seg.color ?: baseColor,
                                             fontWeight = seg.ansiFontWeight,
+                                            background = seg.background ?: Color.Unspecified,
                                         ),
                                     ) { append(seg.text) }
                                 }
