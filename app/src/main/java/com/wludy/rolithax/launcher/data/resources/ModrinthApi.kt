@@ -19,9 +19,7 @@ interface ModrinthApi {
         @Query("query") query: String,
         @Query("limit") limit: Int,
         @Query("offset") offset: Int,
-        @Query("project_type") type: String,
-        @Query("game_version") gameVersion: String?,
-        @Query("loader") loader: String?,
+        @Query("facets") facets: String?,
         @Header("If-None-Match") etag: String?,
     ): Response<JsonObject>
 

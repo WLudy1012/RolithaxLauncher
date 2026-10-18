@@ -9,6 +9,7 @@
 - 首期 Provider：Modrinth API v3。
 - 服务端核心：MSLAPI 服务端核心接口。
 - Provider 接口为后续 Hangar、SpigotMC、GitHub Release 和公开 CurseForge 镜像预留扩展点。
+- Modrinth 搜索只识别 `facets`（`project_types`、`game_versions`、`categories` 作加载器）；`project_type`、`game_version`、`loader` 查询参数会被忽略并返回全站结果，不能用来筛选。很多项目同时属于 `mod` 与 `plugin`，解析类型时优先采用当前请求的分类。
 - 云端安装由 `mslx-plugin-rolithax` 在 Daemon 所在主机完成，避免客户端下载后再上传造成重复流量。
 
 ## 缓存与刷新

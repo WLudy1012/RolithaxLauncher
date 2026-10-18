@@ -29,9 +29,7 @@ class ModrinthResourceProvider(private val api: ModrinthApi) : ResourceProvider 
             query = filter.query,
             limit = limit,
             offset = offset,
-            type = filter.type,
-            gameVersion = filter.gameVersion.takeIf(String::isNotBlank),
-            loader = filter.loader.takeIf(String::isNotBlank),
+            facets = searchFacets(filter),
             etag = etag,
         )
         if (response.code() == 304) return ResourceSearchPage(emptyList(), 0, 0, response.headers()["ETag"], true)
@@ -113,12 +111,31 @@ private fun parseVersion(json: JsonObject): ResourceVersion? {
     )
 }
 
+private val MOD_LOADERS = setOf("fabric", "forge", "neoforge", "quilt")
+private val PLUGIN_LOADERS = setOf("paper", "spigot", "bukkit")
+
+// Modrinth 搜索只识别 facets，project_type/game_version/loader 查询参数会被忽略并返回全站结果。
+internal fun searchFacets(filter: ResourceFilter): String {
+    val groups = mutableListOf("project_types:${filter.type}")
+    if (filter.gameVersion.isNotBlank()) groups += "game_versions:${filter.gameVersion}"
+    val loader = filter.loader.lowercase()
+    val loaderFits = when (filter.type) {
+        "mod", "modpack" -> loader in MOD_LOADERS
+        "plugin" -> loader in PLUGIN_LOADERS
+        else -> false
+    }
+    if (loaderFits) groups += "categories:$loader"
+    return groups.joinToString(prefix = "[", postfix = "]", separator = ",") { "[\"$it\"]" }
+}
+
 private fun parseProject(json: JsonObject, fallbackType: String): ResourceProject {
     val environment = json.getAsJsonObject("project_loader_fields")?.get("environment") ?: json.get("environment")
     val env = environment.asStringValues()
     val clientSide = json.get("client_side").asStringValues()
     val serverSide = json.get("server_side").asStringValues()
-    val projectType = json.getAsJsonArray("project_types")?.firstOrNull()?.stringOrNull()
+    val projectTypes = json.getAsJsonArray("project_types").asStringValues()
+    val projectType = fallbackType.takeIf { it in projectTypes }
+        ?: projectTypes.firstOrNull()
         ?: json.get("project_type").stringOrNull()
         ?: fallbackType
     return ResourceProject(
