@@ -51,8 +51,15 @@ git diff --check
 - GitHub Actions 使用维护中的 Node 运行时和 Action 版本；缓存只保存可安全复用的依赖，不覆盖 runner 预装且可能无写权限的 Android SDK 目录。
 - Issue 自动评审使用固定版本的 Copilot CLI 和稳定模型配置；模型或 CLI 不可用时降级为警告，不阻断 Issue 流程。
 
+## 签名配置
+
+- 签名 JKS 的别名必须是 `wludy`。包名和签名已变更，GitHub Actions Secrets 与 CNB 密钥仓库都必须使用 Rolithax 的发布密钥，旧版签名不能用于发行包。
+- GitHub Actions 在仓库 Secrets 中配置 `KEYSTORE_BASE64`（`.jks` 的单行 Base64）、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；Windows 生成 Base64：`[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`。
+- CNB 的同名变量由密钥仓库 `keystore.yml` 提供，见上文。
+- 本地 `keystore/`、`keystore.properties` 已被 `.gitignore` 忽略，只用于本机签名构建。
+
 ## 版本和 Release notes
 
-- 无后缀 Tag 表示稳定版，`-Beta` 表示测试版，`-Force` 表示强制更新。
+- 无后缀 Tag 表示稳定版，`-Beta` 表示测试版，`-Force` 表示强制更新。应用按数字逐段比较版本号，正式版的版本号必须高于已发布的同号 Beta，否则 Beta 用户收不到。
 - 稳定版说明从上一稳定 Tag 起汇总；Beta 说明从上一 Beta Tag 起汇总；不能在找不到上一 Tag 时把整个仓库历史全部列入 Release notes。
 - Release 同时提供完整包和精简包时，资产名称、是否内嵌运行时和 SHA-256 必须清楚可辨；缺失或未校验的运行时不应伪装成可用附件。

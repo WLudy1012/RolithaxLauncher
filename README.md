@@ -1,220 +1,165 @@
+<div align="center">
+
+<img src="./app/src/main/res/drawable-nodpi/rolithax_logo.png" alt="Rolithax Launcher" width="96">
+
 # Rolithax Launcher
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+**一个 App，同时管理远程 MSLX Daemon 和手机本机上的 Minecraft Java 服务端。**
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Android CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml)
+[![Release](https://img.shields.io/github/v/release/WLudy1012/RolithaxLauncher?include_prereleases&label=release)](https://github.com/WLudy1012/RolithaxLauncher/releases)
+![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-3DDC84)
 
-MSLX 守护程序（MSLX Daemon）的第三方手机安卓端控制台。基于 **Kotlin + Jetpack Compose** 构建，
-复刻了 MSLX Desktop 版「连接守护程序 → 管理实例」的核心能力，并针对手机触屏重新设计了操作流程。
+**简体中文** · [繁體中文](README.zh-TW.md) · [English](README.en.md)
 
-> 仓库地址：https://github.com/WLudy1012/RolithaxLauncher
-> Android namespace / applicationId：`com.wludy.rolithax.launcher`。更换 applicationId 和签名后，旧版需全新安装；旧数据通过应用内加密导出/导入迁移。
-> 本应用为**第三方项目**，与 MSLTeam 无任何隶属/关联关系，使用前请阅读[免责声明](#免责声明)。
+</div>
 
-本应用集成 MSLAPI 下载服务：**本服务由MSL开服器提供**。<a href="https://mslmc.cn"><img src="./app/src/main/res/drawable-nodpi/msl_logo.png" alt="MSL 开服器 Logo" width="40"></a> [MSL 官网：https://mslmc.cn](https://mslmc.cn)
+Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三方** Android 客户端，基于 Kotlin 与 Jetpack Compose 构建。
+它把「连接远程 Daemon 管理实例」和「直接在手机上开服」放进同一套实例列表与控制台，并针对触屏重新设计了操作流程。
 
-## ✨ 功能
+> 本应用与 MSLTeam 没有任何隶属或关联关系，使用前请阅读[免责声明](#免责声明)。
+> 包名 `com.wludy.rolithax.launcher`。更换包名与签名后，旧版需全新安装，旧数据通过应用内加密导出/导入迁移。
 
-- **多 Daemon 平级共存**：可保存多个守护进程连接（地址 + API Key），所有入口按**实例**寻址而不是「当前连接」，
-  不再区分主连接/次连接；API Key 使用 Android Keystore AES-GCM 加密落盘，不随备份恢复。
-- **实例列表**：展示所有实例的名称、运行状态、在线人数，支持下拉刷新与删除（二次确认 + 可选删除磁盘数据文件）。
-- **实例控制**：启动、停止、重启、强制结束、备份；未签署 EULA 时自动弹窗引导「同意并启动」。
-- **实时控制台**：深色终端风格，实时接收服务器日志并支持 **ANSI 原彩显示**；发送命令、自动滚动、清空日志、一键回到最新。
-- **新建实例**：分步向导（基本信息 / 服务端核心 / Java 环境 / 资源配置 / MCDR / 确认），支持 Java 版与基岩版、在线核心库、远程下载、本地上传、整合包。
-- **实例设置**：通用设置、文件管理（浏览/编辑/上传）、插件与模组管理、server.properties 编辑、Java 环境选择。
-- **本机开服**：不依赖 Daemon / Termux，直接在手机上跑 Minecraft Java 版服务端（进程内 JVM，可选 Shizuku 增强为真 java 子进程），实例可放在**公共目录**或应用私有目录，多 Java 运行时、常驻通知保活、控制台交互。详见[本机开服](#-本机开服在手机上开服)。
-- **用户中心**：查看/编辑当前用户信息、一键复制 API Key；管理员可进行用户管理（创建/编辑/删除）。
-- **主页仪表盘**：Daemon CPU / 内存负载监视（SignalR 实时推送）、系统信息、实例概览、开服/关服通知。
-- **软件自动更新**：启动检测 + 设置页手动检查；支持**稳定版 / 测试版（Beta）双更新渠道**；强制更新版本不可跳过。
-- **全应用运行日志**：设置页可查看 / 复制 / 导出 / 清空日志（1MB 轮转 + 敏感信息脱敏）；崩溃重启后自动弹窗提示提交 GitHub Issue。
-- **外观与关于**：主题颜色（动态取色 / 预设色）、「关于」页展示版本号、最近 Release 更新说明与贡献者，并可查看第三方组件许可与免责声明。
+本应用集成 MSLAPI 下载服务：**本服务由MSL开服器提供**。<a href="https://mslmc.cn"><img src="./app/src/main/res/drawable-nodpi/msl_logo.png" alt="MSL 开服器 Logo" width="32"></a> [mslmc.cn](https://mslmc.cn)
 
-## 📁 目录结构
+## 下载
 
-```
-app/src/main/java/com/mslx/console/
-├── RolithaxApplication.kt        # Application（日志初始化 + 依赖容器）
-├── data/                     # 数据层
-│   ├── model/                # 与 Daemon 交互的数据模型
-│   ├── remote/               # Retrofit REST + SignalR Hub 客户端
-│   ├── InstanceRepository.kt # 实例数据仓库（REST + SignalR 封装）
-│   ├── UpdateRepository.kt   # 自动更新（版本后缀解析 + 渠道过滤）
-│   ├── SettingsStore.kt      # DataStore 持久化（多 Daemon/主题/更新渠道）
-│   ├── CryptoManager.kt      # AndroidKeyStore AES-GCM 加密
-│   ├── AppLogger.kt          # 全应用日志（1MB 轮转 + 脱敏 + 崩溃标记）
-│   ├── localengine/          # 本机开服引擎（JRE 管理/双引擎/实例目录与文件）
-│   └── AppContainer.kt       # 手动依赖注入容器
-└── ui/                       # 界面层
-    ├── connect/              # 连接守护程序
-    ├── home/                 # 主页（负载仪表盘 + 多 Daemon 分页）
-    ├── instances/            # 实例列表
-    ├── console/              # 控制台（ANSI 原彩）
-    ├── create/               # 新建实例分步向导
-    ├── settings/             # 设置 / 外观 / 关于 / 合规文档 / 运行日志 / 实例设置 / 文件管理
-    ├── user/                 # 用户中心
-    ├── update/               # 更新弹窗 / 免责协议 / 崩溃报告
-    ├── navigation/           # 导航图
-    └── theme/                # 主题
-```
+在 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 或 [CNB 镜像](https://cnb.cool/WLudy/RolithaxLauncher/-/releases)（大陆网络更快）下载，每个版本提供两个包：
 
-另有随包合规文档：`app/src/main/assets/legal/THIRD_PARTY_NOTICES.md`（许可清单正本）、
-`app/src/jreRuntime/assets/jre/NOTICE-jre17.txt`（内嵌运行时来源与校验值）。
-
-## 🔧 技术栈
-
-| 依赖 | 版本 |
+| 包 | 说明 |
 | --- | --- |
-| Kotlin | 2.0.21 |
-| Android Gradle Plugin | 8.7.2 |
-| Gradle | 8.9 |
-| JDK | 17 |
-| compileSdk / targetSdk | 35 |
-| minSdk | 24 |
-| Jetpack Compose (BOM) | 2024.10.00 |
-| Navigation Compose | 2.8.2 |
-| Retrofit / OkHttp | 2.11.0 / 4.12.0 |
-| SignalR Java Client | 8.0.8 |
-| DataStore Preferences | 1.1.1 |
-| Coil Compose | 2.7.0 |
-| XZ / Commons-Compress（解包 JRE） | 1.10 / 1.27.1 |
-| Shizuku（本机开服增强） | 13.1.5 |
-| NDK（进程内 JVM 桥接） | 28.2.13676358 |
+| `app-release.apk` 完整版 | 内嵌 Java 17 运行时，本机开服可离线使用 |
+| `app-release-lite.apk` 精简版 | 体积更小，首次本机开服需联网下载约 36 MB 运行时 |
 
-## 🛠 编译
+两个包签名一致，可互相覆盖安装。应用内也可直接检查并安装更新，见[更新与版本](#更新与版本)。
 
-1. 用 **Android Studio**（Ladybug 或更新版本）打开本目录。
-2. 等待 Gradle 同步完成（首次会下载依赖，需要联网）。
-3. `Build → Build APK(s)`，或在连接设备后点击 `Run`。
+## 功能
 
-> 要求：JDK 17、Android SDK Platform 35。命令行构建：`./gradlew assembleDebug` / `./gradlew assembleRelease`。
+**连接与管理**
+- 同时保存多台 Daemon，所有入口按**实例**寻址，本机实例与各 Daemon 的实例合并在同一个列表里。
+- 扫描 Daemon 页面生成的二维码即可配对；配对依赖本项目的 [Daemon 插件](https://github.com/WLudy1012/Rolithax-MSLX-plugin)，也可以手动填写地址与 API Key。
+- 启动、停止、重启、强制结束、备份；未同意 EULA 时自动引导。实例可置顶，删除需二次确认。
 
-## 📱 使用
+**控制台**
+- SignalR 实时日志，增量解析 ANSI 颜色与样式；发送命令、自动滚动、一键回到最新。
+- 远程与本机实例共用同一套控制台界面。
 
-1. 在电脑上启动 **MSLX Daemon**，并在其 Web 面板/配置中找到 **API Key**。
-2. 手机与电脑连入**同一局域网**。
-3. 打开本 App，在「连接守护程序」页填写：
-   - **Daemon 地址**：电脑的局域网 IP，例如 `http://192.168.1.100:1027`
-     （Windows 可用 `ipconfig`、Linux/macOS 可用 `ip addr` 查询；Docker 部署填映射后的端口）。
-   - **API Key**：守护程序的 API Key。
-4. 点击「连接」进入实例列表；点任意实例进入控制台，即可查看日志、发送命令、启停实例。
+**创建与资源中心**
+- 创建向导覆盖基本信息、服务端核心、Java 环境、资源配置与确认，支持在线核心库、远程下载、本地上传和整合包。
+- 资源中心：浏览 Modrinth 的模组、插件、整合包与数据包，按目标实例的核心与游戏版本筛选；统一检查依赖与冲突后一次安装。
+- 目标是远程 Daemon 时，由 Daemon 所在机器直接下载安装，手机不做中转。
 
-## 📱 本机开服（在手机上开服）
+**本机开服**
+- 不依赖 Daemon、Termux 或 proot，在手机上直接运行 Minecraft Java 服务端，详见[本机开服](#本机开服)。
 
-新建实例时选「本机」目标，服务端就跑在手机自己的目录里，无需 Daemon、无需 Termux/proot。
-入口：**「设置 → 本机运行时与开服设置」**（Java 运行时 + 全局默认：内存 / JVM 参数 / GC / 保活）+ 每个实例自己的设置页
-（可选「跟随全局默认」或单独覆盖）。
+**设置与安全**
+- 文件管理、插件与模组管理、`server.properties` 编辑、加密备份与迁移。
+- 毛玻璃界面、动态取色与自定义背景；暗色主题；横屏与平板使用侧边导航。
+- 运行日志可查看、复制、导出，自动脱敏；崩溃后可一键提交 Issue。
 
-- **实例目录两种放法**（目录名跨两种根唯一，所以寻址不需要额外带位置）：
-  - **公共目录**（默认）：`/storage/emulated/0/MSLX/servers/<实例名>`，能用文件管理器直接放核心、
-    模组、备份，也能被其它工具读写；需要授予「所有文件访问」权限（Android 11+），未授权时
-    **不会阻断开服**，会自动改建到私有目录并提示。
-  - **应用私有目录**：`files/mslx/servers/<实例名>`，无需任何授权，但只能靠 App 内的文件管理页读写。
-  创建向导的确认页会显示真实落点；建好后在实例设置页可**复制路径**、公共目录实例还能「在文件管理器打开」。
-- **两种引擎**：
-  - **基线（进程内 JVM）**：NDK `dlopen libjvm.so` + `JNI_CreateJavaVM`，无需任何授权；
-    受 Android 限制，一个进程只能创建一个 JVM，停止后需重启 App 才能再起。
-  - **增强模式（Shizuku / ADB）**：以 shell 权限 exec 真正的 `java` 子进程，可多实例并发、
-    可原地重启、可跨 Java 版本。未授权时启动会自动回退到基线引擎。
-    公共目录实例在增强模式下会**直接以该目录为工作目录运行**，不再复制到 `/data/local/tmp` 再回同步，
-    启动更快、大存档更省空间；探测到该路径不可写时自动退回复制模式。
-- **Java 运行时**（设置页可装多个并逐实例选择）：
+## 快速开始
 
-  | 运行时 | 来源 | 分发方式 |
-  | --- | --- | --- |
-  | Java 17 | PojavLauncher `jre17-ec28559`（Android/bionic） | **内嵌在完整版 APK**，可离线安装 |
-  | Java 21 | FCL 下载站 `jre21-arm64-20260223`（Android/bionic） | 应用内下载，SHA-256 固定 |
-  | Java 25 | FCL 下载站 `jre25-arm64-20260223`（Android/bionic） | 应用内下载，SHA-256 固定 |
-  | Java 8 | ZalithLauncher 2 内置 `runtimes/jre-8`（OpenJDK 8u442，Android/bionic） | 应用内下载（类库 + 平台二进制双归档），SHA-256 固定 |
+**连接远程 Daemon**
 
-  下载源按「CNB 镜像 → GitHub Release → 上游直链」依次回退；Java 8 的类库以 pack200 压缩
-  （`.jar.pack`）分发，安装时由随 APK 的 `libunpack200.so` 在设备上还原为 `.jar`。
-  精简版 APK 不内嵌运行时，首次开服需联网下载约 36MB。
-- **版本匹配守卫**：1.16 及以下用 Java 8，1.17–1.20.4 用 Java 17，1.20.5+ 用 Java 21，26.x+ 用
-  Java 25；运行时低于核心要求时启动会被直接拦下并给出可执行的提示（而不是刷一堆看不懂的 JVM 报错）。
-- **保活**：前台服务 + 常驻通知，退到后台/划掉最近任务仍继续运行（通知栏可停）。
+1. 在电脑上启动 MSLX Daemon，准备好它的地址与 API Key。
+2. 打开 App，在「连接守护程序」页填写地址（例如 `https://192.168.1.100:1027`）和 API Key，点击连接。
+   安装了 Rolithax 插件的话，也可以直接扫描插件页面的二维码。
+3. 进入实例列表，点任意实例即可查看日志、发送命令、启停。
 
-开发者相关：`fetch-jre-assets.ps1` 拉内嵌的 jre17（`-Jre21` / `-Jre25` / `-Jre8` 分别取仅作
-Release 附件的 jre21、jre25、jre8 镜像归档）；
-`build-shim.ps1` 重编 `LD_PRELOAD` 垫片（关 Scudo 堆打标签，否则旧 OpenJDK 在 Android 12+ 必
-SIGABRT）；两者的细节注释在 `app/src/main/cpp/shim/mslxnotag.c` 与 `LocalJreManager.kt`。
+**直接在手机上开服**
 
-## ⚠️ 安全与注意事项
+1. 点底部 Dock 中央的「+」，目标选「本机」。
+2. 选择服务端核心与版本，完成向导；首次使用会按需安装 Java 运行时。
+3. 启动实例，在控制台里和平常一样操作。
 
-- **默认强制 HTTPS**：未带协议的地址自动补 `https://`，明文 `http://` 默认自动升级为 `https://`；
-  仅当你在连接页勾选「允许 HTTP」并确认警告后，才保留明文连接（仅限可信内网，明文传输 API Key 有被窃听/篡改风险）。
-- **自签证书**：App 对守护进程的 REST 与 SignalR（WebSocket）连接信任自签证书（仅用于连接你自己的守护进程）；
-  官方 MSLAPI / GitHub API 仍走系统信任链。若控制台报「WebSocket 协商失败」，请确认 Daemon 已启用 WebSocket，并检查 HTTPS/反向代理的 WS 升级配置。
-- **API Key 加密存储**：使用 Android Keystore AES-GCM 加密，备份规则排除密钥相关数据，避免恢复后密文无法解密。
-- **路径预设限制**：新建实例 / 整合包的「Daemon 绝对路径」提供常用路径预设，也可手动输入任意绝对路径；
-  留空时默认创建在 Daemon 数据目录的 `Server` 文件夹下。
-- **防火墙**：请确保守护程序所在主机的防火墙放行了对应端口（默认 1027）。
+## 本机开服
 
-## 🔄 更新与版本后缀约定
+实例目录有两种放法，目录名在两个位置之间全局唯一：
 
-版本号规则（1.3 起）：**正式版 `x.x`**（如 `1.3`）、**Beta 版 `x.x.x`**（如 `1.3.1`）。
+- **公共目录**（默认）：`/storage/emulated/0/MSLX/servers/<实例名>`，可用文件管理器直接放核心、模组和备份。需要 Android 11+ 的「所有文件访问」权限；未授权时不会阻断开服，会自动改建到私有目录并提示。
+- **应用私有目录**：`files/mslx/servers/<实例名>`，无需授权，只能通过 App 内的文件管理读写。
 
-- **稳定版**：tag 无后缀（如 `v1.3`）。
-- **测试版**：tag 带 `-Beta` 后缀（如 `v1.3.1-Beta`）。
-- **强制更新版**：tag 带 `-Force` 后缀，客户端检测到后弹窗禁跳过。
-- 设置页「更新渠道」可选 **稳定版**（默认）/ **测试版**：
-  - 稳定渠道只接收正式版；测试渠道同时接收稳定版 + Beta 版。
-- **所有渠道均应用内下载并安装**（下载进度条 → 系统安装器），不再跳转浏览器。
-- **CNB 镜像（cnb.cool）为首选更新源**：应用优先从 `https://cnb.cool/WLudy/RolithaxLauncher` 下载更新 APK，
-  失败时自动回退 GitHub Releases（大陆网络环境下载更快、更稳）。
-- Release 说明规则：正式版包含自上一正式版以来的全部更新（含中间 Beta）；Beta 版包含自上一 Beta 以来的全部更新。
+两种引擎：
 
-## 📜 开源协议
+| 引擎 | 原理 | 限制 |
+| --- | --- | --- |
+| 基线（进程内 JVM） | NDK `dlopen libjvm.so` 并创建 JVM，无需任何授权 | 一个进程只能创建一个 JVM，停止后需完全退出 App 才能再启动 |
+| 增强（Shizuku） | 以 shell 权限启动真正的 `java` 子进程 | 需要 Shizuku 授权；支持多实例并发、原地重启与跨 Java 版本，未授权时自动回退到基线 |
 
-本项目基于 [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) 开源，
-与上游 [MSLX](https://github.com/MSLTeam/MSLX) 保持一致的 AGPL-3.0 协议。
+Java 运行时可在设置里安装多个并按实例选择，启动前会做版本守卫（运行时低于核心要求时直接拦下并给出建议）：
 
-Copyright (C) 2026 WLudy1012
+| 游戏版本 | 建议运行时 |
+| --- | --- |
+| 1.16 及以下 | Java 8 |
+| 1.17 – 1.20.4 | Java 17（完整版内嵌） |
+| 1.20.5+ | Java 21 |
+| 26.x+ | Java 25 |
 
-第三方组件、内嵌 Java 运行时的来源与许可清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-（正本随 APK 打包，应用内「设置 → 关于 → 合规与许可」可离线查看）。
+所有运行时均校验 SHA-256，下载源按「CNB 镜像 → GitHub Release → 上游」依次回退，缺少可信摘要时失败关闭。运行中由前台服务与常驻通知保活，通知栏可直接停止。
+
+## 安全
+
+- 默认强制 HTTPS：未带协议的地址自动补 `https://`，明文 `http://` 默认升级为 HTTPS；只有在连接页明确允许并确认风险后才保留明文，且仅限可信内网。
+- 自签证书只对你自己配置的 Daemon 生效；MSLAPI、GitHub 等公共服务仍使用系统信任链。
+- API Key 使用 Android Keystore AES-GCM 加密存储，不随系统备份；应用内导出/导入使用独立的口令加密归档，不导出 Keystore 密钥。
+- 下载一律流式处理并校验摘要，解压限制路径、单文件大小、总大小与条目数；运行中的实例禁止删除或迁移。
+- 日志只记录脱敏后的信息，不含地址、路径、Token 与 API Key。
+
+## 更新与版本
+
+- **稳定版**：tag 无后缀（如 `v1.8.0`）。**测试版**：tag 带 `-Beta`。**强制更新**：tag 带 `-Force`，客户端不可跳过。
+- 设置页的「更新渠道」默认为稳定版；测试渠道同时接收稳定版与 Beta。更新在应用内下载并校验后交给系统安装器。
+- 更新优先从 CNB 镜像下载，失败时回退 GitHub Releases。
+- 版本按数字逐段比较，正式版的版本号必须高于已发布的同号 Beta，否则 Beta 用户不会收到它。
+
+## 构建
+
+要求：JDK 17+、Android SDK Platform 35、NDK 28.2.13676358。
+
+```bash
+./gradlew :app:compileDebugKotlin     # 编译检查
+./gradlew :app:testDebugUnitTest      # 单元测试
+./gradlew assembleDebug               # Debug APK
+./gradlew assembleRelease             # 签名 Release，需要 keystore.properties
+./gradlew assembleRelease -PwithoutJre=true   # 精简版，不内嵌 JRE
+```
+
+首次同步需要联网。国内网络可设置 `MSLX_MAVEN_GOOGLE_MIRROR` 与 `MSLX_MAVEN_CENTRAL_MIRROR` 使用镜像仓库。
+内嵌 JRE 用 `fetch-jre-assets.ps1` 获取，`LD_PRELOAD` 垫片用 `build-shim.ps1` 重编。
+
+## 项目结构
+
+```text
+app/src/main/java/com/wludy/rolithax/launcher/
+├── RolithaxApplication.kt   Application 与依赖容器
+├── MainActivity.kt          单 Activity、免责门控、更新与崩溃入口
+├── localengine/             NativeVm 与 JNI 声明
+├── data/
+│   ├── remote/              Retrofit、SignalR、网络客户端
+│   ├── localengine/         本机实例、JRE、引擎、保活
+│   ├── resources/           资源 Provider、Room、Paging、安装
+│   └── ...                  仓库、设置、加密、备份、日志
+└── ui/                      home / instances / console / create / servers / settings / ...
+app/src/main/cpp/            进程内 JVM 的 Native 桥接
+```
+
+架构、接口契约、安全约束与发布流程见 [`develop/agent/`](develop/agent/README.md)。
+
+## 相关仓库
+
+- [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)：Daemon 插件，提供扫码配对、实例图标与资源远端直装。
+- [RolithaxLauncher-website](https://github.com/WLudy1012/RolithaxLauncher-website)：项目官网与下载页。
+
+## 反馈
+
+在 [Issues](https://github.com/WLudy1012/RolithaxLauncher/issues) 提交问题，请附上版本号与脱敏后的日志（设置 → 运行日志）。崩溃后应用会提示一键提交。
+
+## 开源协议
+
+基于 [GNU AGPL-3.0](LICENSE) 开源，与上游 [MSLX](https://github.com/MSLTeam/MSLX) 一致。Copyright (C) 2026 WLudy1012。
+第三方组件与内嵌运行时的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，应用内「设置 → 关于 → 合规与许可」可离线查看。
 
 ## 免责声明
 
-本应用是**独立第三方应用**，与 MSLTeam 不存在任何责任、关联、代理或隶属关系；可管理你自己的
-MSLX 守护程序，也可在手机本机开服。使用本应用管理服务器实例可能涉及数据修改、文件读写、
-进程启停等操作，公共目录授权与 Shizuku（shell 级）授权均属高权限，由此产生的一切后果由使用者自行承担。
-完整声明见 [DISCLAIMER.txt](DISCLAIMER.txt)（与首次开屏的免责协议同一份文本），首次启动时需阅读并同意。
-
-## 🤖 持续集成（GitHub Actions / CNB）
-
-- **android.yml**：`main` 分支 push / PR 时自动构建 debug 与 release APK，并上传 debug APK 工件；main 构建通过后先合并 CNB main 再普通推送源码，不覆盖 CNB 独立提交。
-- **CNB 云构建（.cnb.yml）**：镜像仓库 https://cnb.cool/WLudy/RolithaxLauncher 上，main push 自动构建 debug APK；
-  `v*` tag 推送时从密钥仓库导入签名配置、构建 release APK 并发布 CNB Release（应用首选更新源）。
-- **release.yml**：推送 `v*` 标签时，使用仓库 Secrets 恢复签名密钥，构建签名 release APK 并自动附加到对应 Release；完成后同步 main 源码和 tag 到 CNB。
-- **auto-issue-review.yml**：新 issue 打开时用 AI 自动打标签并评论。直接调用 GitHub Copilot CLI
-  （`copilot -p ... -s --no-ask-user`，官方推荐模式，提示词模板在 `Prompts/issue-review-instructions.txt`；
-  此前用的 `actions/ai-inference@v1` 内部仍走已退役的 GitHub Models 端点，2026-07-30 起必然失败）。
-  评审前会实际检索仓库代码（只读授权 + 只读 git 历史查询），输出「结论/置信度/代码定位/原因假设」
-  的结构化分析。认证走内置 GITHUB_TOKEN + `copilot-requests: write`（无需 PAT，计费到账号 Copilot 订阅）；
-  账号无可用 Copilot 订阅/额度或 CLI 故障时该步骤静默降级（仅打 warning，不影响 issue 流程）。
-
-### release.yml 所需 Secrets
-
-在仓库 `Settings → Secrets and variables → Actions` 配置：
-
-| Secret | 说明 |
-| --- | --- |
-| `KEYSTORE_BASE64` | 对 `.jks` 密钥库执行 `base64` 编码后的内容 |
-| `KEYSTORE_PASSWORD` | 密钥库密码 |
-| `KEY_PASSWORD` | 密钥密码 |
-
-签名 JKS 必须使用 `wludy` 别名。Android 包名和签名已变更，GitHub Actions Secrets 与 CNB 密钥仓库都需要更新为 `keystore/rolithax-release.jks` 对应的新密钥与密码；旧版签名密钥不能用于 Rolithax 发行包。
-
-> Windows 生成 `KEYSTORE_BASE64`：
-> `[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`
-
-### CNB 密钥仓库
-
-tag 流水线通过 `pipeline imports` 从私有密钥仓库 `https://cnb.cool/WLudy/Rolithax-secrets` 导入 `main` 分支的 `keystore.yml`，文件需提供以下变量：
-
-| 变量 | 内容 |
-| --- | --- |
-| `KEYSTORE_BASE64` | `rolithax-release.jks` 的单行 Base64 内容 |
-| `KEYSTORE_PASSWORD` | 密钥库密码 |
-| `KEY_PASSWORD` | `wludy` 别名的密钥密码 |
-
-`keystore.yml` 还需通过 `allow_slugs` 声明允许引用的仓库（包含 `WLudy/RolithaxLauncher`），否则导入会在流水线初始化阶段失败。变量未导入时，签名阶段会给出明确错误并拒绝发布未签名包。
+本应用是**独立第三方应用**，与 MSLTeam 不存在任何责任、关联、代理或隶属关系。管理服务器实例可能涉及数据修改、文件读写与进程启停，公共目录授权与 Shizuku（shell 级）授权均属高权限，由此产生的一切后果由使用者自行承担。完整声明见 [DISCLAIMER.txt](DISCLAIMER.txt)，首次启动时需阅读并同意。
