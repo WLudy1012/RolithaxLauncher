@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./app/src/main/res/drawable-nodpi/rolithax_logo.png" alt="Rolithax Launcher" width="96">
+<img src="./app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" alt="Rolithax Launcher" width="96">
 
 # Rolithax Launcher
 
