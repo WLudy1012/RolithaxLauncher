@@ -219,7 +219,8 @@ class ConnectViewModel(
                 ?.let { "android-$it" }
             // 兑换用未认证客户端：redeem 是插件唯一的匿名端点，内部做签名/时效/一次性/IP 限速校验
             val api = ApiClient.build(url, "")
-            runCatching { api.pairRedeem(PairRedeemRequest(contents, deviceName, fingerprint)) }
+            val previousApiKey = findPreviousApiKey(url)
+            runCatching { api.pairRedeem(PairRedeemRequest(contents, deviceName, fingerprint, previousApiKey)) }
                 .onSuccess { resp ->
                     val data = resp.data
                     if (resp.code != 200 || data?.apiKey.isNullOrBlank()) {
@@ -293,6 +294,16 @@ class ConnectViewModel(
                     _state.update { it.copy(generating = false, error = "生成配对码失败：$detail") }
                 }
         }
+    }
+
+    /** 本机已保存的同一 Daemon 的 API Key（优先当前正在编辑的那台），用于向服务端证明是同一台设备。 */
+    private suspend fun findPreviousApiKey(url: String): String? {
+        val settings = runCatching { store.settingsFlow.first() }.getOrNull() ?: return null
+        val target = normalizeBaseUrl(url, allowHttp = true)
+        val matches = settings.daemons.filter {
+            it.apiKey.isNotBlank() && normalizeBaseUrl(it.baseUrl, allowHttp = true).equals(target, ignoreCase = true)
+        }
+        return (matches.firstOrNull { it.id == _state.value.editingId } ?: matches.firstOrNull())?.apiKey
     }
 
     /** 关闭配对二维码弹窗。 */

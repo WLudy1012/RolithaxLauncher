@@ -34,6 +34,8 @@ data class PairRedeemRequest(
     @SerializedName("payload") val payload: String,
     @SerializedName("deviceName") val deviceName: String? = null,
     @SerializedName("deviceFingerprint") val deviceFingerprint: String? = null,
+    /** 本机已保存的同一 Daemon 的旧 API Key；服务端凭它确认是同一台设备后才替换旧凭据，仅凭指纹不会替换。 */
+    @SerializedName("previousApiKey") val previousApiKey: String? = null,
 )
 
 /** POST /api/plugin/mslx-plugin-rolithax/pair/redeem 的 data 字段（完整 API Key 仅此一次返回）。 */
