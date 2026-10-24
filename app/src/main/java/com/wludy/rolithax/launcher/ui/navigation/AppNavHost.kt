@@ -3,6 +3,14 @@ package com.wludy.rolithax.launcher.ui.navigation
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -168,6 +176,9 @@ fun AppNavHost(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val useNavigationRail = maxWidth >= 600.dp && maxHeight >= 360.dp
         val showRailLabels = maxHeight >= 480.dp
+        // 键盘弹出时收起底部 Dock：否则它会被键盘盖住，或在旧系统上被顶起挤占输入区
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        val showBottomDock = !useNavigationRail && currentTopPage != null && !imeVisible
 
         Row(Modifier.fillMaxSize()) {
             if (useNavigationRail) {
@@ -181,11 +192,20 @@ fun AppNavHost(
                 }
             }
 
-            Column(Modifier.weight(1f).fillMaxHeight()) {
+            // 横屏时系统导航栏可能在左/右侧：内容列按水平方向避让，避免页面右侧被系统栏盖住
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+            ) {
                 NavHost(
                     navController = navController,
                     startDestination = Routes.SPLASH,
-                    modifier = Modifier.weight(1f),
+                    // Dock 已自行避让导航栏；页面内的 navigationBarsPadding 不应再叠加一次
+                    modifier = Modifier.weight(1f).then(
+                        if (showBottomDock) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier,
+                    ),
                     // 页面切换瞬时完成（不用淡入淡出）：交叉淡出在部分设备上会把目标页停留在透明态，
                     // 导致整页空白；导航栏自身的选中动画保留在导航组件中。
                     enterTransition = { EnterTransition.None },
@@ -510,7 +530,7 @@ fun AppNavHost(
             }
         }
 
-                if (!useNavigationRail) {
+                if (showBottomDock) {
                     currentTopPage?.let { topPage ->
                         MainBottomNav(
                             current = topPage,
