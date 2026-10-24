@@ -1,9 +1,18 @@
 name: Android 发布
 
+# 两种触发方式：
+#   1. release* 分支流程（release-branch.yml）验证并合并 main 后通过 workflow_call 调用；
+#   2. 手动推送 v* tag（兜底/补发），行为与之前一致。
 on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        description: 要发布的 tag（必须已存在）
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,85 +22,24 @@ jobs:
     name: 构建并发布签名 APK
     runs-on: ubuntu-latest
     env:
-      # ubuntu runner 自带 SDK 的固定路径；缓存 NDK 等组件时需要以 env 形式引用
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
       MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
+      # workflow_call 下 github.ref_name 是调用方的分支名，必须显式使用传入的 tag
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           # 完整克隆以获取历史提交与 tag
           fetch-depth: 0
           # 必须显式取 tag：否则 git tag --list 为空 → 找不到"上一版本"，
           # release notes 会退化成"把以往所有提交都列出来"
           fetch-tags: true
 
-      - name: 配置 JDK 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      # 只缓存 NDK（约 1GB）；runner 预装的 platform/build-tools 权限不适合通过 tar 恢复。
-      # 缓存 miss 时 sdkmanager 会安装 NDK，job 结束后再由此 step 回写缓存。
-      # 注意：Gradle 依赖缓存（~/.gradle）由下面的 gradle/actions/setup-gradle 负责，
-      # 这里不要重复缓存 ~/.gradle，避免两套缓存还原到同一目录互相覆盖。
-      - name: 缓存 Android NDK
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.ANDROID_SDK_ROOT }}/ndk/28.2.13676358
-          key: android-ndk-28.2.13676358-${{ runner.os }}-${{ runner.arch }}
-          restore-keys: |
-            android-ndk-28.2.13676358-${{ runner.os }}-
-
-      # 不用 android-actions/setup-android@v3：它在末尾会执行 `sdkmanager tools`，而 Google
-      # 已把 `tools` 包从仓库下架（Warning: Failed to find package 'tools' → exit 1），
-      # runner 镜像换成 cmdline-tools 16.0 后这一步必然失败（v1.6.6-Beta 起 Release 全挂）。
-      # ubuntu 运行器自带 Android SDK（ANDROID_HOME）且许可已在镜像内接受，AGP 会按需补齐
-      # 缺失的 platform / build-tools，所以下面只做容错预热，任何失败都不阻断发布。
-      - name: 配置 Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          SDKMAN=""
-          for c in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
-            if [ -x "$c" ]; then SDKMAN="$c"; break; fi
-          done
-          if [ -z "$SDKMAN" ]; then
-            echo "::warning::未找到 sdkmanager，直接使用镜像预装 SDK"
-            exit 0
-          fi
-          yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
-          "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" platform-tools \
-            || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
-
-      - name: 配置 Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      # 依赖缓存健康检查（非阻断）：缓存完整时依赖解析可零网络通过；
-      # 首次发布或依赖有更新时失败，仅提示正式构建会联网补齐。
-      - name: 验证依赖缓存（离线试运行）
-        run: |
-          chmod +x gradlew
-          if ./gradlew :app:dependencies --offline -q > /dev/null 2>&1; then
-            echo "依赖缓存完整：offline 解析通过（install 阶段可零网络完成）"
-          else
-            echo "::warning::offline 解析未完全通过（首次构建或依赖已更新），正式构建将联网补齐"
-          fi
-
-      # 本机开服把 Android JRE 内嵌进 APK：仓库内归档必须存在且哈希正确，
-      # 否则发布出去的包会退化成"首次开服需联网下载运行时"。
-      - name: 验证内嵌 JRE 运行时
-        run: |
-          set -e
-          JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-          SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
-          if [ ! -f "$JRE" ]; then
-            echo "::error::缺少内嵌 JRE 归档 $JRE（本机开服的运行时）"
-            exit 1
-          fi
-          echo "$SHA  $JRE" | sha256sum -c -
-          ls -lh "$JRE"
+      - name: 准备 Android 构建环境
+        uses: ./.github/actions/setup-android
 
       # Java 21/25 运行时不入库、不进 APK，只在发版时从上游
       # 镜像尽力获取。失败只告警，并由后续步骤动态排除缺失附件。
@@ -188,7 +136,7 @@ jobs:
       - name: 生成发布说明
         run: |
           set -e
-          CUR_TAG="${GITHUB_REF_NAME:-$(git describe --tags --exact-match)}"
+          CUR_TAG="$RELEASE_TAG"
           # 双保险：显式同步远端 tag（checkout 已带 fetch-tags，这里再兜一次）
           git fetch --tags --force --quiet || true
           echo "当前 tag: $CUR_TAG；可见 v* tag 数量: $(git tag --list 'v*' | wc -l)"
@@ -266,6 +214,7 @@ jobs:
       - name: 上传 APK 到 Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: ${{ env.RELEASE_ASSETS }}
           body_path: release_notes.md
 
@@ -279,10 +228,12 @@ jobs:
             echo "::warning::未配置 CNB_TOKEN，跳过 CNB 源码和 tag 同步；GitHub Release 已完成。"
             exit 0
           fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/RolithaxLauncher.git"
           git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
           git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
           git switch --create cnb-main-sync refs/remotes/origin/main
           git merge --no-edit --no-ff refs/remotes/cnb/main
           git push cnb "HEAD:refs/heads/main"
-          git push cnb "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          git push cnb "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"

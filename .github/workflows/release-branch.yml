@@ -1,0 +1,139 @@
+name: Release 分支发布
+
+# 推送 release* 分支即发版：校验 → 构建验证 → 合并进 main → 打 tag → 构建并发布签名 APK。
+#
+# 分支名决定版本：去掉 release 前缀和分隔符后加 v 即为 tag。
+#   release-1.8.1        → v1.8.1         正式版
+#   release/1.8.1-Beta   → v1.8.1-Beta    测试版
+#   release_1.8.1-Force  → v1.8.1-Force   强制更新
+# app/build.gradle.kts 的 versionName 必须与分支版本一致，versionCode 必须大于 main 上的值。
+on:
+  push:
+    branches:
+      - "release*"
+      - "release/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-branch
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: 校验版本
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.parse.outputs.tag }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 解析并校验 tag
+        id: parse
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          NAME=$(echo "$BRANCH" | sed -E 's#^release[/_-]?##; s#^[vV]##')
+          TAG="v${NAME}"
+          if ! echo "$TAG" | grep -qE '^v[0-9]+(\.[0-9]+){1,3}(-Beta|-Force)?$'; then
+            echo "::error::分支名 $BRANCH 无法解析为版本。示例：release-1.8.1、release/1.8.1-Beta、release-1.8.1-Force"
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then
+            echo "::error::tag $TAG 已存在，不能重复发布；请提升版本号后用新的 release 分支。"
+            exit 1
+          fi
+          BASE="${TAG#v}"; BASE="${BASE%-Beta}"; BASE="${BASE%-Force}"
+          NAME_IN_GRADLE=$(grep -E 'versionName *=' app/build.gradle.kts | grep -oE '\?: *"[^"]+"' | grep -oE '"[^"]+"' | tr -d '"' | head -1)
+          if [ "$NAME_IN_GRADLE" != "$BASE" ]; then
+            echo "::error::app/build.gradle.kts 的 versionName 是 ${NAME_IN_GRADLE:-<未找到>}，与分支版本 $BASE 不一致。"
+            exit 1
+          fi
+          CODE_NEW=$(grep -oE 'versionCode *= *[0-9]+' app/build.gradle.kts | grep -oE '[0-9]+$')
+          CODE_MAIN=$(git show origin/main:app/build.gradle.kts | grep -oE 'versionCode *= *[0-9]+' | grep -oE '[0-9]+$')
+          if [ "${CODE_NEW:-0}" -le "${CODE_MAIN:-0}" ]; then
+            echo "::error::versionCode ($CODE_NEW) 必须大于 main 上的 $CODE_MAIN。"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "将发布 $TAG（versionName=$BASE，versionCode $CODE_MAIN → $CODE_NEW）"
+
+  # job 名必须与 android.yml 一致：main 保护规则要求的状态检查就是「构建验证」
+  build:
+    name: 构建验证
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
+      MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: 准备 Android 构建环境
+        uses: ./.github/actions/setup-android
+
+      - name: 单元测试
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: 构建 Debug 与 Release APK
+        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+
+  merge:
+    name: 合并到 main 并打 tag
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      tag: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: 创建并合并 Pull Request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PR=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$PR" ]; then
+            PR=$(gh pr create --base main --head "$BRANCH" \
+              --title "release: 发布 ${TAG}" \
+              --body "由 release 分支流程自动创建：构建验证通过后合并并发布 ${TAG}。" | grep -oE '[0-9]+$')
+          fi
+          echo "PR #$PR"
+          # 刚创建的 PR 可合并状态是异步计算的，重试等待
+          for i in 1 2 3 4 5 6; do
+            if gh pr merge "$PR" --merge --subject "release: 发布 ${TAG}"; then
+              MERGED=1; break
+            fi
+            echo "合并未成功，10 秒后重试（$i/6）"; sleep 10
+          done
+          [ "${MERGED:-0}" = 1 ] || { echo "::error::无法合并 PR #$PR，请检查冲突或 main 保护规则。"; exit 1; }
+          SHA=$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid')
+          [ -n "$SHA" ] || { echo "::error::取不到合并提交"; exit 1; }
+          # 用 API 创建 tag（指向 main 上的合并提交），随后由 release 作业通过 workflow_call 发布
+          gh api "repos/${GH_REPO}/git/refs" -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" > /dev/null
+          echo "已在 ${SHA} 创建 ${TAG}"
+          gh api -X DELETE "repos/${GH_REPO}/git/refs/heads/${BRANCH}" > /dev/null || echo "::warning::未能删除分支 ${BRANCH}"
+
+  release:
+    name: 发布
+    needs: merge
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.merge.outputs.tag }}
+    secrets: inherit
+    permissions:
+      contents: write
