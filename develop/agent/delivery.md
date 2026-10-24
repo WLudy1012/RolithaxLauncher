@@ -33,9 +33,30 @@ git diff --check
 
 提交说明应能直接作为 Release notes 的输入，不能只写一句模糊标题。涉及强制更新时，必须在提交正文和发布说明中明确写出“强制更新”。
 
+## 分支模型
+
+- `main` 受 GitHub 分支保护：禁止直接推送、强制推送和删除，只能通过 Pull Request 合并，且必须通过状态检查「构建验证」。
+- 日常开发和提交推到 `dev` 分支；`dev` 推送会触发 `android.yml` 做单元测试和 Debug/Release 构建验证。需要合入 `main` 时从 `dev` 发 Pull Request。
+- 发版只通过推送 `release*` 分支完成（见下文「release 分支发布」）。**推送 `release*` 分支等同于发版**，用户未明确要求时不得推送。
+- 不要把 `main` 当开发分支；不要在本地直接向 `origin/main` 推送。
+- 历史遗留：仓库曾有名为 `dev` 的 tag 和 GitHub Release（已下线的 Actions 更新渠道），与 `dev` 分支同名；命令行操作 `dev` 分支时使用 `refs/heads/dev` 全名。
+
+## release 分支发布
+
+`.github/workflows/release-branch.yml` 在推送 `release*`（含 `release/**`）分支时依次执行：
+
+1. **校验版本**：分支名去掉 `release` 前缀和分隔符后加 `v` 即为 tag（`release-1.8.1` → `v1.8.1`，`release/1.8.1-Beta` → `v1.8.1-Beta`，`release_1.8.1-Force` → `v1.8.1-Force`）。tag 不得已存在；`app/build.gradle.kts` 的 `versionName` 必须等于分支版本；`versionCode` 必须大于 `main` 上的值。
+2. **构建验证**：单元测试和 Debug/Release 构建，job 名与 `android.yml` 相同，满足 `main` 保护要求的状态检查。
+3. **合并到 main 并打 tag**：自动创建 Pull Request 并以 merge commit 合并，在合并提交上创建 tag，删除 release 分支。
+4. **发布**：通过 `workflow_call` 调用 `release.yml`，构建签名完整版和精简版 APK、生成 Release notes 并发布，随后同步 `main` 与 tag 到 CNB。
+
+发版步骤：在 `dev` 上提升 `versionName`/`versionCode` 并合并通过验证，然后 `git push origin dev:release-<版本>`。手动推送 `v*` tag 仍会触发 `release.yml`，仅作补发兜底。
+
+依赖的仓库设置：`main` 保护规则（Pull Request + 状态检查「构建验证」+ 禁止强推与删除）；Actions 权限开启「Allow GitHub Actions to create and approve pull requests」。`github.token` 创建的 tag 不会触发其他工作流，所以发布必须走 `workflow_call`。
+
 ## 分支、Tag 与远端
 
-- 用户未明确要求发版时，只处理代码分支，不自行创建 `v*` Tag 或 Release。
+- 用户未明确要求发版时，只处理 `dev` 分支，不自行创建 `v*` Tag、`release*` 分支或 Release。
 - 用户明确指定 Tag 时，先确认目标提交和 Tag 是否已经存在，再按项目版本后缀规则创建。
 - 用户指定只推送某个远端时，不把 Tag 或源码额外推到其他远端。
 - 推送完成后分别核对 GitHub 和 CNB 的目标分支或 Tag；远端 ref 对齐不等于 Actions/CNB 构建成功，CI 状态要单独确认。
@@ -43,8 +64,8 @@ git diff --check
 
 ## GitHub Actions 与 CNB
 
-- Android 工作流负责 Pull Request、分支构建、Debug/Release 校验、工件上传以及 main 源码镜像同步。
-- Release 工作流只由 `v*` Tag 触发，生成签名发布物、SHA-256 校验信息、Release notes，并按约定同步 CNB。
+- `android.yml` 负责 `dev` 推送和面向 `main` 的 Pull Request：单元测试、Debug/Release 构建验证与工件上传，不使用签名密钥；`cnb-sync.yml` 在 `main` 更新后把源码同步到 CNB；`release-branch.yml` 负责 `release*` 分支发版；公共的环境准备在 `.github/actions/setup-android`。
+- `release.yml` 由 `release-branch.yml` 通过 `workflow_call` 调用，或由手动推送的 `v*` Tag 触发，生成签名发布物、SHA-256 校验信息、Release notes，并按约定同步 CNB。
 - CNB 工作流负责 main 构建和 Tag 发布；阶段名称、任务名称和关键输出以中文为主，保留 Gradle、Android、Release、CNB 等技术名词。
 - 签名和镜像认证只通过 CI 的受保护配置注入，具体凭据不进入仓库、脚本、文档或日志。
 - CNB tag 构建通过 `pipeline imports` 从私有密钥仓库 `WLudy/Rolithax-secrets` 的 `main/keystore.yml` 读取 `KEYSTORE_BASE64`、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；该文件须用 `allow_slugs` 授权 `WLudy/RolithaxLauncher`，否则流水线初始化会因资源权限失败。

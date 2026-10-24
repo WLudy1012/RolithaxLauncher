@@ -1,0 +1,57 @@
+name: 准备 Android 构建环境
+description: JDK 17、NDK 缓存、SDK 预热、Gradle 缓存与内嵌 JRE 校验，供 CI 与发布工作流共用
+
+runs:
+  using: composite
+  steps:
+    - name: 配置 JDK 17
+      uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: "17"
+
+    # 只缓存 NDK（约 1GB）；runner 预装的 platform/build-tools 权限不适合通过 tar 恢复。
+    # Gradle 依赖缓存由 setup-gradle 负责，这里不要重复缓存 ~/.gradle，避免两套缓存互相覆盖。
+    - name: 缓存 Android NDK
+      uses: actions/cache@v6
+      with:
+        path: /usr/local/lib/android/sdk/ndk/28.2.13676358
+        key: android-ndk-28.2.13676358-${{ runner.os }}-${{ runner.arch }}
+        restore-keys: |
+          android-ndk-28.2.13676358-${{ runner.os }}-
+
+    # 不用 android-actions/setup-android：它末尾会执行已下架的 `sdkmanager tools` 而失败。
+    # runner 自带 SDK 且许可已接受，AGP 会按需补齐缺失组件，这里只做容错预热。
+    - name: 配置 Android SDK
+      shell: bash
+      run: |
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        SDKMAN=""
+        for c in "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager; do
+          if [ -x "$c" ]; then SDKMAN="$c"; break; fi
+        done
+        if [ -z "$SDKMAN" ]; then
+          echo "::warning::未找到 sdkmanager，直接使用镜像预装 SDK"
+          exit 0
+        fi
+        yes | "$SDKMAN" --licenses > /dev/null 2>&1 || true
+        "$SDKMAN" "platforms;android-35" "build-tools;35.0.0" platform-tools \
+          || echo "::warning::sdkmanager 预装未完全成功，交由 AGP 自动下载"
+
+    - name: 配置 Gradle
+      uses: gradle/actions/setup-gradle@v6
+
+    # 本机开服把 Android JRE 内嵌进 APK：归档必须存在且哈希正确，
+    # 否则发出去的包会退化成"首次开服需联网下载运行时"。
+    - name: 验证内嵌 JRE 运行时
+      shell: bash
+      run: |
+        set -e
+        JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
+        SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
+        if [ ! -f "$JRE" ]; then
+          echo "::error::缺少内嵌 JRE 归档 $JRE（本机开服的运行时）"
+          exit 1
+        fi
+        echo "$SHA  $JRE" | sha256sum -c -
+        chmod +x gradlew

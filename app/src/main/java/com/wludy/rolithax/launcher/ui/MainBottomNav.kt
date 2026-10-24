@@ -12,7 +12,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,7 +37,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
@@ -67,13 +74,18 @@ fun MainBottomNav(
     val shape = RoundedCornerShape(28.dp)
     val style = rememberGlassStyle(alpha = maxOf(LocalGlassAlpha.current, 0.72f))
     NavigationBar(
+        // 系统栏避让放在玻璃面板外侧：面板整体悬浮在手势条/三键导航之上，不被系统栏盖住
         modifier = Modifier
+            .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .glass(style, shape),
         containerColor = Color.Transparent,
         contentColor = MaterialTheme.colorScheme.onSurface,
         tonalElevation = 0.dp,
-        windowInsets = NavigationBarDefaults.windowInsets,
+        windowInsets = WindowInsets(0, 0, 0, 0),
     ) {
         TopPage.entries.forEach { page ->
             DockItem(
@@ -168,7 +180,7 @@ private fun RowScope.DockItem(
 
     Box(
         modifier = Modifier
-            .height(68.dp)
+            .heightIn(min = 68.dp)
             .weight(1f)
             // indication=null：不绘制默认 ripple 矩形框，按压反馈走图标缩放/变淡
             .selectable(
@@ -185,7 +197,7 @@ private fun RowScope.DockItem(
                 // 图标背后的圆角指示条
                 Box(
                     modifier = Modifier
-                        .size(if (page == TopPage.NEW_INSTANCE) 46.dp else 56.dp)
+                        .size(if (page == TopPage.NEW_INSTANCE) 46.dp else 48.dp)
                         .graphicsLayer { alpha = indicatorAlpha }
                         .clip(RoundedCornerShape(15.dp))
                         .background(
