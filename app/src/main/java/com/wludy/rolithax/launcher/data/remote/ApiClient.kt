@@ -23,7 +23,7 @@ object ApiClient {
      * 客户端 User-Agent：直接读 BuildConfig.VERSION_NAME，
      * 发版时不再需要手工同步版本号。
      */
-    private val USER_AGENT = "Rolithax-Launcher/${BuildConfig.VERSION_NAME}"
+    internal val USER_AGENT = "Rolithax-Launcher/${BuildConfig.VERSION_NAME}"
 
     fun build(baseUrl: String, apiKey: String): DaemonApi {
         return buildDaemonConnection(baseUrl, apiKey).api
@@ -320,6 +320,11 @@ object ApiClient {
 
     private fun ensureTrailingSlash(url: String): String =
         if (url.endsWith("/")) url else "$url/"
+
+    /** 共用的 Gson 实例（Retrofit 转换器之外的手动解析，如 CNB 标签页内嵌数据）。 */
+    internal fun gson(): com.google.gson.Gson = sharedGson
+
+    private val sharedGson by lazy { com.google.gson.Gson() }
 }
 
 private object MslApiRateLimiter {
