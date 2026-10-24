@@ -38,17 +38,6 @@ data class UpdateUiState(
 
 class UpdateViewModel(application: Application) : AndroidViewModel(application) {
 
-    /** 更新 APK 下载允许的域名（CNB 镜像 + GitHub 本体与下载 CDN），防止任意主机/任意 scheme 拉起安装。 */
-    private companion object {
-        val ALLOWED_DOWNLOAD_HOSTS = setOf(
-            "cnb.cool",
-            "github.com",
-            "www.github.com",
-            "objects.githubusercontent.com",
-            "release-assets.githubusercontent.com",
-        )
-    }
-
     private val repository = getApplication<RolithaxApplication>().container.updateRepository
     private val store = getApplication<RolithaxApplication>().container.settingsStore
 
@@ -165,7 +154,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             .mapNotNull { url ->
                 val uri = Uri.parse(url)
                 val host = uri.host?.lowercase()
-                if (uri.scheme == "https" && host != null && host in ALLOWED_DOWNLOAD_HOSTS) url else null
+                if (uri.scheme == "https" && host != null && isTrustedUpdateHost(host)) url else null
             }
             .distinct()
         if (candidates.isEmpty()) {
@@ -220,7 +209,7 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
                 val finalHost = response.request.url.host?.lowercase().orEmpty()
-                if (finalHost !in ALLOWED_DOWNLOAD_HOSTS) throw IllegalStateException("下载跳转到非信任域名：$finalHost")
+                if (!isTrustedUpdateHost(finalHost)) throw IllegalStateException("下载跳转到非信任域名：$finalHost")
                 val body = response.body ?: throw IllegalStateException("响应为空")
                 val total = body.contentLength()
                 val dir = File(context.filesDir, "apks").apply { mkdirs() }
@@ -287,4 +276,21 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 _message.tryEmit("无法打开安装器：${e.message ?: "未知错误"}")
             }
     }
+}
+
+private val TRUSTED_UPDATE_HOSTS = setOf(
+    "github.com",
+    "www.github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+)
+
+/**
+ * 更新 APK 允许的下载域名，防止任意主机拉起安装。
+ * CNB 的 Release 链接会 302 到 asset.cnb.cool，因此 cnb.cool 及其子域都要放行；
+ * 只匹配精确域名或 `.cnb.cool` 后缀，避免 evilcnb.cool 之类的相似域名。
+ */
+internal fun isTrustedUpdateHost(host: String?): Boolean {
+    val h = host?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return false
+    return h in TRUSTED_UPDATE_HOSTS || h == "cnb.cool" || h.endsWith(".cnb.cool")
 }
