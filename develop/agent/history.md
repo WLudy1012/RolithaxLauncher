@@ -17,6 +17,7 @@
 11. **界面统一与可读性**：全站页面统一到 `MslxCard`/`GlassSurface` 卡片、`MslxSectionHeader` 分区标题与 `MslxEmptyState` 空/错误态；页面边距 16–20dp、卡片间距 12dp、卡内边距 16dp 成为默认；触控目标统一到 48dp，开关/单选改为整行可点；长文本补 `maxLines` + 省略。`StatusUi` 状态色、浅色主题 `primary/secondary/tertiary` 前景色按 WCAG AA 对比度派生（`ensureContrast`），并补齐 `MSLXShapes.extraSmall`。日志/终端等区域保持不透明自绘，不参与玻璃。
 12. **资源中心分类修复与配对收尾**：Modrinth 搜索改用 `facets`，修复模组/插件分类不生效（Issue #22）；扫码配对重新兑换时携带本机已保存的同一 Daemon 的旧 API Key（`previousApiKey`），与插件端的设备替换校验配套。
 13. **README 多语言**：README 提供简体中文、繁体中文和英文三份，改动功能描述时需同步三份。
+14. **CNB 更新下载与元数据回退**：修复 CNB Release 链接 302 跳到 `asset.cnb.cool` 被下载域名白名单拦截导致 CNB 源静默失效的问题（`isTrustedUpdateHost` 放行 `cnb.cool` 及子域）；更新检查元数据从单点 `api.github.com` 扩展为 GitHub → CNB 回退——tag 发现走 git ref 通告，release 数据取自标签页服务端渲染的 `__NEXT_DATA__`，解析后复用原有渠道过滤与版本比较；遗留限制是 GitHub 不可达时元数据回退依赖 CNB 页面结构。
 14. **分支保护与 release 分支发版**：`main` 只接受 Pull Request，日常推 `dev`，推送 `release*` 分支自动校验、构建验证、合并并发布；更新下载的域名白名单补上 CNB 重定向到的 `asset.cnb.cool`（此前 CNB 下载总在重定向后被拒，只能回退 GitHub）。
 
 ## 当前实现依据

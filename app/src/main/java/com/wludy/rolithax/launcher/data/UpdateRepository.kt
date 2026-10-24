@@ -1,10 +1,13 @@
 package com.wludy.rolithax.launcher.data
 
 import com.wludy.rolithax.launcher.data.remote.ApiClient
+import com.wludy.rolithax.launcher.data.remote.CnbReleaseSource
 import com.wludy.rolithax.launcher.data.remote.GitHubRelease
+import com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset
+import kotlinx.coroutines.CancellationException
 
 /**
- * 应用更新信息（由 GitHub Release 解析而来）。
+ * 应用更新信息（由 GitHub / CNB Release 元数据解析而来）。
  */
 data class AppUpdateInfo(
     /** 展示用版本标识。 */
@@ -59,26 +62,62 @@ private const val EMBEDDED_JRE_MIN_BYTES = 30L * 1024 * 1024
 private const val APK_FULL_NAME = "app-release.apk"
 private const val APK_LITE_NAME = "app-release-lite.apk"
 
+/** CNB 回退路径单次检查最多拉取的标签页数量（旧版本用户也不必逐页回溯全部历史）。 */
+private const val MAX_CNB_PAGE_FETCHES = 5
+
 /** 单个 release 的解析结果（内部使用）。 */
 private data class ParsedRelease(
+    val tag: ParsedTag,
+    val release: GitHubRelease,
+    val apk: GitHubReleaseAsset,
+    val lite: GitHubReleaseAsset? = null,
+)
+
+/** tag 解析结果：语义化版本 + Beta/Force 后缀 + 原始 tag 名（用于拼 CNB 地址）。 */
+private data class ParsedTag(
     val version: String,
     val beta: Boolean,
     val force: Boolean,
-    val release: GitHubRelease,
-    val apk: com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset,
-    val lite: com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset? = null,
+    val rawTag: String? = null,
 )
 
 /**
- * 检查应用更新：查询 GitHub 仓库 Release 列表，
+ * 检查应用更新：优先查询 GitHub Release 列表，不可达时回退 CNB 镜像元数据，
  * 按更新渠道过滤，与当前版本比较，返回更新信息（无更新时返回 null）。
+ *
+ * 两个元数据源都不可用时返回失败（Result.failure），不猜测版本、不跳过校验。
  */
-class UpdateRepository {
+class UpdateRepository(
+    private val githubReleases: suspend () -> List<GitHubRelease> = { ApiClient.buildGitHubReleaseApi().releases() },
+    private val cnbTags: suspend () -> List<String> = { CnbReleaseSource.fetchTags() },
+    private val cnbRelease: suspend (String) -> GitHubRelease? = { tag -> CnbReleaseSource.fetchRelease(tag) },
+) {
 
     /** 检查是否有新版本。currentVersion 形如 "1.2.16"。 */
-    suspend fun checkLatest(currentVersion: String, channel: UpdateChannel): Result<AppUpdateInfo?> = runCatching {
-        val releases = ApiClient.buildGitHubReleaseApi().releases()
-        parseUpdate(releases, currentVersion, channel)
+    suspend fun checkLatest(currentVersion: String, channel: UpdateChannel): Result<AppUpdateInfo?> = try {
+        Result.success(computeUpdate(currentVersion, channel))
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    private suspend fun computeUpdate(currentVersion: String, channel: UpdateChannel): AppUpdateInfo? {
+        val fromGitHub = attempt { githubReleases() }
+        if (fromGitHub != null) {
+            return parseUpdate(fromGitHub, currentVersion, channel)
+        }
+        AppLogger.i("Update", "GitHub Release 元数据不可达，回退 CNB 元数据源")
+        return parseUpdateFromCnb(currentVersion, channel)
+    }
+
+    /** 元数据源失败返回 null（触发回退或跳过该版本）；协程取消必须继续向上传播。 */
+    private suspend fun <T> attempt(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     /** 从 Release 列表解析更新信息；无更新时返回 null。 */
@@ -90,51 +129,86 @@ class UpdateRepository {
         // 过滤出正式(非预发布)且带 APK 资产的版本，解析 tag 的 Beta/Force 后缀
         val parsed = releases
             .filter { !it.prerelease }
-            .mapNotNull { release -> parseTag(release.tagName)?.let { p ->
+            .mapNotNull { release ->
+                val tag = parseTag(release.tagName) ?: return@mapNotNull null
                 val (full, lite) = pickApkAssets(release)
                 val url = full?.browserDownloadUrl
                 if (full == null || url.isNullOrBlank()) null
-                else ParsedRelease(p.version, p.beta, p.force, release, full, lite)
-            } }
+                else ParsedRelease(tag, release, full, lite)
+            }
 
         // 渠道过滤：稳定渠道只出稳定版；测试渠道稳定+测试都出
         val candidates = if (channel == UpdateChannel.BETA) {
             parsed
         } else {
-            parsed.filter { !it.beta }
+            parsed.filter { !it.tag.beta }
         }
 
         val newest = candidates
-            .sortedWith { a, b -> compareVersions(b.version, a.version) }
+            .sortedWith { a, b -> compareVersions(b.tag.version, a.tag.version) }
             .firstOrNull() ?: return null
-        if (compareVersions(newest.version, currentVersion) <= 0) return null
+        if (compareVersions(newest.tag.version, currentVersion) <= 0) return null
 
         // 强制判定：任一高于当前版本的 release 带 Force 后缀或说明含"强制更新"（旧版兼容）
         val forceUpdate = parsed.any { p ->
-            compareVersions(p.version, currentVersion) > 0 &&
-                (p.force || p.release.body.orEmpty().contains("强制更新", ignoreCase = true))
+            compareVersions(p.tag.version, currentVersion) > 0 &&
+                (p.tag.force || p.release.body.orEmpty().contains("强制更新", ignoreCase = true))
         }
 
-        val apkName = newest.apk.name ?: APK_FULL_NAME
-        val tag = newest.release.tagName?.takeIf { it.isNotBlank() }
-        val lite = newest.lite
+        return buildUpdateInfo(newest.tag, newest.release, forceUpdate)
+    }
+
+    /**
+     * CNB 回退路径：tag 列表来自 git ref 通告，逐个标签页取 release 元数据。
+     * 强制判定用 tag 后缀覆盖全部候选（与 GitHub 路径的列表语义一致），
+     * 「说明含强制更新」的旧版兼容只覆盖实际取到页面的最新 release。
+     */
+    private suspend fun parseUpdateFromCnb(currentVersion: String, channel: UpdateChannel): AppUpdateInfo? {
+        val parsed = cnbTags().mapNotNull { raw -> parseTag(raw)?.let { it.copy(rawTag = raw) } }
+        val candidates = if (channel == UpdateChannel.BETA) {
+            parsed
+        } else {
+            parsed.filter { !it.beta }
+        }
+        val sorted = candidates.sortedWith { a, b -> compareVersions(b.version, a.version) }
+        val forcedByTag = candidates.any { compareVersions(it.version, currentVersion) > 0 && it.force }
+        var fetched = 0
+        for (entry in sorted) {
+            if (compareVersions(entry.version, currentVersion) <= 0) return null
+            if (fetched >= MAX_CNB_PAGE_FETCHES) return null
+            val rawTag = entry.rawTag?.takeIf { it.isNotBlank() } ?: continue
+            val release = attempt { cnbRelease(rawTag) } ?: continue
+            fetched++
+            val forceUpdate = forcedByTag || release.body.orEmpty().contains("强制更新", ignoreCase = true)
+            buildUpdateInfo(entry, release, forceUpdate)?.let { return it }
+        }
+        return null
+    }
+
+    /** 组装更新信息；release 不带可用 APK 资产时返回 null（调用方继续尝试更早的版本）。 */
+    private fun buildUpdateInfo(tag: ParsedTag, release: GitHubRelease, forceUpdate: Boolean): AppUpdateInfo? {
+        val (full, lite) = pickApkAssets(release)
+        val url = full?.browserDownloadUrl
+        if (full == null || url.isNullOrBlank()) return null
+        val apkName = full.name ?: APK_FULL_NAME
+        val rawTag = tag.rawTag?.takeIf { it.isNotBlank() }
         return AppUpdateInfo(
-            version = newest.version,
-            notes = newest.release.body.orEmpty(),
-            downloadUrl = newest.apk.browserDownloadUrl.orEmpty(),
+            version = tag.version,
+            notes = release.body.orEmpty(),
+            downloadUrl = url,
             apkName = apkName,
-            apkSize = newest.apk.size ?: 0,
-            sha256 = assetSha256(newest.apk, newest.release.body),
-            beta = newest.beta,
+            apkSize = full.size ?: 0,
+            sha256 = assetSha256(full, release.body),
+            beta = tag.beta,
             forceUpdate = forceUpdate,
-            embeddedJre = (newest.apk.size ?: 0) >= EMBEDDED_JRE_MIN_BYTES,
+            embeddedJre = (full.size ?: 0) >= EMBEDDED_JRE_MIN_BYTES,
             // CNB 首选：镜像仓库同名 tag 的 Release 资产（下载失败时由客户端回退 GitHub）
-            cnbUrl = tag?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
+            cnbUrl = rawTag?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
             liteUrl = lite?.browserDownloadUrl,
             liteSize = lite?.size ?: 0,
-            liteSha256 = lite?.let { assetSha256(it, newest.release.body) },
-            liteCnbUrl = if (lite != null && tag != null) {
-                "$CNB_RELEASE_DOWNLOAD_BASE/$tag/${lite.name}"
+            liteSha256 = lite?.let { assetSha256(it, release.body) },
+            liteCnbUrl = if (lite != null && rawTag != null) {
+                "$CNB_RELEASE_DOWNLOAD_BASE/$rawTag/${lite.name ?: APK_LITE_NAME}"
             } else {
                 null
             },
@@ -148,7 +222,7 @@ class UpdateRepository {
             ?.let { Regex("(?i)\\b[0-9a-f]{64}\\b").find(it)?.value?.lowercase() }
     }
 
-    private fun assetSha256(asset: com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset, body: String?): String? {
+    private fun assetSha256(asset: GitHubReleaseAsset, body: String?): String? {
         val digest = asset.digest?.removePrefix("sha256:")?.trim()?.lowercase()
         return digest?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }
             ?: parseAssetSha256(body, asset.name)
@@ -160,7 +234,7 @@ class UpdateRepository {
      */
     private fun pickApkAssets(
         release: GitHubRelease,
-    ): Pair<com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset?, com.wludy.rolithax.launcher.data.remote.GitHubReleaseAsset?> {
+    ): Pair<GitHubReleaseAsset?, GitHubReleaseAsset?> {
         val apks = release.assets.filter { it.name?.endsWith(".apk", ignoreCase = true) == true }
         if (apks.isEmpty()) return null to null
         val lite = apks.firstOrNull { it.name.equals(APK_LITE_NAME, ignoreCase = true) }
@@ -169,7 +243,7 @@ class UpdateRepository {
         return full to lite
     }
 
-    /** 解析 tag 为 (版本号, 是否测试版, 是否强制版)。支持 v 前缀与 -Beta/-Force 后缀。 */
+    /** 解析 tag 为 (版本号, 是否测试版, 是否强制版, 原始 tag)。支持 v 前缀与 -Beta/-Force 后缀。 */
     private fun parseTag(tagName: String?): ParsedTag? {
         val raw = tagName?.trim()?.removePrefix("v") ?: return null
         if (raw.isBlank()) return null
@@ -181,10 +255,8 @@ class UpdateRepository {
         var version = raw
         if (beta || force) version = raw.substringBeforeLast("-").trim()
         if (version.isBlank()) return null
-        return ParsedTag(version, beta, force)
+        return ParsedTag(version, beta, force, tagName)
     }
-
-    private data class ParsedTag(val version: String, val beta: Boolean, val force: Boolean)
 
     /** 语义化版本比较："1.10.0" > "1.9.9"。返回正数表示 a 更新。 */
     private fun compareVersions(a: String, b: String): Int {

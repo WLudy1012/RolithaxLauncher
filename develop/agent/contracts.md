@@ -49,6 +49,18 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 
 集成 MSLAPI 下载服务的界面需要同时展示准确署名、MSL Logo 和 `https://mslmc.cn` 官网链接。不能把 MSLAPI 当作没有归属的公共镜像，也不能绕过响应中的摘要校验。
 
+## 更新元数据（GitHub / CNB）
+
+更新检查的元数据源按「GitHub → CNB」回退，两者都不可用时失败关闭，不猜测版本：
+
+- 首选 GitHub Releases API（`api.github.com`，`repos/WLudy1012/RolithaxLauncher/releases`）。
+- GitHub 不可达（大陆网络常见）时回退 CNB，全部匿名可读、不经任何第三方代理：
+  - tag 发现：`GET https://cnb.cool/WLudy/RolithaxLauncher/info/refs?service=git-upload-pack`，按 `refs/tags/<tag>` 提取；
+  - 单个 release：`GET https://cnb.cool/WLudy/RolithaxLauncher/-/releases/tag/<tag>`，解析标签页服务端渲染的 `__NEXT_DATA__` 中 `props.pageProps.releasesDetailData.release`，取 `assets`（`name`/`path`/`hashValue`/`sizeInByte`）、`body`、`isPrerelease`。
+- 两个源解析后走同一套渠道过滤、版本比较与 APK 资产挑选逻辑；CNB 路径单次检查最多拉取 5 个标签页。
+- 强制更新判定：CNB 路径用全部候选 tag 的 `-Force` 后缀，加上实际取到页面的最新 release 说明中是否含「强制更新」（旧版兼容）。
+- CNB 标签页属于 Web 载体而非开放 API，解析失败按「该版本无可用元数据」跳过更早版本，不降级到无校验数据；请求带应用 User-Agent，响应体限 4MB。
+
 ## Rolithax Daemon 插件
 
 远程扫码、图标和云端资源直装使用插件前缀：
