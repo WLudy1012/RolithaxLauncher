@@ -123,6 +123,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))
+    implementation("io.ktor:ktor-client-okhttp:2.3.13")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.coil.compose)
@@ -156,6 +158,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
 
     // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
     implementation(libs.xz)

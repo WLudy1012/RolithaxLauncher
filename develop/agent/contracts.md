@@ -61,6 +61,15 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 - 强制更新判定：CNB 路径用全部候选 tag 的 `-Force` 后缀，加上实际取到页面的最新 release 说明中是否含「强制更新」（旧版兼容）。
 - CNB 标签页属于 Web 载体而非开放 API，解析失败按「该版本无可用元数据」跳过更早版本，不降级到无校验数据；请求带应用 User-Agent，响应体限 4MB。
 
+### 更新下载域名信任
+
+更新 APK 的下载域名由 `isTrustedUpdateHost`（`ui/update/UpdateViewModel.kt`）白名单控制，防止任意主机被拉起安装：候选域名在下载前和每次重定向后都要校验，任一环节不受信即失败关闭。
+
+- GitHub 系：`github.com`、`www.github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`。
+- CNB 系：`cnb.cool` 精确匹配加 `.cnb.cool` 子域后缀匹配（Release 链接会 302 到 `asset.cnb.cool`）。
+- 主机名先 trim、转小写再匹配；只接受精确域名或子域后缀，`evilcnb.cool` 这类相似域名必须拒绝。
+- 新增下载源时必须同步扩充白名单并补充单测；域名规则变化属于发布契约变化，需在 Release notes 说明。
+
 ## Rolithax Daemon 插件
 
 远程扫码、图标和云端资源直装使用插件前缀：
@@ -69,16 +78,19 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 /api/plugin/mslx-plugin-rolithax/...
 ```
 
-插件包标识为 `mslx-plugin-rolithax`，最低支持的 MSLX Daemon 版本为 `1.5.10.2`。插件程序集、目录和前端资源继续使用 Rolithax 命名。
+插件包标识为 `mslx-plugin-rolithax`，最低支持的 MSLX Daemon 版本为 `1.7.3`。插件程序集、目录和前端资源继续使用 Rolithax 命名。
 
 当前使用的路由包括：
 
+- `/features`：已认证用户查询配对、实例图标和资源安装扩展 API 的启用状态；管理员通过 `/features/{feature}` 修改状态。
 - `/pair/codes`：生成一次性配对码
 - `/pair/redeem`：兑换二维码载荷
 - `/icon/server/{id}`：实例图标
 - `/resources/install`：在 Daemon 所在机器创建资源安装任务
 - `/resources/install/{id}`：查询安装任务
 - `/resources/install/{id}/cancel`：取消安装任务
+
+新安装和旧配置中缺失的开关默认启用。关闭资源安装后不再创建新任务，已有任务仍可查询或取消；关闭配对接口不取消已有配对设备的租约校验。实例图标 GET 端点支持 Media Scoped Token，仍按实例权限授权。
 
 客户端不应恢复已移除的旧版 `/api/plugins/...` 兼容路由。资源安装由 Daemon 侧下载并落地，客户端不把远程文件先下载再上传一遍。
 

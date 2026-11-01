@@ -17,6 +17,8 @@
 ./gradlew :app:lintDebug
 ./gradlew :app:assembleDebug
 ./gradlew :app:assembleRelease
+./gradlew :shared:desktopTest :desktop:test
+./gradlew :desktop:createDistributable
 git diff --check
 ```
 
@@ -52,6 +54,12 @@ git diff --check
 
 发版步骤：在 `dev` 上提升 `versionName`/`versionCode` 并合并通过验证，然后 `git push origin dev:release-<版本>`。手动推送 `v*` tag 仍会触发 `release.yml`，仅作补发兜底。
 
+### 实测经验（1.8.1 全链路验证）
+
+- 流程可用性已在 1.8.1 正式版实测：推送 `release-1.8.1` 后依次完成版本校验（`versionName` 与分支一致、`versionCode` 大于 `main`）、构建验证、PR 合并 `main`、在合并提交上创建 tag、发布签名资产、同步 `main` 与 tag 到 CNB。
+- **PR 触发的「Android 持续集成」显示 failure 是固有现象，不是构建失败**：`gh pr create` 后立即执行合并，PR 触发的 `android.yml` run 会在 1 秒内被取消（jobs 为空、从未真正构建）。真正的构建验证是 `release-branch.yml` 内部同名的「构建验证」job（跑满全程并 success，满足 `main` 保护规则的状态检查）。判读发版结果时以 `release-branch.yml` run 的结论、tag 指向和 Release 资产为准。
+- 发版后核对清单：tag 与 `main` 的合并提交一致且双远端（GitHub/CNB）都存在；Release 资产齐全（完整版/精简版 APK 及 JRE 运行时归档）且 notes 含 SHA-256 表格；`release*` 分支已被流程删除。
+
 依赖的仓库设置：`main` 保护规则（Pull Request + 状态检查「构建验证」+ 禁止强推与删除）；Actions 权限开启「Allow GitHub Actions to create and approve pull requests」。`github.token` 创建的 tag 不会触发其他工作流，所以发布必须走 `workflow_call`。
 
 ## 分支、Tag 与远端
@@ -65,6 +73,9 @@ git diff --check
 ## GitHub Actions 与 CNB
 
 - `android.yml` 负责 `dev` 推送和面向 `main` 的 Pull Request：单元测试、Debug/Release 构建验证与工件上传，不使用签名密钥；`cnb-sync.yml` 在 `main` 更新后把源码同步到 CNB；`release-branch.yml` 负责 `release*` 分支发版；公共的环境准备在 `.github/actions/setup-android`。
+- `desktop.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中分别验证 Windows、Linux 的共享代码与桌面测试，打包含运行时的应用并上传测试报告和渲染样本；也提供手动与可复用工作流入口。Linux UI 测试通过 Xvfb 运行，Windows 配置 WiX 3；桌面构建使用 JetBrains Runtime 21。
+- 桌面应用由 Actions 工件提供开发构建，当前发布工作流仍只发布 Android 资产。不要把 Windows/Linux CI 包或鸿蒙领域库链接成功描述为正式发布、HAP 构建成功或真实 Daemon 验收通过。
+- HarmonyOS NEXT 依赖单独的 SDK 与原生桥接工具链，暂不纳入通用桌面 CI；本地构建前提与未验证项见 `harmony/README.md`。
 - `release.yml` 由 `release-branch.yml` 通过 `workflow_call` 调用，或由手动推送的 `v*` Tag 触发，生成签名发布物、SHA-256 校验信息、Release notes，并按约定同步 CNB。
 - CNB 工作流负责 main 构建和 Tag 发布；阶段名称、任务名称和关键输出以中文为主，保留 Gradle、Android、Release、CNB 等技术名词。
 - 签名和镜像认证只通过 CI 的受保护配置注入，具体凭据不进入仓库、脚本、文档或日志。

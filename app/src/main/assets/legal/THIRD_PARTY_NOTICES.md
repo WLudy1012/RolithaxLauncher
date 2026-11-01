@@ -1,16 +1,15 @@
 # 第三方组件与许可（THIRD PARTY NOTICES）
 
-本文件是 Rolithax Launcher（Android 端，包名 `com.wludy.rolithax.launcher`）所用第三方组件与许可的**正本**，
-随 APK 打包（`assets/legal/THIRD_PARTY_NOTICES.md`），应用内「设置 → 关于 → 合规与许可」
-可直接离线查看；仓库根目录的 `THIRD_PARTY_NOTICES.md` 只是指向本文件的说明。
+本文件是 Rolithax Launcher 所用第三方组件与许可的**正本**，
+随 APK 打包（`assets/legal/THIRD_PARTY_NOTICES.md`），应用内「设置 → 关于 → 合规与许可」可直接离线查看；桌面分发也在应用资源目录的 `legal/` 中包含这份资料。仓库根目录的 `THIRD_PARTY_NOTICES.md` 只是指向本文件的说明。
 
-最后核对：2026-09（版本号以 `gradle/libs.versions.toml` 为准）。
+最后核对：2026-11（版本号以各模块 Gradle 配置和实际解析结果为准）。
 
 ## 一、本项目与上游项目
 
 | 名称 | 角色 | 许可 |
 | --- | --- | --- |
-| Rolithax Launcher（本应用） | 面向 MSLX Daemon 的 Android 客户端 | AGPL-3.0 |
+| Rolithax Launcher（本应用） | 面向 MSLX Daemon 的 Android 与桌面客户端 | AGPL-3.0 |
 | [MSLX](https://github.com/MSLTeam/MSLX)（MSLTeam） | 被管理的守护程序（MSLX Daemon）与其桌面端 | AGPL-3.0 |
 | [MSLAPI（mslapi / mslxapi）](https://mslmc.cn) | Java 运行时、服务端核心与版本元数据、下载地址、SHA-256；本服务由 MSL 开服器提供 | 未声明开源许可，仅作为外部 HTTP 接口调用 |
 | Minecraft / Mojang Studios | 被管理的服务端程序本身与其 EULA | 非开源；服务端运行须自行同意 Minecraft EULA |
@@ -51,6 +50,20 @@
 | Shizuku 客户端 API / Provider（`dev.rikka.shizuku:api`、`:provider`） | 13.1.5 | Apache-2.0（按该许可第 6 条附加说明：**不得**复用 Shizuku 管理器自身的界面资源；本应用只调用 API） |
 | `libunpack200.so`（`jniLibs/{arm64-v8a,x86_64}`，Java 8 类库的 pack200 解包器） | 8u442（取自 ZalithLauncher 2 的 `runtimes/jre-8` 归档，bionic 构建） | OpenJDK：GPL-2.0 **with Classpath Exception** |
 
+### 共享代码与桌面端依赖
+
+以下列出本轮直接使用的主要组件；具体分发平台和传递依赖以对应构建产物为准。
+
+| 组件 | 版本 | 来源与许可 |
+| --- | --- | --- |
+| Ktor 客户端核心、WebSocket 和 CIO | 2.3.13 | [Ktor](https://github.com/ktorio/ktor/tree/2.3.13)，Apache-2.0；共享客户端使用核心与 WebSocket，桌面端使用 CIO |
+| Compose Multiplatform | 1.7.3 | [JetBrains Compose Multiplatform](https://github.com/JetBrains/compose-multiplatform)，Apache-2.0；桌面 UI |
+| Skiko | 0.8.18 | [JetBrains Skiko](https://github.com/JetBrains/skiko)，Apache-2.0；Compose 桌面渲染依赖，另见上游 [NOTICE](https://github.com/JetBrains/skiko/blob/master/NOTICE) |
+| java-keyring（`com.github.javakeyring:java-keyring`） | 1.0.4 | [java-keyring](https://github.com/javakeyring/java-keyring)，BSD-3-Clause；系统凭据存储。版权声明和完整许可文本见同目录 `java-keyring-LICENSE.txt` |
+| JNA / JNA Platform（`net.java.dev.jna`） | 5.15.0 | [Java Native Access](https://github.com/java-native-access/jna/tree/5.15.0)，可选 LGPL-2.1-or-later 或 Apache-2.0；本项目采用 Apache-2.0 |
+
+各组件及其传递依赖可能另附版权、许可或 NOTICE 文件，分发时以实际产物和上游声明为准。
+
 ## 四、自研组件
 
 | 组件 | 说明 | 许可 |
@@ -64,6 +77,7 @@
 - GPL-2.0 with Classpath Exception：https://openjdk.org/legal/gplv2+ce.html
 - 0BSD：https://opensource.org/licenses/0BSD
 - MIT：https://opensource.org/licenses/MIT
+- BSD-3-Clause：本目录 `java-keyring-LICENSE.txt`；上游 https://github.com/javakeyring/java-keyring/blob/master/LICENSE
 
 上述组件的许可证副本亦随各自发布产物提供；APK 中 `META-INF/` 目录内可找到多数 JVM 库
 自带的 `LICENSE`/`NOTICE` 文件。若在分发版本时对第三方组件做了实质性修改，请以对应上游

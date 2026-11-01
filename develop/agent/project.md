@@ -2,7 +2,7 @@
 
 ## 产品身份
 
-Rolithax Launcher 是面向 MSLX Daemon 的 Android 客户端，也支持在 Android 设备上直接运行 Minecraft Java 服务端。项目以 Kotlin 和 Jetpack Compose 为主，遵循 AGPL-3.0，并作为独立第三方应用与上游 MSLTeam 保持清晰的项目边界。
+Rolithax Launcher 是面向 MSLX Daemon 的多平台客户端工程。Android 宿主保留远端管理与本机 Minecraft Java 开服；Windows/Linux 宿主仅管理远端 Daemon；HarmonyOS NEXT 原生入口仍在迁移中。公共模型与部分远端业务使用 Kotlin Multiplatform，界面分别由 Android Compose、桌面 Compose 和 ArkTS 承载。项目遵循 AGPL-3.0，作为独立第三方应用与上游 MSLTeam 保持清晰边界。
 
 - 系统显示名：`Rolithax Launcher`
 - Android `namespace` / `applicationId`：`com.wludy.rolithax.launcher`
@@ -49,7 +49,7 @@ Rolithax Launcher 是面向 MSLX Daemon 的 Android 客户端，也支持在 And
 - 本机开服：内嵌 Android JRE、进程内 JVM、可选 Shizuku 增强引擎、前台服务保活。
 - 资源中心：Modrinth 资源、MSLAPI 服务端核心、Room 缓存、依赖/冲突检查和目标端安装。
 - 服务端文件管理、插件/模组管理、`server.properties` 编辑、备份与加密迁移。
-- 稳定版和 Beta 更新渠道、应用内下载校验、运行日志、崩溃报告与首次使用导览。
+- 稳定版和 Beta 更新渠道、应用内下载校验（下载域名白名单与 SHA-256）、更新检查元数据 GitHub → CNB 回退、运行日志、崩溃报告与首次使用导览。
 - 暗色主题、自定义外观、MSLAPI 署名与第三方许可展示。
 
 ## 目录结构

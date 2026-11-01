@@ -2,7 +2,9 @@
 
 ## 总体结构
 
-项目是单模块 Android 应用，采用 MVVM、手动依赖注入和 Compose 状态驱动界面：
+项目正在从单模块 Android 应用迁移到 Kotlin Multiplatform。`app` 仍是 Android 宿主，保留本机开服、权限和 JNI；`shared` 提供 Android 与桌面可复用的模型和远端 Daemon 客户端；`desktop` 是 Windows/Linux 桌面宿主。`harmony` 是独立的 HarmonyOS NEXT 原生工程，共享 Kotlin 核心的鸿蒙编译与桥接尚待验证。桌面和鸿蒙的远端功能仍在迁移中，不能视为已与 Android 对齐。
+
+Android 应用采用 MVVM、手动依赖注入和 Compose 状态驱动界面：
 
 ```text
 Compose Screen
@@ -13,6 +15,19 @@ Repository / Manager
     ↓ REST、SignalR、Room、文件系统、Native
 Daemon / MSLAPI / 本地 JVM / Android 系统
 ```
+
+## 多平台迁移边界
+
+- `shared` 的通用源码包含远端 Daemon 协议、SignalR、资源规则和公共模型；Android 与桌面宿主分别注入网络和系统能力。Android 的迁移按接口逐步进行，未迁移的调用仍使用现有 Retrofit 仓库。
+- `desktop` 面向 Windows 和 Linux 管理远端 Daemon，连接凭据使用系统密钥存储。本机 JVM、Shizuku 和 Android 前台服务继续由 `app` 管理。
+- Windows 工作区采用系统窗口与 Fluent 风格的浅灰、蓝色及深色主题。页面层级参考 [MSLX Desktop](https://github.com/MSLTeam/MSLX/tree/dev/MSLX.Desktop) 和 [WebPanel](https://github.com/MSLTeam/MSLX/tree/dev/MSLX.WebPanel)，由本项目使用 Compose 独立实现：大品牌侧栏提供概览、实例管理、新建、用户与连接入口；首页展示真实的节点、实例数量和 CPU/内存监控状态，不补造未提供的信息。
+- 实例列表支持按名称、ID、核心搜索，按状态筛选和按名称或 ID 排序；全宽卡片直接提供控制台、启停、文件和设置操作，详情工作区顶部显示实例状态，并以页签切换功能。界面保留适合 150% 显示缩放的字号、布局和滚动，遵循系统 DPI；多显示器 DPI 切换需在目标环境验证。
+- 桌面控制台支持 Enter 发送、上下键浏览命令历史、日志搜索、跟随输出和复制。文件或实例配置有未保存修改时，工作区导航会请求确认；具体设计约定见 [`desktop/DESIGN.md`](../../desktop/DESIGN.md)。
+- 桌面文件管理器打开文件名为 `server.properties` 的文件时提供结构化和文本两种编辑模式，结构化模式复用 Android 的属性字段定义，并通过现有文件保存接口提交；它只展示文件中已有的已知、非续行字段。未知字段、注释和文件换行保留在文本中；新增字段、续行及自定义文件名需使用文本模式，当前不会从实例设置自动定位自定义路径。
+- 桌面远端文件管理通过 Daemon 接口创建目录、重命名及删除条目；删除目录是递归操作。Daemon 删除接口可能在 HTTP 成功时报告部分失败，客户端保留其结果并刷新列表，不以 HTTP 状态推断全部成功。
+- 桌面远端实例设置同时提供结构化表单与 JSON 编辑；提交前校验非空内存值为非负整数，且最大内存不小于最小内存，两种编辑方式共用同一校验。
+- `harmony/kmp-domain` 使用 Kuikly Kotlin/Native 编译选定的共享源码，通过 N-API 提供给鸿蒙原生入口。鸿蒙网络目前由 ArkTS 实现：现有 Ktor 依赖没有 OHOS 变体，不能将领域库链接成功当作共享网络层已迁移。
+- 多平台构建应分别验证 Android 测试与 APK、共享测试、桌面测试和目标平台包；鸿蒙 HAP、真实设备、真实 Daemon、Linux 系统密钥库和桌面端平台交互均需要对应环境验收。构建命令和鸿蒙前提见 [`harmony/README.md`](../../harmony/README.md)。
 
 界面只负责渲染状态和发送事件。网络、文件、数据库、JVM 和权限操作由 ViewModel 下方的仓库或协调器拥有，避免在 Composable 中直接做不可控的副作用。
 

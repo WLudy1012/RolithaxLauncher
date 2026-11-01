@@ -47,3 +47,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "RolithaxLauncher"
 include(":app")
+include(":shared", ":desktop")

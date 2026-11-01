@@ -1,0 +1,111 @@
+name: 桌面持续集成
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: ${{ matrix.platform }} 桌面验证
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows
+            runner: windows-2025
+          - platform: Linux
+            runner: ubuntu-24.04
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 JetBrains Runtime 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: jetbrains
+          java-version: "21"
+          java-package: jdk
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: 准备 Linux 显示环境与中文字体
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth fonts-noto-cjk
+          chmod +x gradlew
+
+      - name: 配置 Windows WiX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $wixBin = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
+          if (-not (Test-Path (Join-Path $wixBin 'candle.exe'))) {
+            throw "未找到 WiX 3：$wixBin"
+          }
+          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "WIX_PATH=$wixBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Linux 共享及桌面测试
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test --no-daemon --stacktrace
+
+      - name: Windows 共享及桌面测试
+        if: runner.os == 'Windows'
+        run: .\gradlew.bat :shared:desktopTest :desktop:test --no-daemon --stacktrace
+
+      - name: Linux 桌面应用打包
+        if: runner.os == 'Linux'
+        run: |
+          ./gradlew :desktop:createDistributable --no-daemon --stacktrace
+          tar -C desktop/build/compose/binaries/main/app -czf RolithaxLauncher-Linux.tar.gz RolithaxLauncher
+
+      - name: Windows 桌面应用打包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\gradlew.bat :desktop:createDistributable --no-daemon --stacktrace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path desktop/build/compose/binaries/main/app/RolithaxLauncher -DestinationPath RolithaxLauncher-Windows.zip
+
+      - name: 上传 Linux 应用
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: RolithaxLauncher-Linux
+          path: RolithaxLauncher-Linux.tar.gz
+          if-no-files-found: error
+
+      - name: 上传 Windows 应用
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: RolithaxLauncher-Windows
+          path: RolithaxLauncher-Windows.zip
+          if-no-files-found: error
+
+      - name: 上传桌面测试结果与渲染样本
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-results-${{ matrix.platform }}
+          path: |
+            desktop/build/reports/tests/test/
+            desktop/build/visual-check/
+            shared/build/reports/tests/desktopTest/
+          if-no-files-found: ignore

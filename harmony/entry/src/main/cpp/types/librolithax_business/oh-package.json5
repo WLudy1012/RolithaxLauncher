@@ -1,0 +1,5 @@
+{
+  "name": "librolithax_business.so",
+  "types": "./index.d.ts",
+  "version": "0.1.0"
+}

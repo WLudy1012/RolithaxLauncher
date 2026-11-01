@@ -4,10 +4,11 @@
 
 # Rolithax Launcher
 
-**One app to manage remote MSLX Daemons and Minecraft Java servers running on your phone.**
+**Android local hosting and Windows/Linux remote management; HarmonyOS NEXT migration is in progress.**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Android CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml)
+[![Desktop CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml/badge.svg?branch=dev)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml)
 [![Release](https://img.shields.io/github/v/release/WLudy1012/RolithaxLauncher?include_prereleases&label=release)](https://github.com/WLudy1012/RolithaxLauncher/releases)
 ![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-3DDC84)
 
@@ -15,8 +16,7 @@
 
 </div>
 
-Rolithax Launcher is an independent, **third-party** Android client for [MSLX Daemon](https://github.com/MSLTeam/MSLX), built with Kotlin and Jetpack Compose.
-It puts "manage instances on a remote Daemon" and "host a server directly on your phone" into one instance list and one console, with a workflow designed for touch screens.
+Rolithax Launcher is an independent, **third-party client project** for [MSLX Daemon](https://github.com/MSLTeam/MSLX). Android supports remote management and local hosting; the Windows/Linux desktop client manages remote Daemons through an independently implemented Compose interface. Common models, protocols and parts of the remote client are being moved to Kotlin Multiplatform.
 
 > This app is not affiliated with MSLTeam in any way. Please read the [Disclaimer](#disclaimer) before use.
 > Application ID: `com.wludy.rolithax.launcher`. The package name and signing key changed, so older builds must be installed fresh; migrate old data with the in-app encrypted export/import.
@@ -25,7 +25,7 @@ This app integrates the MSLAPI download service: **本服务由MSL开服器提�
 
 ## Download
 
-Get it from [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) or the [CNB mirror](https://cnb.cool/WLudy/RolithaxLauncher/-/releases) (faster in mainland China). Every release ships two packages:
+Android releases are available from [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) or the [CNB mirror](https://cnb.cool/WLudy/RolithaxLauncher/-/releases) (faster in mainland China). Every Android release ships two packages:
 
 | Package | Description |
 | --- | --- |
@@ -33,6 +33,18 @@ Get it from [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/rele
 | `app-release-lite.apk` (lite) | Smaller; the first local server needs a ~36 MB runtime download |
 
 Both are signed with the same key and can be installed over each other. The app can also check for and install updates itself, see [Updates and versioning](#updates-and-versioning).
+
+## Platforms and migration scope
+
+| Platform | Current scope | Validation boundary |
+| --- | --- | --- |
+| Android | Remote management, local hosting and Resource Center | Existing capabilities remain; some remote calls now use the shared layer |
+| Windows / Linux | Multiple Daemons, instance control, console, files, settings, resources and users | Development builds; no local hosting. Real Daemon integration and the Linux keyring still need validation |
+| HarmonyOS NEXT | Native ArkTS entry and shared-model bridge | In progress; HAP packaging, the complete SDK build and device behavior remain unverified |
+
+The desktop interface takes layout cues from MSLX management pages and is implemented independently in Compose. Desktop feature parity with Android is incomplete; the feature list below primarily describes Android. See [harmony/README.md](harmony/README.md) for the HarmonyOS boundary.
+
+Desktop development packages are available as artifacts of successful [desktop CI runs](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml). These are CI artifacts rather than formal Releases. See [desktop/README.md](desktop/README.md) for usage and build instructions.
 
 ## Features
 
@@ -128,7 +140,18 @@ Requirements: JDK 17+, Android SDK Platform 35, NDK 28.2.13676358.
 The first sync needs network access. In mainland China, set `MSLX_MAVEN_GOOGLE_MIRROR` and `MSLX_MAVEN_CENTRAL_MIRROR` to use mirror repositories.
 Fetch the bundled JRE with `fetch-jre-assets.ps1` and rebuild the `LD_PRELOAD` shim with `build-shim.ps1`.
 
+Use JDK 21 for desktop packaging. Run the following checks with `gradlew.bat` on Windows; Linux UI tests require a display session or Xvfb.
+
+```bash
+./gradlew :shared:desktopTest :desktop:test
+./gradlew :desktop:createDistributable
+```
+
+Windows/Linux workflows upload platform-specific application archives with a bundled runtime. See the [HarmonyOS build notes](harmony/README.md) for its separate toolchain and validation limits.
+
 ## Project layout
+
+Multiplatform modules: `app` is the Android host, `shared` contains KMP models and remote protocols, `desktop` is the Windows/Linux host, and `harmony` is the separate HarmonyOS NEXT project.
 
 ```text
 app/src/main/java/com/wludy/rolithax/launcher/
