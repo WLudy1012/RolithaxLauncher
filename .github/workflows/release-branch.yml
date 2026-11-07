@@ -145,12 +145,24 @@ jobs:
             git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
           fi
           require_newer_code "$sha^1"
-          existing=$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)
-          if [[ -z "$existing" ]]; then
-            gh api "repos/$GH_REPO/git/refs" -f "ref=refs/tags/$TAG" -f "sha=$sha" >/dev/null
-          elif [[ "$existing" != "$sha" ]]; then
-            echo "::error::远端标记指向另一提交"
-            exit 1
+          tag_ref="refs/tags/$TAG"
+          if remote_tag=$(git ls-remote --exit-code --refs --tags origin "$tag_ref"); then
+            existing=${remote_tag%%$'\t'*}
+            [[ "$existing" =~ ^[0-9a-f]{40}$ && "$remote_tag" == "$existing"$'\t'"$tag_ref" ]] || {
+              echo "::error::远端标记查询结果无效"
+              exit 1
+            }
+            [[ "$existing" == "$sha" ]] || {
+              echo "::error::远端标记指向另一提交"
+              exit 1
+            }
+          else
+            status=$?
+            [[ "$status" == 2 && -z "$remote_tag" ]] || {
+              echo "::error::无法确认远端标记状态（退出码 $status）"
+              exit 1
+            }
+            gh api "repos/$GH_REPO/git/refs" -f "ref=$tag_ref" -f "sha=$sha" >/dev/null
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
