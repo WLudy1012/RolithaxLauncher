@@ -118,7 +118,9 @@ fi
   if [[ "$RELEASE_TAG" == *-Force ]]; then
     printf '**强制更新**\n\n'
   fi
-  if [[ -n "$previous" ]]; then
+  if [[ -f ".github/release-notes/$RELEASE_TAG.md" ]]; then
+    cat ".github/release-notes/$RELEASE_TAG.md"
+  elif [[ -n "$previous" ]]; then
     printf '自 `%s` 以来的变更\n\n' "$previous"
     git log --no-merges --format='- %s' "$previous..$RELEASE_TAG"
   else
