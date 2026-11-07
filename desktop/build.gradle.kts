@@ -18,7 +18,7 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:2.3.13")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.github.javakeyring:java-keyring:1.0.4")
-    implementation("net.java.dev.jna:jna-platform:5.15.0")
+    runtimeOnly("net.java.dev.jna:jna-platform:5.15.0")
     testImplementation(kotlin("test"))
     testImplementation(compose.desktop.uiTestJUnit4)
 }
@@ -41,12 +41,5 @@ compose.desktop {
             packageName = "RolithaxLauncher"
             appResourcesRootDir.set(layout.buildDirectory.dir("desktop-resources"))
         }
-    }
-}
-
-
-tasks.test {
-    if (providers.gradleProperty("rolithax.testWindowsCredentialStore").orNull == "true") {
-        systemProperty("rolithax.testWindowsCredentialStore", "true")
     }
 }

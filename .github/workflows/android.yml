@@ -1,48 +1,53 @@
 name: Android 持续集成
 
-# 日常开发推到 dev；合并进 main 只走 Pull Request，main 受分支保护。
-# 本工作流的 job 名「构建验证」就是 main 保护规则要求通过的状态检查，改名需同步修改保护规则。
 on:
   push:
     branches: [dev]
   pull_request:
     branches: [main]
   workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: android-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    # main 分支保护依赖此名称。
     name: 构建验证
-    runs-on: ubuntu-latest
-    env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
-      MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0
-          fetch-tags: true
+          persist-credentials: false
 
-      - name: 准备 Android 构建环境
-        uses: ./.github/actions/setup-android
-
-      # 不恢复签名密钥：验证构建不需要，也避免把 Secrets 交给 PR 触发的流程
-      - name: 单元测试
-        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
-
-      - name: 构建 Debug 与 Release APK
-        run: ./gradlew assembleDebug assembleRelease --no-daemon --stacktrace
+      - name: 验证 Android 构建
+        uses: ./.github/actions/verify-android
+        with:
+          gradle-cache-read-only: ${{ github.ref != 'refs/heads/dev' }}
 
       - name: 上传 Debug APK
         uses: actions/upload-artifact@v7
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: 上传 Android 测试报告
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-test-results
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/TEST-*.xml
+          if-no-files-found: ignore
+          retention-days: 14

@@ -4,5 +4,5 @@
     "resOptions": { "copyCodeResource": { "enable": false } },
     "externalNativeOptions": { "path": "./src/main/cpp/CMakeLists.txt", "abiFilters": ["arm64-v8a"] }
   },
-  "targets": [{ "name": "default", "runtimeOS": "HarmonyOS" }]
+  "targets": [{ "name": "default" }]
 }

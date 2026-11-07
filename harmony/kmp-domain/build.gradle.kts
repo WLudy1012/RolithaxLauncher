@@ -24,6 +24,13 @@ kotlin {
 
 tasks.register<Copy>("prepareHarmonyNative") {
     dependsOn("linkDebugSharedOhosArm64")
+    val cxxRuntime = providers.environmentVariable("OHOS_SDK_HOME").map { sdk ->
+        file(sdk).resolve("native/llvm/lib/aarch64-linux-ohos/libc++_shared.so")
+    }
     from(layout.buildDirectory.file("bin/ohosArm64/debugShared/librolithax_domain.so"))
+    from(cxxRuntime)
     into(layout.projectDirectory.dir("../entry/libs/arm64-v8a"))
+    doFirst {
+        require(cxxRuntime.orNull?.isFile == true) { "OHOS_SDK_HOME 必须指向包含 ARM64 C++ 运行库的 SDK 目录" }
+    }
 }

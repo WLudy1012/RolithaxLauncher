@@ -4,7 +4,7 @@
 
 # Rolithax Launcher
 
-**Android 本机开服与 Windows/Linux 远端管理；HarmonyOS NEXT 正在迁移。**
+**Android 本机开服，Windows、Linux 和 HarmonyOS NEXT 远端管理。**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Android CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml)
@@ -16,7 +16,7 @@
 
 </div>
 
-Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**独立第三方客户端工程**。Android 端支持远端管理与本机开服；Windows/Linux 桌面端面向远端 Daemon，界面由 Compose 独立实现。公共模型、协议与部分远端业务正在迁移到 Kotlin Multiplatform。
+Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的独立第三方客户端。Android 用 Material 3 Compose 管理本机和远端实例。Windows 用 .NET 10 与 WinUI 3，Linux 用 Compose Desktop，HarmonyOS NEXT 用 ArkTS。各平台按工具链能力复用 Kotlin Multiplatform 的远端业务和公共模型。
 
 > 本应用与 MSLTeam 没有任何隶属或关联关系，使用前请阅读[免责声明](#免责声明)。
 > 包名 `com.wludy.rolithax.launcher`。更换包名与签名后，旧版需全新安装，旧数据通过应用内加密导出/导入迁移。
@@ -39,10 +39,11 @@ Android 正式版本可在 [GitHub Releases](https://github.com/WLudy1012/Rolith
 | 平台 | 当前范围 | 验证边界 |
 | --- | --- | --- |
 | Android | 远端管理、本机开服与资源中心 | 保留现有能力，部分远端调用已接入共享层 |
-| Windows / Linux | 多 Daemon、实例控制、控制台、文件、配置、资源及用户管理 | 开发版本；不提供本机开服，真实 Daemon 与 Linux 密钥库仍需联调 |
-| HarmonyOS NEXT | 原生 ArkTS 入口与共享模型桥接 | 迁移中；HAP、完整 SDK 构建和真机行为尚未验证 |
+| [Windows](windows/README.md) | 多 Daemon、实例启停、控制台、文件、配置、插件与用户管理 | x64 开发构建，通过 C ABI 复用 Kotlin/Native 客户端 |
+| [Linux](desktop/README.md) | 多 Daemon、实例控制、控制台、文件、配置、资源与用户管理 | Compose Desktop 开发构建 |
+| [HarmonyOS NEXT](harmony/README.md) | 保存多个 Daemon、查找和控制实例、控制台及文件管理 | 原生 ARM64 工程，HAP 与真机验收待验证 |
 
-桌面界面参考 MSLX 的管理页面层级，使用本项目 Compose 组件独立实现。桌面功能与安卓尚未完全对齐；下方功能说明主要描述 Android 端。鸿蒙的具体范围见 [harmony/README.md](harmony/README.md)。
+Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。下方功能说明主要描述 Android 端。
 
 桌面开发包可在成功的 [桌面持续集成](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml) 运行中下载；它们是 CI 产物，不等同于正式 Release。桌面使用与构建说明见 [desktop/README.md](desktop/README.md)。
 
@@ -56,6 +57,7 @@ Android 正式版本可在 [GitHub Releases](https://github.com/WLudy1012/Rolith
 **控制台**
 - SignalR 实时日志，增量解析 ANSI 颜色与样式；发送命令、自动滚动、一键回到最新。
 - 远程与本机实例共用同一套控制台界面。
+- Android 和 Windows 提供结构化控制台。内置 Paper 面板从日志提取运行状态与玩家动态，也可以用 [控制台插件 SDK](console-sdk/README.md) 编写和热替换面板。
 
 **创建与资源中心**
 - 创建向导覆盖基本信息、服务端核心、Java 环境、资源配置与确认，支持在线核心库、远程下载、本地上传和整合包。
@@ -81,7 +83,7 @@ Android 正式版本可在 [GitHub Releases](https://github.com/WLudy1012/Rolith
 
 **直接在手机上开服**
 
-1. 点底部 Dock 中央的「+」，目标选「本机」。
+1. 在「概览」或「实例」点「新建实例」，目标选「本机」。
 2. 选择服务端核心与版本，完成向导；首次使用会按需安装 Java 运行时。
 3. 启动实例，在控制台里和平常一样操作。
 
@@ -140,7 +142,7 @@ Java 运行时可在设置里安装多个并按实例选择，启动前会做版
 首次同步需要联网。国内网络可设置 `MSLX_MAVEN_GOOGLE_MIRROR` 与 `MSLX_MAVEN_CENTRAL_MIRROR` 使用镜像仓库。
 内嵌 JRE 用 `fetch-jre-assets.ps1` 获取，`LD_PRELOAD` 垫片用 `build-shim.ps1` 重编。
 
-桌面打包使用 JDK 21，验证命令如下；Windows 使用 `gradlew.bat`，Linux 无显示会话时通过 Xvfb 运行 UI 测试。
+Linux 桌面打包使用 JDK 21，无显示会话时通过 Xvfb 运行 UI 测试。Windows 原生构建需要 .NET 10 与 Kotlin/Native，见 [Windows 构建说明](windows/README.md)。
 
 ```bash
 ./gradlew :shared:desktopTest :desktop:test
@@ -151,7 +153,7 @@ Windows/Linux 工作流会分别上传包含运行时的应用压缩包。Harmon
 
 ## 项目结构
 
-多平台模块：`app` 为 Android 宿主，`shared` 为 KMP 公共模型与远端协议，`desktop` 为 Windows/Linux 宿主，`harmony` 为独立的 HarmonyOS NEXT 工程。
+多平台模块包括 Android 的 `app`、KMP 远端核心 `shared`、Windows 的 `windows`、Linux 的 `desktop` 和 HarmonyOS NEXT 的 `harmony`。
 
 ```text
 app/src/main/java/com/wludy/rolithax/launcher/

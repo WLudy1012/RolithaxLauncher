@@ -7,6 +7,14 @@ plugins {
 kotlin {
     androidTarget()
     jvm("desktop")
+    if (providers.gradleProperty("rolithax.windowsNative").orNull == "true") {
+        mingwX64 {
+            binaries.sharedLib { baseName = "rolithax_core" }
+        }
+        sourceSets.named("mingwX64Main") {
+            dependencies { implementation("io.ktor:ktor-client-winhttp:2.3.13") }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {

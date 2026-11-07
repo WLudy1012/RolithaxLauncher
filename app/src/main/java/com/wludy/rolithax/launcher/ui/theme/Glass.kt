@@ -2,7 +2,6 @@ package com.wludy.rolithax.launcher.ui.theme
 
 import android.graphics.BitmapFactory
 import android.view.View
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -65,7 +63,7 @@ data class GlassBackdrop(
 fun isRealtimeBlurSupported(): Boolean = HazeDefaults.blurEnabled()
 
 /**
- * 背景层宿主：绘制背景（自定义图片或主题色柔光），并把它注册为 Haze 模糊源，
+ * 背景层宿主：绘制背景（自定义图片或主题表面色），并把它注册为 Haze 模糊源，
  * [content] 中的 [GlassSurface] / [glass] 面板会实时模糊其后方的这层背景。
  * 页面 Scaffold 需保持透明才能透出背景。
  */
@@ -94,6 +92,7 @@ fun GlassHost(
                 .haze(hazeState),
         )
         CompositionLocalProvider(
+            LocalContentColor provides MaterialTheme.colorScheme.onSurface,
             LocalGlassAlpha provides config.glassAlpha,
             LocalGlassBackdrop provides backdrop,
         ) {
@@ -105,7 +104,7 @@ fun GlassHost(
 @Composable
 private fun BackdropLayer(bitmap: ImageBitmap?, dark: Boolean, modifier: Modifier) {
     val scheme = MaterialTheme.colorScheme
-    Box(modifier.background(scheme.background)) {
+    Box(modifier.background(scheme.surface)) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
@@ -121,26 +120,6 @@ private fun BackdropLayer(bitmap: ImageBitmap?, dark: Boolean, modifier: Modifie
                         if (dark) Color.Black.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.18f),
                     ),
             )
-        } else {
-            val primary = scheme.primary.copy(alpha = if (dark) 0.20f else 0.18f)
-            val tertiary = scheme.tertiary.copy(alpha = if (dark) 0.12f else 0.12f)
-            Canvas(Modifier.fillMaxSize()) {
-                val reach = size.maxDimension
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(primary, Color.Transparent),
-                        center = Offset(size.width * 0.08f, size.height * 0.02f),
-                        radius = reach * 0.62f,
-                    ),
-                )
-                drawRect(
-                    Brush.radialGradient(
-                        colors = listOf(tertiary, Color.Transparent),
-                        center = Offset(size.width * 0.96f, size.height * 0.78f),
-                        radius = reach * 0.55f,
-                    ),
-                )
-            }
         }
     }
 }
@@ -168,7 +147,7 @@ fun rememberGlassStyle(
     val scheme = MaterialTheme.colorScheme
     val dark = LocalRolithaxDarkTheme.current
     val backdrop = LocalGlassBackdrop.current
-    val base = if (tint.isSpecified) tint else scheme.surface
+    val base = if (tint.isSpecified) tint else scheme.surfaceContainerLow
     // 弹窗等独立窗口的坐标与模糊源不一致，只做半透明填充，避免画出错位的模糊内容。
     val sameWindow = backdrop != null && backdrop.ownerView === LocalView.current
     val blur = backdrop != null && sameWindow && backdrop.hasImage &&

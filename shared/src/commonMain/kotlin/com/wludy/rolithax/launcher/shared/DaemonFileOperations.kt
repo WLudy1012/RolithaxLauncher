@@ -22,7 +22,10 @@ suspend fun DaemonClient.renameRemoteFile(instanceId: Long, oldPath: String, new
     return postResponse("api/files/instance/$instanceId/rename", json.encodeToString(RenameRequest(oldPath, newPath))).message
 }
 
-suspend fun DaemonClient.deleteRemoteFile(instanceId: Long, path: String): String? {
-    require(instanceId > 0 && validRemotePath(path))
-    return postResponse("api/files/instance/$instanceId/delete", json.encodeToString(DeleteRequest(listOf(path)))).message
+suspend fun DaemonClient.deleteRemoteFile(instanceId: Long, path: String): String? =
+    deleteRemoteFiles(instanceId, listOf(path)).message
+
+internal suspend fun DaemonClient.deleteRemoteFiles(instanceId: Long, paths: List<String>): DaemonResponse {
+    require(instanceId > 0 && paths.isNotEmpty() && paths.all { validRemotePath(it) }) { "文件路径无效" }
+    return postResponse("api/files/instance/$instanceId/delete", json.encodeToString(DeleteRequest(paths)))
 }

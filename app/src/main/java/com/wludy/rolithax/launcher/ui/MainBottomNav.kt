@@ -1,97 +1,45 @@
 package com.wludy.rolithax.launcher.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.displayCutout
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Build
-import com.wludy.rolithax.launcher.ui.theme.LocalGlassAlpha
-import com.wludy.rolithax.launcher.ui.theme.glass
-import com.wludy.rolithax.launcher.ui.theme.rememberGlassStyle
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailDefaults
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** 顶层页面标识，用于底部导航高亮。 */
 enum class TopPage(val label: String, val icon: ImageVector) {
-    HOME("主页", Icons.Filled.Home),
+    HOME("概览", Icons.Filled.Home),
     INSTANCES("实例", Icons.AutoMirrored.Filled.List),
-    NEW_INSTANCE("新建", Icons.Filled.Add),
+    CONNECTIONS("连接", Icons.Filled.Share),
     RESOURCES("资源", Icons.Filled.Build),
     SETTINGS("设置", Icons.Filled.Settings),
 }
 
-/** 五个顶层页共享的底部导航栏（Dock）。 */
 @Composable
-fun MainBottomNav(
-    current: TopPage,
-    onNavigate: (TopPage) -> Unit,
-) {
-    val shape = RoundedCornerShape(28.dp)
-    val style = rememberGlassStyle(alpha = maxOf(LocalGlassAlpha.current, 0.72f))
-    NavigationBar(
-        // 系统栏避让放在玻璃面板外侧：面板整体悬浮在手势条/三键导航之上，不被系统栏盖住
-        modifier = Modifier
-            .windowInsetsPadding(
-                WindowInsets.systemBars.union(WindowInsets.displayCutout)
-                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-            )
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .glass(style, shape),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        tonalElevation = 0.dp,
-        windowInsets = WindowInsets(0, 0, 0, 0),
-    ) {
+fun MainBottomNav(current: TopPage, onNavigate: (TopPage) -> Unit) {
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         TopPage.entries.forEach { page ->
-            DockItem(
-                page = page,
+            NavigationBarItem(
                 selected = page == current,
-                onNavigate = onNavigate,
+                onClick = { onNavigate(page) },
+                icon = { Icon(page.icon, contentDescription = null) },
+                label = { NavigationLabel(page) },
             )
         }
     }
@@ -104,127 +52,28 @@ fun MainNavigationRail(
     modifier: Modifier = Modifier,
     showLabels: Boolean = true,
 ) {
-    val style = rememberGlassStyle(alpha = maxOf(LocalGlassAlpha.current, 0.72f))
     NavigationRail(
-        modifier = modifier.glass(style, RoundedCornerShape(topEnd = 28.dp, bottomEnd = 28.dp)),
-        containerColor = Color.Transparent,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        windowInsets = NavigationRailDefaults.windowInsets,
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
     ) {
-        TopPage.entries.forEach { page ->
-            NavigationRailItem(
-                selected = page == current,
-                onClick = { onNavigate(page) },
-                icon = {
-                    if (page == TopPage.NEW_INSTANCE) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = page.icon,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                            )
-                        }
-                    } else {
-                        Icon(imageVector = page.icon, contentDescription = null)
-                    }
-                },
-                label = { Text(page.label) },
-                alwaysShowLabel = showLabels,
-            )
+        LazyColumn(
+            modifier = Modifier.fillMaxHeight(),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            items(TopPage.entries) { page ->
+                NavigationRailItem(
+                    selected = page == current,
+                    onClick = { onNavigate(page) },
+                    icon = { Icon(page.icon, contentDescription = null) },
+                    label = { NavigationLabel(page) },
+                    alwaysShowLabel = showLabels,
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun RowScope.DockItem(
-    page: TopPage,
-    selected: Boolean,
-    onNavigate: (TopPage) -> Unit,
-) {
-    // 按压交互源：去掉默认矩形 ripple（点击时整块 item 会闪黑框），改为图标缩放/变淡反馈
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-
-    // 图标弹性缩放（选中弹跳，按压时轻微缩小）
-    val scale by animateFloatAsState(
-        targetValue = when {
-            isPressed -> 0.92f
-            selected -> 1.22f
-            else -> 1f
-        },
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMediumLow,
-        ),
-        label = "dockIconScale",
-    )
-    // 指示 pill 淡入淡出
-    val indicatorAlpha by animateFloatAsState(
-        // “新建”是常驻主操作按钮，未选中时也要保留底色，否则白色图标会消失在面板上
-        targetValue = if (selected || page == TopPage.NEW_INSTANCE) 1f else 0f,
-        animationSpec = tween(durationMillis = 220),
-        label = "dockIndicatorAlpha",
-    )
-    // 图标与文字颜色过渡
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        animationSpec = tween(durationMillis = 220),
-        label = "dockContentColor",
-    )
-
-    Box(
-        modifier = Modifier
-            .heightIn(min = 68.dp)
-            .weight(1f)
-            // indication=null：不绘制默认 ripple 矩形框，按压反馈走图标缩放/变淡
-            .selectable(
-                selected = selected,
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Tab,
-                onClick = { onNavigate(page) },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center) {
-                // 图标背后的圆角指示条
-                Box(
-                    modifier = Modifier
-                        .size(if (page == TopPage.NEW_INSTANCE) 46.dp else 48.dp)
-                        .graphicsLayer { alpha = indicatorAlpha }
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(
-                            if (page == TopPage.NEW_INSTANCE) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-                        ),
-                )
-                Icon(
-                    imageVector = page.icon,
-                    contentDescription = null,
-                    tint = if (page == TopPage.NEW_INSTANCE) MaterialTheme.colorScheme.onPrimary
-                    else if (isPressed) contentColor.copy(alpha = 0.6f) else contentColor,
-                    modifier = Modifier
-                        .size(if (page == TopPage.NEW_INSTANCE) 28.dp else 24.dp)
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        },
-                )
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = page.label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                color = contentColor,
-            )
-        }
-    }
+private fun NavigationLabel(page: TopPage) {
+    Text(page.label, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }

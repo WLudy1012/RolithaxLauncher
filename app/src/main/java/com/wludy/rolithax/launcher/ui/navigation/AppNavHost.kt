@@ -31,6 +31,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -45,7 +46,6 @@ import com.wludy.rolithax.launcher.ui.console.ConsoleScreen
 import com.wludy.rolithax.launcher.ui.console.ConsoleViewModel
 import com.wludy.rolithax.launcher.ui.console.LocalConsoleViewModel
 import com.wludy.rolithax.launcher.ui.create.CreateInstanceScreen
-import com.wludy.rolithax.launcher.ui.create.CreateResetBus
 import com.wludy.rolithax.launcher.ui.home.HomeScreen
 import com.wludy.rolithax.launcher.ui.instances.InstancesScreen
 import com.wludy.rolithax.launcher.ui.settings.InstanceSettingsScreen
@@ -56,7 +56,8 @@ import com.wludy.rolithax.launcher.ui.settings.PluginsModsScreen
 import com.wludy.rolithax.launcher.ui.settings.ServerPropertiesScreen
 import com.wludy.rolithax.launcher.ui.settings.LocalServerSettingsScreen
 import com.wludy.rolithax.launcher.ui.settings.SettingsScreen
-import com.wludy.rolithax.launcher.ui.servers.ServersOverviewScreen
+import com.wludy.rolithax.launcher.ui.settings.ConnectionsScreen
+import com.wludy.rolithax.launcher.ui.create.CreateInstanceViewModel
 import com.wludy.rolithax.launcher.ui.servers.ResourceCenterScreen
 import com.wludy.rolithax.launcher.ui.settings.AppearanceScreen
 import com.wludy.rolithax.launcher.ui.settings.AboutScreen
@@ -71,10 +72,11 @@ object Routes {
     const val WELCOME = "welcome"
     const val CONNECT = "connect?auto={autoConnect}&daemonId={daemonId}"
     const val HOME = "home"
-    const val INSTANCES = "instances"
+    const val INSTANCES = "instances?source={source}"
+    const val CONNECTIONS = "connections"
     const val SETTINGS = "settings"
     const val RESOURCES = "resources"
-    const val NEW_INSTANCE = "newInstance"
+    const val NEW_INSTANCE = "newInstance?source={source}"
 
     // 二级页统一携带 daemonId：实例归属哪台服务端就操作哪台（去主连接）。
     // 本机实例复用同一套路由：daemonId = local、instanceId = 实例目录名。
@@ -88,7 +90,6 @@ object Routes {
     const val ABOUT = "about"
     const val LOGS = "logs"
     const val LOCAL_SERVER_SETTINGS = "localServerSettings"
-    const val SERVERS = "servers"
     /** 合规文档（第三方许可 / 免责声明），docKey 取 [com.wludy.rolithax.launcher.ui.settings.LegalDoc.key]。 */
     const val LEGAL = "legal/{docKey}"
 
@@ -104,6 +105,9 @@ object Routes {
 
     fun connect(auto: Boolean, daemonId: String? = null): String =
         "connect?auto=$auto&daemonId=${daemonId.orEmpty()}"
+
+    fun instances(source: String? = null): String = "instances?source=${Uri.encode(source.orEmpty())}"
+    fun create(source: String? = null): String = "newInstance?source=${Uri.encode(source.orEmpty())}"
 
     fun legal(docKey: String): String = "legal/$docKey"
 }
@@ -127,8 +131,8 @@ fun AppNavHost(
 ) {
     fun topLevelRoute(page: TopPage): String = when (page) {
         TopPage.HOME -> Routes.HOME
-        TopPage.INSTANCES -> Routes.INSTANCES
-        TopPage.NEW_INSTANCE -> Routes.NEW_INSTANCE
+        TopPage.INSTANCES -> Routes.instances()
+        TopPage.CONNECTIONS -> Routes.CONNECTIONS
         TopPage.RESOURCES -> Routes.RESOURCES
         TopPage.SETTINGS -> Routes.SETTINGS
     }
@@ -136,7 +140,7 @@ fun AppNavHost(
     // NavHost 在一次切换完成前仍可能短暂保留上一页；连续点击时只接受第一条请求。
     val dockNavigationLocked = remember { mutableStateOf(false) }
     val backStackEntry by navController.currentBackStackEntryAsState()
-    LaunchedEffect(backStackEntry?.destination?.route) {
+    LaunchedEffect(backStackEntry) {
         dockNavigationLocked.value = false
     }
 
@@ -158,23 +162,19 @@ fun AppNavHost(
     val currentTopPage = when (backStackEntry?.destination?.route) {
         Routes.HOME -> TopPage.HOME
         Routes.INSTANCES -> TopPage.INSTANCES
-        Routes.NEW_INSTANCE -> TopPage.NEW_INSTANCE
+        Routes.CONNECTIONS -> TopPage.CONNECTIONS
         Routes.RESOURCES -> TopPage.RESOURCES
         Routes.SETTINGS -> TopPage.SETTINGS
         else -> null
     }
 
     val onTopPageNavigate: (TopPage) -> Unit = { page ->
-        if (page == TopPage.NEW_INSTANCE && currentTopPage == TopPage.NEW_INSTANCE) {
-            CreateResetBus.request()
-        } else {
-            navigateTopLevel(topLevelRoute(page))
-        }
+        if (page != currentTopPage) navigateTopLevel(topLevelRoute(page))
     }
 
     // 根容器保持透明：底色由 MainActivity 的 GlassHost 提供（毛玻璃模糊源）
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val useNavigationRail = maxWidth >= 600.dp && maxHeight >= 360.dp
+        val useNavigationRail = maxWidth >= 600.dp
         val showRailLabels = maxHeight >= 480.dp
         // 键盘弹出时收起底部 Dock：否则它会被键盘盖住，或在旧系统上被顶起挤占输入区
         val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -241,10 +241,9 @@ fun AppNavHost(
 
             composable(Routes.HOME) {
                 HomeScreen(
-                    onOpenInstances = { navigateTopLevel(Routes.INSTANCES) },
-                    onOpenConnect = {
-                        navController.navigate(Routes.connect(false)) { launchSingleTop = true }
-                    },
+                    onOpenInstances = { source -> navigateTopLevel(Routes.instances(source)) },
+                    onOpenConnections = { navigateTopLevel(Routes.CONNECTIONS) },
+                    onCreate = { navController.navigate(Routes.create()) { launchSingleTop = true } },
                     onEditDaemon = { daemonId ->
                         navController.navigate(Routes.connect(false, daemonId)) { launchSingleTop = true }
                     },
@@ -270,66 +269,70 @@ fun AppNavHost(
                 val autoConnect = entry.arguments?.getBoolean("autoConnect") ?: true
                 val daemonId = entry.arguments?.getString("daemonId")?.takeIf { it.isNotBlank() }
                 ConnectScreen(
-                    onConnected = {
-                        // 连接成功：回到主页，由主页加载负载与实例
-                        navController.navigate(Routes.HOME) {
-                            popUpTo(navController.graph.id) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
+                    onConnected = { navController.popBackStack() },
                     onBack = { navController.popBackStack() },
-                    // 自动连接失败：回主页显示"Daemon 未连接"
-                    onAutoConnectFailed = {
-                        navController.navigate(Routes.HOME) {
-                            popUpTo(navController.graph.id) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
+                    onAutoConnectFailed = { navController.popBackStack() },
                     autoConnect = autoConnect,
                     editingDaemonId = daemonId,
                 )
             }
 
-            composable(Routes.INSTANCES) {
+            composable(
+                route = Routes.INSTANCES,
+                arguments = listOf(navArgument("source") { defaultValue = "" }),
+            ) { entry ->
                 InstancesScreen(
-                    onOpenHome = { navigateTopLevel(Routes.HOME) },
-                    onOpenSettings = {
-                        navigateTopLevel(Routes.SETTINGS)
-                    },
-                    onOpenNewInstance = {
-                        navigateTopLevel(Routes.NEW_INSTANCE)
+                    initialSource = entry.arguments?.getString("source").orEmpty(),
+                    onOpenConnections = { navigateTopLevel(Routes.CONNECTIONS) },
+                    onOpenNewInstance = { source ->
+                        navController.navigate(Routes.create(source)) { launchSingleTop = true }
                     },
                     onOpenServer = { ref ->
                         navController.navigate(Routes.console(ref)) { launchSingleTop = true }
+                    },
+                    onOpenSettings = { ref ->
+                        navController.navigate(Routes.instanceSettings(ref)) { launchSingleTop = true }
+                    },
+                    onOpenFiles = { ref ->
+                        navController.navigate(Routes.fileManager(ref)) { launchSingleTop = true }
                     },
                 )
             }
 
-            composable(Routes.NEW_INSTANCE) {
-                CreateInstanceScreen(
-                    onOpenHome = { navigateTopLevel(Routes.HOME) },
-                    onOpenInstances = { navigateTopLevel(Routes.INSTANCES) },
-                    onOpenSettings = { navigateTopLevel(Routes.SETTINGS) },
-                    onOpenServer = { ref ->
-                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
+            composable(
+                route = Routes.NEW_INSTANCE,
+                arguments = listOf(navArgument("source") { defaultValue = "" }),
+            ) { entry ->
+                val source = entry.arguments?.getString("source").orEmpty()
+                val createModel: CreateInstanceViewModel = viewModel(
+                    factory = viewModelFactory {
+                        initializer {
+                            val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as Application
+                            CreateInstanceViewModel(app, source)
+                        }
                     },
+                )
+                CreateInstanceScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenInstances = { target -> navigateTopLevel(Routes.instances(target)) },
+                    onOpenServer = { ref ->
+                        navController.navigate(Routes.console(ref)) {
+                            popUpTo(Routes.NEW_INSTANCE) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    viewModel = createModel,
                 )
             }
 
             composable(Routes.RESOURCES) {
                 ResourceCenterScreen(
-                    onOpenCreate = { navigateTopLevel(Routes.NEW_INSTANCE) },
+                    onOpenCreate = { navController.navigate(Routes.create()) { launchSingleTop = true } },
                 )
             }
 
             composable(Routes.SETTINGS) {
                 SettingsScreen(
-                    onAddDaemon = {
-                        navController.navigate(Routes.connect(false)) { launchSingleTop = true }
-                    },
-                    onEditDaemon = { daemonId ->
-                        navController.navigate(Routes.connect(false, daemonId)) { launchSingleTop = true }
-                    },
                     onOpenUserCenter = {
                         navController.navigate(Routes.USER_CENTER) { launchSingleTop = true }
                     },
@@ -345,22 +348,20 @@ fun AppNavHost(
                     onOpenLocalServerSettings = {
                         navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
                     },
-                    onOpenServers = {
-                        navController.navigate(Routes.SERVERS) { launchSingleTop = true }
-                    },
+                    onOpenConnections = { navigateTopLevel(Routes.CONNECTIONS) },
                 )
             }
 
-            // 服务端总览：多 Daemon 状态 + 本机/各 Daemon 实例统一列表
-            composable(Routes.SERVERS) {
-                ServersOverviewScreen(
-                    onBack = { navController.popBackStack() },
-                    onOpenServer = { ref ->
-                        navController.navigate(Routes.console(ref)) { launchSingleTop = true }
+            composable(Routes.CONNECTIONS) {
+                ConnectionsScreen(
+                    onAddDaemon = { navController.navigate(Routes.connect(false)) { launchSingleTop = true } },
+                    onEditDaemon = { id -> navController.navigate(Routes.connect(false, id)) { launchSingleTop = true } },
+                    onOpenInstances = { source -> navigateTopLevel(Routes.instances(source)) },
+                    onCreate = { source -> navController.navigate(Routes.create(source)) { launchSingleTop = true } },
+                    onOpenLocalServerSettings = {
+                        navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
                     },
-                    onOpenCreate = {
-                        navigateTopLevel(Routes.NEW_INSTANCE)
-                    },
+                    onOpenUserCenter = { navController.navigate(Routes.USER_CENTER) { launchSingleTop = true } },
                 )
             }
 

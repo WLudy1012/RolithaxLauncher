@@ -26,6 +26,12 @@ Daemon 接口使用统一响应包装：
 
 认证凭据由统一网络客户端注入并从安全存储读取；文档、日志、异常和截图中不得出现凭据值。
 
+## Windows C ABI
+
+`windows/rolithax_core.h` 声明 WinUI 3 使用的 C ABI。会话接收 UTF-8 JSON 配置并持有独立的 REST、SignalR 客户端和流任务。操作参数为 UTF-8 JSON，返回结果包含 `ok` 和 `data`，失败返回 `error`，可附 HTTP 状态与 Daemon 业务码。
+
+宿主通过 ABI 版本判断兼容性，使用 `rolithax_string_free` 释放返回字符串。会话由 .NET `SafeHandle` 持有，释放前等待正在进行的原生调用结束。控制台通过序号增量取回日志，文件上传和下载在原生层分块处理。
+
 ## 地址与 TLS
 
 `ApiClient.normalizeDaemonUrl` 的默认行为是：去除首尾空白和多余斜杠；缺少协议时补 HTTPS；未明确允许明文时把 `http://` 升级为 `https://`。只有用户在连接页明确启用并确认风险后，才允许可信内网使用 HTTP。
@@ -36,12 +42,16 @@ Daemon 可能使用自签证书。客户端对用户自己配置的 Daemon REST�
 
 | Hub | 客户端操作 | 主要推送 |
 | --- | --- | --- |
-| `/api/hubs/instanceControlHub` | 加入/离开实例组、发送命令 | 日志、命令结果、EULA 请求 |
+| `/api/hubs/instanceControlHub` | 按游标续接或加入实例组、发送命令 | 日志、提交回执、EULA 请求 |
 | `/api/hubs/updateProgressHub` | 加入更新组 | 更新消息、进度和错误 |
 | `/api/hubs/creationProgressHub` | 跟踪/取消跟踪创建任务 | 创建消息和进度 |
 | `/api/hubs/system` | 开始/结束监视 | 本机与从节点 CPU、内存和时间戳 |
 
 对象推送必须注册为对应的数据类接收。不要把对象载荷注册为 `String` 再自行解析，否则 GsonHubProtocol 可能静默丢弃参数。连接重试要带连接代际校验，旧连接关闭后不能继续写入当前状态。
+
+共享控制台优先调用 `ResumeConsole`。支持游标的 Daemon 返回历史批次，实时日志带 `streamId` 与 `sequence`。客户端合并、排序和去重，发现缺口时向宿主发出 `ConsoleEvent.Gap`。服务端明确表示该方法不存在时才回退到旧的 `JoinGroup`。旧版单参数日志没有来源标记，断线后的历史与实时日志可能重叠。
+
+`CommandResult` 表示 Daemon 提交结果，现有载荷没有请求 ID。面板只从日志提取显示数据。宿主负责绑定目标实例、授权和确认，重放日志或重连不会重发命令。插件文件约定见 [控制台插件 SDK](../../console-sdk/README.md)。
 
 ## MSLAPI
 

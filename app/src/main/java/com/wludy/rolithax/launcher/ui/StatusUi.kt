@@ -27,10 +27,10 @@ import com.wludy.rolithax.launcher.ui.theme.LocalRolithaxDarkTheme
 fun statusColor(status: Int): Color {
     val dark = LocalRolithaxDarkTheme.current
     return when (status) {
-        2 -> if (dark) Color(0xFF8BE28F) else Color(0xFF2E7D32)
-        1, 4 -> if (dark) Color(0xFFFFD166) else Color(0xFFF9A825)
-        3 -> if (dark) Color(0xFFFFB86B) else Color(0xFFFB8C00)
-        else -> if (dark) Color(0xFFB7C0CC) else Color(0xFF9E9E9E)
+        2 -> if (dark) Color(0xFF8BE28F) else Color(0xFF1B6623)
+        1, 4 -> if (dark) Color(0xFFFFD166) else Color(0xFF815100)
+        3 -> if (dark) Color(0xFFFFB86B) else Color(0xFF8E3E08)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 }
 

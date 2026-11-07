@@ -1,0 +1,85 @@
+name: 鸿蒙原生桥接验证
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harmony-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-bridge:
+    name: OpenHarmony API 18 ARM64
+    runs-on: windows-2025
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: 配置 JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
+
+      - name: 缓存公开原生 SDK
+        id: ohos-sdk
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/openharmony-sdk-5.1.0.107/native
+          key: openharmony-native-windows-x64-5.1.0.107-351a0437
+
+      - name: 下载并校验公开原生 SDK
+        if: steps.ohos-sdk.outputs.cache-hit != 'true'
+        timeout-minutes: 18
+        env:
+          OHOS_SDK_HOME: ${{ runner.temp }}/openharmony-sdk-5.1.0.107
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'openharmony-sdk-5.1.0.107.tar.gz'
+          $source = 'https://repo.huaweicloud.com/openharmony/os/5.1.0-Release/ohos-sdk-windows_linux-public.tar.gz'
+          curl.exe --fail --silent --show-error --location --retry 2 --max-time 600 --output $archive $source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $expected = '8c1f97df34812e45fa4f0e3275987b261e80622abb7c51392bb063f853451344'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $expected) {
+            throw 'OpenHarmony SDK SHA-256 mismatch'
+          }
+
+          New-Item -ItemType Directory -Force -Path $env:OHOS_SDK_HOME | Out-Null
+          $member = 'ohos-sdk/windows/native-windows-x64-5.1.0.107-Release.zip'
+          tar.exe -xf $archive -C $env:OHOS_SDK_HOME $member
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item -LiteralPath $archive
+
+          $component = Join-Path $env:OHOS_SDK_HOME $member
+          tar.exe -xf $component -C $env:OHOS_SDK_HOME --exclude native/docs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item -LiteralPath $component
+
+      - name: 编译 Kotlin 领域库和 N-API 桥
+        env:
+          OHOS_SDK_HOME: ${{ runner.temp }}/openharmony-sdk-5.1.0.107
+        run: |
+          .\gradlew.bat -p harmony/kmp-domain prepareHarmonyNative --no-daemon --stacktrace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $native = Join-Path $env:OHOS_SDK_HOME 'native'
+          $cmake = Join-Path $native 'build-tools/cmake/bin/cmake.exe'
+          $ninja = Join-Path $native 'build-tools/cmake/bin/ninja.exe'
+          $toolchain = Join-Path $native 'build/cmake/ohos.toolchain.cmake'
+          & $cmake -S harmony/entry/src/main/cpp -B harmony/entry/build/native-verification -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" "-DCMAKE_TOOLCHAIN_FILE=$toolchain" -DOHOS_ARCH=arm64-v8a
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $cmake --build harmony/entry/build/native-verification
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

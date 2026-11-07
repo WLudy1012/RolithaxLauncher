@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.data.AppSettings
 import com.wludy.rolithax.launcher.data.AppLogger
+import com.wludy.rolithax.launcher.data.DaemonConfig
 import com.wludy.rolithax.launcher.data.DaemonState
 import com.wludy.rolithax.launcher.data.DaemonStatus
 import com.wludy.rolithax.launcher.data.InstanceIcons
@@ -14,7 +15,6 @@ import com.wludy.rolithax.launcher.data.InstanceRepository
 import com.wludy.rolithax.launcher.data.ManagedServer
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.model.NodeStatsPayload
-import com.wludy.rolithax.launcher.data.remote.ApiClient
 import com.wludy.rolithax.launcher.data.remote.SystemMonitorClient
 import com.wludy.rolithax.launcher.ui.ServerNotificationHelper
 import kotlinx.coroutines.CancellationException
@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /** 开服/关服通知条目（去主连接：以 [ServerRef] 定位，本机与远程走同一条通路）。 */
 data class ServerNotification(
@@ -69,41 +71,14 @@ data class HomeUiState(
     val pages: List<DaemonPage> = emptyList(),
     /** 当前滑到的那台 Daemon。 */
     val selectedDaemonId: String = "",
-    /** true = 实例列表只显示当前卡片那台服务端的实例（滑动联动的显式版）。 */
-    val onlySelected: Boolean = false,
     /** 聚合实例列表：本机实例 + 所有 Daemon 的实例。 */
     val servers: List<ManagedServer> = emptyList(),
+    val daemonFailures: Map<String, String> = emptyMap(),
     /** 实例图标（key = [ManagedServer.key]）；未加载到的不显示（占位状态点）。 */
     val icons: Map<String, Bitmap> = emptyMap(),
     val notifications: List<ServerNotification> = emptyList(),
-    // 一言金句
-    val quote: String = "",
-    val quoteSource: String = "",
-    val quoteFailed: Boolean = false,
     val error: String? = null,
 ) {
-    val hasDaemons: Boolean get() = pages.isNotEmpty()
-    val selectedDaemonName: String get() = pages.firstOrNull { it.daemonId == selectedDaemonId }?.name.orEmpty()
-
-    /** 当前页码（选中项失效时回落到 0）。 */
-    val selectedIndex: Int
-        get() = pages.indexOfFirst { it.daemonId == selectedDaemonId }.coerceAtLeast(0)
-
-    /**
-     * 列表展示顺序与卡片联动：默认展示全部聚合实例，但把当前卡片那台服务端的实例排到最前，
-     * 本机实例始终保留在首位（不属于任何 Daemon，不参与过滤歧义）。
-     */
-    val visibleServers: List<ManagedServer>
-        get() {
-            if (onlySelected && selectedDaemonId.isNotBlank()) {
-                return servers.filter { it.ref?.daemonId == selectedDaemonId }
-            }
-            val local = servers.filter { it.isLocal }
-            val selected = servers.filter { it.ref?.daemonId == selectedDaemonId }
-            val rest = servers - local.toSet() - selected.toSet()
-            return local + selected + rest
-        }
-
     val runningServers: Int get() = servers.count { it.running }
 }
 
@@ -126,34 +101,42 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 每台 Daemon 的实时负载（各自一路 SignalR 推送）。 */
     private val loads = mutableMapOf<String, NodeStatsPayload>()
-    private val monitorClients = mutableMapOf<String, SystemMonitorClient>()
+    private val monitorClients = mutableMapOf<String, Pair<String, SystemMonitorClient>>()
 
     /** 上一轮实例运行状态（catalogKey → running），用于检测开服/关服。 */
     private val lastRunning = mutableMapOf<String, Boolean>()
 
     /** Daemon 配置指纹：只有增删改连接才重做一轮全量刷新，避免改主题等写入触发网络风暴。 */
-    private var daemonSignature: String? = null
+    private var daemonConfigs: List<DaemonConfig>? = null
     private val reloadMutex = Mutex()
 
     init {
-        loadQuote()
         // Daemon 状态是异步并行探测出来的，任何一次刷新都重算页面数据
         viewModelScope.launch { registry.statuses.collect { publish() } }
         // 设置变化：同步注册表（configure 内部对未变化的连接早退，代价极低），
         // 但只有连接配置真的增删改才重做一轮网络刷新，避免改主题等写入触发风暴。
         viewModelScope.launch {
             store.settingsFlow.collect { latest ->
-                val signature = latest.daemons.joinToString("|") { "${it.id}:${it.baseUrl}:${it.apiKey}" }
-                val first = daemonSignature == null
-                val daemonsChanged = first || signature != daemonSignature
-                daemonSignature = signature
+                val first = daemonConfigs == null
+                val daemonsChanged = latest.daemons != daemonConfigs
+                val changedIds = settings.daemons.filter { it !in latest.daemons }.mapTo(mutableSetOf()) { it.id }
+                daemonConfigs = latest.daemons
                 settings = latest
                 registry.sync(latest)
+                if (changedIds.isNotEmpty()) {
+                    changedIds.forEach(::closeMonitor)
+                    _state.update { current ->
+                        current.copy(
+                            servers = current.servers.filterNot { it.ref?.daemonId in changedIds },
+                            daemonFailures = current.daemonFailures.filterKeys { it !in changedIds },
+                        )
+                    }
+                }
                 if (first) {
                     _state.update { it.copy(selectedDaemonId = preferredDaemonId(latest)) }
                 }
                 publish()
-                if (daemonsChanged) reload()
+                if (daemonsChanged) launch { reload() }
             }
         }
         // 周期轮询：实例状态 + 负载订阅自愈（守护进程重启后连接会被动失效）
@@ -179,7 +162,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 重算页面数据（由状态流、负载与实例列表派生，不发网络请求）。 */
     private fun publish() {
         // 设置首次真实值落盘前不发布：避免首帧闪一下「还没有配置任何服务端」
-        if (daemonSignature == null) return
+        if (daemonConfigs == null) return
         val statuses: Map<String, DaemonStatus> = registry.statuses.value
         val servers = _state.value.servers
         val pages = settings.daemons.map { daemon ->
@@ -216,7 +199,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             val selected = current.selectedDaemonId.takeIf { id -> pages.any { it.daemonId == id } }
                 ?: preferredDaemonId(settings)
             current.copy(
-                loading = false,
                 pages = pages,
                 selectedDaemonId = selected,
             )
@@ -229,25 +211,38 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 重新拉取一轮：并行探测所有 Daemon → 聚合实例列表 → 补齐/回收负载订阅。
      * [silent] 为 true 时不显示下拉刷新态（后台轮询用）。
      */
-    private suspend fun reload(silent: Boolean = false) {
-        if (!reloadMutex.tryLock()) return
+    private suspend fun reload(silent: Boolean = false, onlyDaemon: String? = null) = reloadMutex.withLock {
+        if (daemonConfigs == null) return@withLock
+        val snapshotSettings = settings
+        if (!silent) _state.update { it.copy(refreshing = true) }
         try {
-            if (!silent) _state.update { it.copy(refreshing = true) }
-            runCatching { catalog.load(settings, refreshDaemonStatuses = !silent) }
-                .onSuccess { servers ->
-                    _state.update { it.copy(refreshing = false, error = null, servers = servers) }
-                    detectStatusChanges(servers)
-                    loadIcons(servers)
-                }
-                .onFailure { e ->
-                    AppLogger.w("Home", "聚合服务端列表失败", e)
-                    _state.update { it.copy(refreshing = false, error = e.message ?: "加载失败") }
-                }
-            // 据最新状态维护负载订阅并刷新页码
+            if (onlyDaemon != null) {
+                snapshotSettings.daemons.firstOrNull { it.id == onlyDaemon }?.let { registry.refreshOne(it) }
+            }
+            if (settings.daemons != snapshotSettings.daemons) return@withLock
+            val snapshot = catalog.load(snapshotSettings, refreshDaemonStatuses = !silent && onlyDaemon == null)
+            if (settings.daemons != snapshotSettings.daemons) return@withLock
+            val servers = snapshot.servers
+            _state.update { current ->
+                val keys = servers.mapTo(mutableSetOf(), ManagedServer::key)
+                current.copy(
+                    error = null,
+                    servers = servers,
+                    daemonFailures = snapshot.daemonFailures,
+                    icons = current.icons.filterKeys(keys::contains),
+                )
+            }
+            detectStatusChanges(servers)
+            loadIcons(servers.sortedByDescending { it.running }.take(4))
             ensureMonitors()
-            publish()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLogger.w("Home", "聚合服务端列表失败", e)
+            _state.update { it.copy(error = e.message ?: "加载失败") }
         } finally {
-            reloadMutex.unlock()
+            _state.update { it.copy(loading = false, refreshing = false) }
+            publish()
         }
     }
 
@@ -263,7 +258,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun loadIcons(servers: List<ManagedServer>) {
         val icons = InstanceIcons.load(container, servers)
         if (icons.isEmpty()) return
-        _state.update { it.copy(icons = it.icons + icons) }
+        _state.update { current ->
+            val keys = current.servers.mapTo(mutableSetOf(), ManagedServer::key)
+            current.copy(icons = current.icons + icons.filterKeys(keys::contains))
+        }
     }
 
     /** 卡片滑动切页：只改选中的 Daemon，不触发网络请求。 */
@@ -273,48 +271,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         publish()
     }
 
-    /** 实例列表是否只显示当前卡片那台服务端的实例。 */
-    fun setOnlySelected(only: Boolean) {
-        _state.update { it.copy(onlySelected = only) }
-    }
-
     /** 单台 Daemon 重连（卡片「重连」按钮）。 */
     fun reconnect(daemonId: String) {
-        viewModelScope.launch {
-            val daemon = settings.daemons.firstOrNull { it.id == daemonId } ?: return@launch
-            registry.repositoryFor(daemonId)?.let { repo ->
-                // 地址可能被规范化（http→https），回写避免下次仍用旧地址
-                runCatching {
-                    if (repo.baseUrl.isNotBlank() && repo.baseUrl != daemon.baseUrl) {
-                        store.upsertDaemon(daemon.copy(baseUrl = repo.baseUrl))
-                    }
-                }.onFailure { AppLogger.w("Home", "回写 Daemon 地址失败", it) }
-            }
-            registry.refreshOne(daemon, isDefault = daemonId == settings.activeDaemonId)
-            reload()
-        }
+        viewModelScope.launch { reload(onlyDaemon = daemonId) }
     }
 
     /** 删除某台 Daemon 后由设置页写入新配置，主页经 settingsFlow 自动跟进，此处无需额外处理。 */
     fun clearNotifications() {
         _state.update { it.copy(notifications = emptyList()) }
-    }
-
-    /** 加载一言（Hitokoto）金句；失败时置 quoteFailed=true 由 UI 展示兜底文案，绝不崩溃。 */
-    fun loadQuote() {
-        viewModelScope.launch {
-            runCatching {
-                val q = ApiClient.buildHitokotoApi().quote()
-                val text = q.hitokoto?.trim().orEmpty()
-                if (text.isBlank()) throw IllegalStateException("一言返回为空")
-                text to (q.fromWho?.takeIf { it.isNotBlank() } ?: q.from.orEmpty())
-            }.onSuccess { (text, source) ->
-                _state.update { it.copy(quote = text, quoteSource = source, quoteFailed = false) }
-            }.onFailure { e ->
-                AppLogger.w("Home", "一言加载失败", e)
-                _state.update { it.copy(quote = "", quoteSource = "", quoteFailed = true) }
-            }
-        }
     }
 
     // ---------------------------------------------------------------- 负载订阅
@@ -329,13 +293,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             .filter { registry.statusOf(it).state == DaemonState.ONLINE }
             .toSet()
 
-        val stale = monitorClients.keys.filterNot { it in onlineIds }
-        stale.forEach { id ->
-            val client = monitorClients.remove(id)
-            if (client != null) runCatching { client.close() }
-        }
+        val stale = monitorClients.filter { (id, monitor) -> id !in onlineIds || repositoryOf(id)?.baseUrl != monitor.first }
+        stale.keys.forEach(::closeMonitor)
 
         onlineIds.filterNot { it in monitorClients }.forEach { id -> startMonitor(id) }
+    }
+
+    private fun closeMonitor(daemonId: String) {
+        monitorClients.remove(daemonId)?.second?.let { runCatching { it.close() } }
+        loads.remove(daemonId)
     }
 
     /**
@@ -344,14 +310,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun startMonitor(daemonId: String) {
         val repository = registry.repositoryFor(daemonId) ?: return
-        val client = repository.createSystemMonitorClient { stats -> onSystemStats(daemonId, stats) }
-        monitorClients[daemonId] = client
-        viewModelScope.launch(Dispatchers.IO) {
-            val ok = runCatching { client.connect() }.isSuccess
-            if (!ok && monitorClients[daemonId] === client) {
-                monitorClients.remove(daemonId)
-                runCatching { client.disconnect() }
+        val url = repository.baseUrl
+        lateinit var client: SystemMonitorClient
+        client = repository.createSystemMonitorClient { stats ->
+            viewModelScope.launch {
+                if (monitorClients[daemonId]?.second === client) onSystemStats(daemonId, stats)
             }
+        }
+        monitorClients[daemonId] = url to client
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { runCatching { client.connect() }.isSuccess }
+            if (!ok && monitorClients[daemonId]?.second === client) closeMonitor(daemonId)
         }
     }
 
@@ -416,9 +385,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
-        val clients = monitorClients.values.toList()
-        monitorClients.clear()
-        clients.forEach { runCatching { it.close() } }
+        monitorClients.keys.toList().forEach(::closeMonitor)
         super.onCleared()
     }
 }

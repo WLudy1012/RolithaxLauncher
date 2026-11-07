@@ -1,7 +1,6 @@
 package com.wludy.rolithax.launcher.data
 
 import android.util.Base64
-import com.wludy.rolithax.launcher.data.model.CommandResultPayload
 import com.wludy.rolithax.launcher.data.model.CreateServerRequest
 import com.wludy.rolithax.launcher.data.model.ServerCoreClassify
 import com.wludy.rolithax.launcher.data.model.ServerCoreDownloadInfo
@@ -26,7 +25,6 @@ import com.wludy.rolithax.launcher.data.model.UserInfo
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.wludy.rolithax.launcher.data.remote.ApiClient
-import com.wludy.rolithax.launcher.data.remote.ConsoleHubClient
 import com.wludy.rolithax.launcher.data.remote.DaemonApi
 import com.wludy.rolithax.launcher.data.remote.SystemMonitorClient
 import kotlinx.coroutines.Dispatchers
@@ -424,13 +422,7 @@ class InstanceRepository {
         resp.message ?: "保存成功"
     }
 
-    fun createConsoleClient(
-        instanceId: Long,
-        onLog: (String) -> Unit,
-        onCommandResult: (CommandResultPayload) -> Unit,
-        onEulaRequired: () -> Unit,
-    ): ConsoleHubClient = ConsoleHubClient(baseUrl, apiKey, instanceId, onLog, onCommandResult, onEulaRequired)
-        .also { hubClients += it }
+    internal val consoleConnection: SharedDaemonConnection? get() = sharedConnection
 
     /** 创建系统负载监视客户端(订阅 /api/hubs/system 的 ReceiveSystemStats)。 */
     fun createSystemMonitorClient(

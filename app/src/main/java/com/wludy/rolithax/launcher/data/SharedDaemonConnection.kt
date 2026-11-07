@@ -20,6 +20,9 @@ import com.wludy.rolithax.launcher.data.model.PmListData
 import com.wludy.rolithax.launcher.data.model.PmSetRequest
 import com.wludy.rolithax.launcher.data.model.ResourceInstallBatchRequest
 import com.wludy.rolithax.launcher.data.model.ResourceInstallTaskData
+import com.wludy.rolithax.launcher.shared.ConsoleCursor
+import com.wludy.rolithax.launcher.shared.ConsoleEvent
+import com.wludy.rolithax.launcher.shared.DaemonConsole
 import com.wludy.rolithax.launcher.shared.DaemonClient
 import com.wludy.rolithax.launcher.shared.DaemonException
 import com.wludy.rolithax.launcher.shared.cancelCreationWithMessage
@@ -41,10 +44,12 @@ import com.wludy.rolithax.launcher.shared.resourceTaskPayload
 import com.wludy.rolithax.launcher.shared.setPluginsModsWithMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -53,8 +58,8 @@ import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 
 internal class SharedDaemonConnection(
-    baseUrl: String,
-    apiKey: String,
+    private val baseUrl: String,
+    private val apiKey: String,
     source: OkHttpClient,
 ) {
     private val lifetime = Job()
@@ -230,6 +235,26 @@ internal class SharedDaemonConnection(
         }
         val registration = lifetime.invokeOnCompletion { request.cancel() }
         try { request.await() } finally { registration.dispose() }
+    }
+
+    suspend fun runConsole(
+        instanceId: Long,
+        cursor: ConsoleCursor?,
+        onSession: (DaemonConsole) -> Unit,
+        onEvent: suspend (ConsoleEvent) -> Unit,
+    ) = coroutineScope {
+        val console = DaemonConsole(baseUrl, apiKey, http, allowHttp = baseUrl.startsWith("http://", true))
+        val stream = launch(start = CoroutineStart.LAZY) { console.run(instanceId, cursor, onEvent) }
+        val registration = lifetime.invokeOnCompletion { stream.cancel() }
+        try {
+            if (!stream.isCancelled) {
+                onSession(console)
+                stream.start()
+            }
+            stream.join()
+        } finally {
+            registration.dispose()
+        }
     }
 
     fun close() {

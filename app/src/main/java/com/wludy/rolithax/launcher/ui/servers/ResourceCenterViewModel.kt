@@ -348,8 +348,7 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
     private fun loadTargets() {
         viewModelScope.launch {
             val settings = runCatching { container.settingsStore.settingsFlow.first() }.getOrDefault(AppSettings())
-            container.daemonRegistry.sync(settings)
-            val servers = runCatching { container.serverCatalog.load(settings) }.getOrDefault(emptyList())
+            val servers = runCatching { container.serverCatalog.load(settings).servers }.getOrDefault(emptyList())
             _state.update { it.copy(loadingTargets = false, servers = servers) }
             if (servers.size == 1) selectServer(servers.first())
         }

@@ -1,7 +1,6 @@
 package com.wludy.rolithax.launcher.desktop
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -77,11 +76,8 @@ fun main() = application {
         icon = painterResource("rolithax_app.png"),
         state = rememberWindowState(size = initialSize),
     ) {
-        val dark = isSystemInDarkTheme()
-        DisposableEffect(window, dark) {
+        LaunchedEffect(window, initialSize) {
             window.minimumSize = java.awt.Dimension(initialSize.width.value.toInt().coerceAtMost(820), initialSize.height.value.toInt().coerceAtMost(560))
-            styleWindowsTitleBar(window, dark)
-            onDispose { }
         }
         RolithaxWindowsTheme {
             Surface(Modifier.fillMaxSize()) { DesktopApp(closeRequested, { closeRequested = false }, ::exitApplication) }

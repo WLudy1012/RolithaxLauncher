@@ -936,8 +936,9 @@ internal class DesktopController(private val scope: CoroutineScope) {
                     when (event) {
                         ConsoleEvent.Connected -> state = state.copy(consoleConnected = true)
                         ConsoleEvent.Disconnected -> state = state.copy(consoleConnected = false)
+                        ConsoleEvent.Gap -> addConsoleLine("控制台重连，部分日志可能缺失。")
                         is ConsoleEvent.Log -> addConsoleLine(event.line)
-                        is ConsoleEvent.CommandResult -> addConsoleLine(event.message ?: if (event.success) "命令已执行" else "命令执行失败")
+                        is ConsoleEvent.CommandResult -> addConsoleLine(event.message ?: if (event.success) "命令已发送" else "命令发送失败")
                         ConsoleEvent.EulaRequired -> state = state.copy(eulaRequired = true)
                     }
                 }

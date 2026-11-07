@@ -12,24 +12,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: desktop-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  desktop:
-    name: ${{ matrix.platform }} 桌面验证
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: Windows
-            runner: windows-2025
-          - platform: Linux
-            runner: ubuntu-24.04
+  linux:
+    name: Linux 桌面验证
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: 配置 JetBrains Runtime 21
         uses: actions/setup-java@v6
@@ -42,70 +37,157 @@ jobs:
 
       - name: 配置 Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
 
       - name: 准备 Linux 显示环境与中文字体
-        if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xauth fonts-noto-cjk
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends xvfb xauth fonts-noto-cjk
           chmod +x gradlew
 
-      - name: 配置 Windows WiX
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: 测试并构建 Linux 应用
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test :desktop:createDistributable :console-sdk:installDist :console-sdk:distZip --no-daemon --stacktrace
+
+      - name: 验证控制台 SDK 和模板
         run: |
-          $wixBin = Join-Path ${env:ProgramFiles(x86)} 'WiX Toolset v3.14\bin'
-          if (-not (Test-Path (Join-Path $wixBin 'candle.exe'))) {
-            throw "未找到 WiX 3：$wixBin"
-          }
-          $wixBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "WIX_PATH=$wixBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          sdk=console-sdk/build/install/rolithax-console-sdk/bin/rolithax-console-sdk
+          template="$RUNNER_TEMP/rolithax-console-template"
+          "$sdk" init "$template"
+          "$sdk" validate "$template"
+          "$sdk" replay "$template" "$template/fixtures/logs.txt" "$template/fixtures/expected.json"
+          "$sdk" pack "$template" "$RUNNER_TEMP/paper-console-plugin.zip"
 
-      - name: Linux 共享及桌面测试
-        if: runner.os == 'Linux'
-        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test --no-daemon --stacktrace
+      - name: 上传控制台 SDK 和样例插件
+        uses: actions/upload-artifact@v7
+        with:
+          name: Rolithax-Console-SDK
+          path: |
+            console-sdk/build/distributions/*.zip
+            ${{ runner.temp }}/paper-console-plugin.zip
+          if-no-files-found: error
 
-      - name: Windows 共享及桌面测试
-        if: runner.os == 'Windows'
-        run: .\gradlew.bat :shared:desktopTest :desktop:test --no-daemon --stacktrace
-
-      - name: Linux 桌面应用打包
-        if: runner.os == 'Linux'
+      - name: 归档 Linux 应用
         run: |
-          ./gradlew :desktop:createDistributable --no-daemon --stacktrace
-          tar -C desktop/build/compose/binaries/main/app -czf RolithaxLauncher-Linux.tar.gz RolithaxLauncher
-
-      - name: Windows 桌面应用打包
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          .\gradlew.bat :desktop:createDistributable --no-daemon --stacktrace
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Compress-Archive -Path desktop/build/compose/binaries/main/app/RolithaxLauncher -DestinationPath RolithaxLauncher-Windows.zip
+          app=desktop/build/compose/binaries/main/app
+          test -x "$app/RolithaxLauncher/bin/RolithaxLauncher"
+          mkdir -p desktop/build/outputs
+          tar -C "$app" -czf desktop/build/outputs/RolithaxLauncher-Linux.tar.gz RolithaxLauncher
 
       - name: 上传 Linux 应用
-        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
         with:
           name: RolithaxLauncher-Linux
-          path: RolithaxLauncher-Linux.tar.gz
+          path: desktop/build/outputs/RolithaxLauncher-Linux.tar.gz
           if-no-files-found: error
-
-      - name: 上传 Windows 应用
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: RolithaxLauncher-Windows
-          path: RolithaxLauncher-Windows.zip
-          if-no-files-found: error
+          compression-level: 0
 
       - name: 上传桌面测试结果与渲染样本
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-results-${{ matrix.platform }}
+          name: desktop-results-Linux
           path: |
             desktop/build/reports/tests/test/
+            desktop/build/test-results/test/
             desktop/build/visual-check/
             shared/build/reports/tests/desktopTest/
+            shared/build/test-results/desktopTest/
           if-no-files-found: ignore
+
+  windows:
+    name: Windows 桌面验证
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/windows/build/nuget-packages
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: 配置 JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name != 'push' || github.ref != 'refs/heads/dev' }}
+
+      - name: 缓存 Kotlin/Native 工具链依赖
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.konan/dependencies
+            !~/.konan/dependencies/cache
+          key: desktop-konan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties', 'shared/build.gradle.kts') }}
+
+      - name: 配置 Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: 配置 .NET 10
+        id: dotnet
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: latest
+          dotnet-channel: "10.0"
+          dotnet-quality: ga
+          skip-lts-prepass: true
+
+      - name: 缓存 NuGet 依赖
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.NUGET_PACKAGES }}
+          key: desktop-nuget-${{ runner.os }}-${{ runner.arch }}-${{ steps.dotnet.outputs.dotnet-version }}-${{ hashFiles('windows/Rolithax.Windows.csproj', '**/NuGet.Config', '**/Directory.Build.*', '**/Directory.Packages.props') }}
+
+      - name: 构建 Kotlin/Native 核心
+        run: .\gradlew.bat '-Prolithax.windowsNative=true' '-Pkotlin.native.distribution.downloadFromMaven=true' :shared:linkReleaseSharedMingwX64 --no-daemon --stacktrace
+
+      - name: 验证 C ABI
+        run: python windows/tests/core_smoke.py shared/build/bin/mingwX64/releaseShared/rolithax_core.dll
+
+      - name: 发布 WinUI 3 自包含应用
+        working-directory: windows
+        env:
+          DOTNET_SDK_VERSION: ${{ steps.dotnet.outputs.dotnet-version }}
+        run: |
+          if ($env:DOTNET_SDK_VERSION -notmatch '^10\.0\.\d+$') {
+            throw '需要 .NET 10 正式版 SDK'
+          }
+          @{ sdk = @{ version = $env:DOTNET_SDK_VERSION; rollForward = 'disable' } } |
+            ConvertTo-Json -Depth 3 | Set-Content global.json -Encoding utf8
+          $core = (Resolve-Path '../shared/build/bin/mingwX64/releaseShared/rolithax_core.dll').Path
+          dotnet publish Rolithax.Windows.csproj -c Release -r win-x64 --self-contained true -o build/RolithaxLauncher "-p:RolithaxCorePath=$core"
+
+      - name: 验证并归档 Windows 应用
+        run: |
+          $app = 'windows/build/RolithaxLauncher'
+          $expected = @(
+            'RolithaxLauncher.exe', 'RolithaxLauncher.pri', 'App.xbf', 'MainWindow.xbf',
+            'coreclr.dll', 'Microsoft.UI.Xaml.dll', 'rolithax_core.dll',
+            'legal/WindowsAppSDK-LICENSE.txt', 'legal/WindowsAppSDK-NOTICE.txt'
+          )
+          foreach ($name in $expected) {
+            if ((Get-Item -LiteralPath (Join-Path $app $name)).Length -eq 0) {
+              throw "发布文件为空：$name"
+            }
+          }
+          $original = (Get-FileHash 'shared/build/bin/mingwX64/releaseShared/rolithax_core.dll').Hash
+          if ((Get-FileHash "$app/rolithax_core.dll").Hash -ne $original) {
+            throw 'WinUI 包内的 DLL 与通过 C ABI 测试的 DLL 不一致'
+          }
+          Compress-Archive -LiteralPath $app -DestinationPath windows/build/RolithaxLauncher-Windows.zip
+
+      - name: 上传 Windows 应用
+        uses: actions/upload-artifact@v7
+        with:
+          name: RolithaxLauncher-Windows
+          path: windows/build/RolithaxLauncher-Windows.zip
+          if-no-files-found: error
+          compression-level: 0

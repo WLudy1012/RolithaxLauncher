@@ -6,11 +6,12 @@ import com.wludy.rolithax.launcher.data.AppLogger
 import com.wludy.rolithax.launcher.localengine.NativeVm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -24,14 +25,29 @@ import java.io.File
  * 用户离开界面后要能继续运行、回到界面要能接着看日志，所以运行实例与日志
  * 必须挂在进程级单例上，由 `LocalServerService` 前台服务保证进程不被回收。
  */
+data class LocalConsoleLine(val id: Long, val text: String, val system: Boolean = false)
+
+data class LocalConsoleOutput(
+    val directory: String = "",
+    val generation: Long = 0,
+    val lines: List<LocalConsoleLine> = emptyList(),
+)
+
 object LocalServerRuntime {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val startMutex = Mutex()
     private val lifecycleLock = Any()
 
-    private val _logs = MutableStateFlow<List<String>>(emptyList())
-    val logs: StateFlow<List<String>> = _logs.asStateFlow()
+    private val _consoleOutput = MutableStateFlow(LocalConsoleOutput())
+    val consoleOutput = _consoleOutput.asStateFlow()
+    private val lines = ArrayDeque<LocalConsoleLine>()
+    private var lineId = 0L
+    private var generation = 0L
+    private var characters = 0
+    private var publishJob: Job? = null
+    private var engineLogsJob: Job? = null
+    private val commandMutex = Mutex()
 
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
@@ -82,17 +98,43 @@ object LocalServerRuntime {
         }
     }
 
-    /** 向当前运行实例发送一条控制台命令。 */
-    fun sendCommand(command: String) {
-        engine?.sendCommand(command)
+    suspend fun sendCommand(dirName: String, command: String): Boolean = commandMutex.withLock {
+        val current = runningEngine(dirName) ?: return@withLock false
+        val sent = withContext(Dispatchers.IO) { current.sendCommand(command) }
+        if (sent) synchronized(lifecycleLock) {
+            if (engine === current) appendLocked("> $command", system = true)
+        }
+        sent
     }
 
-    fun append(line: String) {
-        _logs.update { (it + line).takeLast(2000) }
+    fun append(line: String) = synchronized(lifecycleLock) { appendLocked(line, system = true) }
+
+    private fun appendLocked(line: String, system: Boolean = false) {
+        val text = if (line.length <= 8192) line else line.take(8192) + " …（已截断）"
+        lines.addLast(LocalConsoleLine(++lineId, text, system))
+        characters += text.length
+        while (lines.size > 2000 || characters > 1_000_000) {
+            characters -= lines.removeFirst().text.length
+        }
+        if (publishJob?.isActive == true) return
+        publishJob = scope.launch {
+            delay(40)
+            synchronized(lifecycleLock) {
+                publishJob = null
+                _consoleOutput.value = LocalConsoleOutput(currentDirName, generation, lines.toList())
+            }
+        }
     }
 
-    fun clearLogs() {
-        _logs.value = emptyList()
+    private fun resetOutput(initialLogs: List<String>) {
+        publishJob?.cancel()
+        publishJob = null
+        generation++
+        lineId = 0L
+        lines.clear()
+        characters = 0
+        _consoleOutput.value = LocalConsoleOutput(currentDirName, generation)
+        initialLogs.forEach { appendLocked(it, system = true) }
     }
 
     fun refreshJvmState() {
@@ -116,6 +158,7 @@ object LocalServerRuntime {
         keepAlive: Boolean,
         runtime: LocalJreManager.JavaRuntime = LocalJreManager.DEFAULT_RUNTIME,
         useExec: Boolean = false,
+        initialLogs: List<String> = emptyList(),
     ): Result<Unit> {
         val reserved = synchronized(lifecycleLock) {
             if (startingDirName.isNotEmpty() || _running.value || engine?.running?.value == true) {
@@ -156,16 +199,31 @@ object LocalServerRuntime {
                             runtime = runtime,
                         )
                     }
-                    engine = chosen
-                    currentServerName = serverName
-                    currentDirName = workDir.name
-                    scope.launch { chosen.logs.collect { append(it) } }
+                    synchronized(lifecycleLock) {
+                        engine?.closeLogs()
+                        engine = chosen
+                        currentServerName = serverName
+                        currentDirName = workDir.name
+                        resetOutput(initialLogs)
+                        engineLogsJob?.cancel()
+                        engineLogsJob = scope.launch {
+                            chosen.logs.collect { line ->
+                                synchronized(lifecycleLock) {
+                                    if (engine === chosen) appendLocked(line.text, line.system)
+                                }
+                            }
+                        }
+                    }
                     chosen.onExit = { code ->
-                        _running.value = false
-                        refreshJvmState()
-                        releaseWakeLock()
-                        AppLogger.i("LocalEngine", "服务端退出 rc=$code（${chosen.kind}），停止前台服务")
-                        if (keepAlive) runCatching { LocalServerService.stop(app) }
+                        synchronized(lifecycleLock) {
+                            if (engine === chosen) {
+                                refreshJvmState()
+                                releaseWakeLock()
+                                AppLogger.i("LocalEngine", "服务端退出 rc=$code（${chosen.kind}），停止前台服务")
+                                if (keepAlive) runCatching { LocalServerService.stop(app) }
+                                _running.value = false
+                            }
+                        }
                     }
                     // 前台服务必须在引擎启动前就位：staging/exec 可能耗时数秒，若等服务端起来后再
                     // startForegroundService，会撞上系统前台服务时限；且服务端秒退时 onExit 的 stop
@@ -178,7 +236,6 @@ object LocalServerRuntime {
                     }
                     val ok = withContext(Dispatchers.IO) { chosen.start() }
                     if (!ok) {
-                        engine = null
                         releaseWakeLock()
                         if (keepAlive) runCatching { LocalServerService.stop(app) }
                         throw IllegalStateException("启动失败，详见日志")
@@ -198,7 +255,23 @@ object LocalServerRuntime {
     /** 优雅停止：向服务端 stdin 发 stop（exec 模式超时兜底 kill）。 */
     fun stop() {
         val current = engine ?: return
-        scope.launch { withContext(Dispatchers.IO) { current.stop() } }
+        requestStop(current)
+    }
+
+    fun stop(dirName: String): Boolean {
+        val current = runningEngine(dirName) ?: return false
+        requestStop(current)
+        return true
+    }
+
+    private fun requestStop(current: LocalEngine) {
+        scope.launch {
+            commandMutex.withLock { withContext(Dispatchers.IO) { current.stop() } }
+        }
+    }
+
+    private fun runningEngine(dirName: String): LocalEngine? = synchronized(lifecycleLock) {
+        engine?.takeIf { currentDirName == dirName && it.running.value }
     }
 
     private fun acquireWakeLock(context: Context) {

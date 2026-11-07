@@ -221,7 +221,10 @@ class SettingsStore(private val context: Context) {
         s.copy(daemons = daemons, activeDaemonId = active)
     }
 
-    suspend fun setActiveDaemon(id: String) = update { it.copy(activeDaemonId = id) }
+    suspend fun setActiveDaemon(id: String) = update {
+        require(it.daemons.any { daemon -> daemon.id == id }) { "连接已移除" }
+        it.copy(activeDaemonId = id)
+    }
 
     suspend fun setTheme(mode: ThemeMode, seedColor: Long) =
         update { it.copy(themeMode = mode, seedColor = seedColor) }

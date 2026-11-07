@@ -163,12 +163,6 @@ data class DeleteServerRequest(
     @SerializedName("deleteFiles") val deleteFiles: Boolean = false,
 )
 
-/** SignalR CommandResult 事件负载：{ "success": bool, "message": "..." } */
-data class CommandResultPayload(
-    @SerializedName("success") val success: Boolean = false,
-    @SerializedName("message") val message: String? = null,
-)
-
 /** GET /api/files/instance/{id}/lists 的 data 数组元素(文件/目录项)。 */
 data class FileItem(
     @SerializedName("name") val name: String = "",

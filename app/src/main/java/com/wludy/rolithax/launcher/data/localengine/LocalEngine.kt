@@ -3,6 +3,8 @@ package com.wludy.rolithax.launcher.data.localengine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
+data class LocalEngineLine(val text: String, val system: Boolean = false)
+
 /** 本机开服引擎类型。 */
 enum class EngineKind {
     /**
@@ -32,7 +34,9 @@ interface LocalEngine {
     val kind: EngineKind
 
     /** 服务端 stdout/stderr 行流（引擎内部已合流为可读日志行）。 */
-    val logs: Flow<String>
+    val logs: Flow<LocalEngineLine>
+
+    fun closeLogs()
 
     /** 是否正在运行。 */
     val running: StateFlow<Boolean>
@@ -47,7 +51,7 @@ interface LocalEngine {
     suspend fun start(): Boolean
 
     /** 向服务端 stdin 发送一条控制台命令（如 stop / say hi）。 */
-    fun sendCommand(command: String)
+    fun sendCommand(command: String): Boolean
 
     /** 优雅停止：先发 stop；exec 模式超时兜底 kill。 */
     fun stop()
