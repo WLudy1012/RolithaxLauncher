@@ -36,7 +36,9 @@ class InProcessJvmEngine(
         runtime = runtime,
     )
 
-    override val logs: Flow<String> = launcher.logs
+    override val logs: Flow<LocalEngineLine> = launcher.logs
+
+    override fun closeLogs() = launcher.closeLogs()
 
     private val _running = MutableStateFlow(false)
     override val running: StateFlow<Boolean> = _running.asStateFlow()

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\Rolithax.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>RolithaxLauncher</AssemblyName>
+    <RootNamespace>Rolithax.Windows</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);build/**</DefaultItemExcludes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.4" GeneratePathProperty="true" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <Content Include="Assets\Rolithax.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\desktop\src\main\resources\rolithax_app.png" Link="Assets\Rolithax.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\app\src\main\assets\legal\**\*" Link="legal\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgMicrosoft_WindowsAppSDK)\license.txt" Condition="'$(PkgMicrosoft_WindowsAppSDK)' != ''" Link="legal\WindowsAppSDK-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(PkgMicrosoft_WindowsAppSDK)\NOTICE.txt" Condition="'$(PkgMicrosoft_WindowsAppSDK)' != ''" Link="legal\WindowsAppSDK-NOTICE.txt" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="$(RolithaxCorePath)" Condition="'$(RolithaxCorePath)' != ''" Link="rolithax_core.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <Target Name="CheckRolithaxCore" BeforeTargets="Publish">
+    <Error Condition="!Exists('$(RolithaxCorePath)')" Text="Pass -p:RolithaxCorePath=&lt;absolute path to rolithax_core.dll&gt; when publishing." />
+  </Target>
+  <!-- Unpackaged WinUI publishing omits app resources (WindowsAppSDK #6720). -->
+  <Target Name="PublishWinUIResources" AfterTargets="Publish">
+    <ItemGroup>
+      <WinUIResource Include="$(TargetDir)$(AssemblyName).pri;$(TargetDir)*.xbf" />
+    </ItemGroup>
+    <Copy SourceFiles="@(WinUIResource)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

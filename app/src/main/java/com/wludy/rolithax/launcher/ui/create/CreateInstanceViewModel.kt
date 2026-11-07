@@ -10,6 +10,7 @@ import com.wludy.rolithax.launcher.data.AppLogger
 import com.wludy.rolithax.launcher.data.AppSettings
 import com.wludy.rolithax.launcher.data.DaemonOption
 import com.wludy.rolithax.launcher.data.InstanceRepository
+import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.ensureRepository
 import com.wludy.rolithax.launcher.data.localengine.InstanceStorage
 import com.wludy.rolithax.launcher.data.localengine.LocalCoreInstaller
@@ -23,6 +24,8 @@ import com.wludy.rolithax.launcher.data.model.ServerCoreDownloadInfo
 import com.wludy.rolithax.launcher.data.model.ServerCoreMirror
 import com.wludy.rolithax.launcher.data.remote.CreationProgressClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,24 +34,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 /** 已同意 EULA 的 eula.txt 内容（与守护进程 AgreeEULA 写入格式一致）。 */
 private const val EULA_AGREED_CONTENT =
     "#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\n#Rolithax Launcher auto agreed\neula=true\n"
-
-/**
- * 「重按新建 tab 重置表单」的跨层事件通道：底部 Dock 在 NavHost 外层（AppNavHost），
- * 而表单状态在页面内的 CreateInstanceViewModel，两者通过此单例桥接。
- */
-object CreateResetBus {
-    private val _events = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val events = _events.asSharedFlow()
-
-    /** 请求重置新建实例表单（由 Dock 重按新建 tab 触发）。 */
-    fun request() {
-        _events.tryEmit(Unit)
-    }
-}
 
 data class CoreCategory(
     val key: String,
@@ -113,6 +103,7 @@ data class CreateInstanceUiState(
     val availableDaemons: List<DaemonOption> = emptyList(),
     /** 当前选中的目标 Daemon（初值为「默认 Daemon」）。 */
     val selectedDaemonId: String = "",
+    val bindingDaemon: Boolean = true,
     // 模式: 1 快速 / 2 整合包 / 3 基岩版 / 4 MCDR / 10 自定义
     val mode: Int = 1,
     val step: Int = 0,
@@ -196,7 +187,10 @@ data class CreateInstanceUiState(
     val error: String? = null,
 )
 
-class CreateInstanceViewModel(application: Application) : AndroidViewModel(application) {
+class CreateInstanceViewModel(
+    application: Application,
+    private val initialSource: String,
+) : AndroidViewModel(application) {
 
     private val container = getApplication<RolithaxApplication>().container
     private val settingsStore = container.settingsStore
@@ -205,7 +199,9 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
      * 目标 Daemon 的仓储：随 [CreateInstanceUiState.selectedDaemonId] 切换（未选中时为
      * 未配置仓储，调用只会得到「尚未配置连接信息」而不会崩溃）。
      */
-    private var repository: InstanceRepository = InstanceRepository()
+    private val unavailableRepository = InstanceRepository()
+    private var repository = unavailableRepository
+    private var daemonBinding: Job? = null
 
     private val _state = MutableStateFlow(CreateInstanceUiState())
     val state = _state.asStateFlow()
@@ -216,8 +212,12 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     private var creationClient: CreationProgressClient? = null
 
     init {
+        if (initialSource == ServerRef.LOCAL_DAEMON_ID) {
+            setTarget("local")
+        } else {
+            loadLocalRuntimes()
+        }
         loadDaemons()
-        loadLocalRuntimes()
         loadLocalDefaults()
     }
 
@@ -226,37 +226,53 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             val settings = runCatching { settingsStore.settingsFlow.first() }.getOrNull()
             val daemons = settings?.daemons.orEmpty()
-            val initial = settings?.activeDaemonId?.takeIf { id -> daemons.any { it.id == id } }
-                ?: daemons.firstOrNull()?.id
-                ?: ""
-            _state.update { it.copy(availableDaemons = daemons.map { d -> DaemonOption(d.id, d.name) }) }
+            val initial = when {
+                daemons.any { it.id == initialSource } -> initialSource
+                initialSource.isNotBlank() && initialSource != ServerRef.LOCAL_DAEMON_ID -> ""
+                else -> settings?.activeDaemonId?.takeIf { id -> daemons.any { it.id == id } }
+                    ?: daemons.firstOrNull()?.id.orEmpty()
+            }
+            _state.update { it.copy(availableDaemons = daemons.map { d -> DaemonOption(d.id, d.name.ifBlank { d.baseUrl }) }) }
+            if (daemons.isEmpty() && initialSource.isBlank()) setTarget("local")
             bindDaemon(initial)
         }
     }
 
     /** 切换目标 Daemon：重新解析仓储并重取该 Daemon 的 Java 选项与核心分类。 */
     private fun bindDaemon(daemonId: String) {
-        viewModelScope.launch {
-            repository = container.ensureRepository(daemonId) ?: InstanceRepository()
-            _state.update { it.copy(selectedDaemonId = daemonId) }
-            loadJavaOptions()
-            loadCoreCategories()
+        daemonBinding?.cancel()
+        _state.update { it.copy(selectedDaemonId = daemonId, bindingDaemon = true) }
+        daemonBinding = viewModelScope.launch {
+            val selected = container.ensureRepository(daemonId) ?: unavailableRepository
+            ensureActive()
+            repository = selected
+            _state.update { it.copy(bindingDaemon = false) }
+            if (selected !== unavailableRepository) loadJavaOptions(selected)
         }
     }
 
-    /** 界面上选择目标 Daemon。 */
     fun setDaemon(daemonId: String) {
-        if (_state.value.selectedDaemonId == daemonId) return
-        // 上传得到的文件 key / 核心下载信息都属于旧 Daemon，切 Daemon 后一律清空
+        val current = _state.value
+        if (current.selectedDaemonId == daemonId || current.uploading || current.submitting || current.creating) return
+        if (current.availableDaemons.none { it.id == daemonId }) return
         _state.update {
             it.copy(
+                step = 0,
                 core = "",
                 coreUrl = "",
                 coreSha256 = "",
+                coreMirrors = emptyList(),
                 coreFileKey = "",
                 packageFileKey = "",
                 uploadedFileName = "",
                 onlineGameVersion = "",
+                javaType = "online",
+                customJavaPath = "",
+                path = "",
+                packageLocalPath = "",
+                localJavas = emptyList(),
+                onlineJavaVersions = emptyList(),
+                error = null,
             )
         }
         bindDaemon(daemonId)
@@ -267,7 +283,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun setMode(mode: Int) {
-        if (_state.value.mode == mode) return
+        if (_state.value.mode == mode || _state.value.uploading || _state.value.submitting || _state.value.creating) return
         // 切换新建方式：重置向导进度及相关选择状态，避免残留上一方式的旧数据
         _state.update {
             it.copy(
@@ -295,14 +311,14 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
      * 强制回到快速模式(1) 与第一步，并清理与本机无关的整合包/基岩版/MCDR 选项。
      */
     fun setTarget(target: String) {
-        if (_state.value.target == target) return
+        if (_state.value.target == target || _state.value.uploading || _state.value.submitting || _state.value.creating) return
         _state.update {
             it.copy(
                 target = target,
                 step = 0,
                 mode = if (target == "local") 1 else it.mode,
                 downloadType = if (target == "local") "online" else it.downloadType,
-                javaType = if (target == "local") "local" else it.javaType,
+                javaType = if (target == "local") "local" else "online",
                 core = "",
                 coreUrl = "",
                 coreSha256 = "",
@@ -428,6 +444,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 
     fun nextStep() {
         val s = _state.value
+        if (s.uploading || s.submitting || (s.target == "daemon" && !checkDaemonTarget(s))) return
         val steps = wizardSteps(s.mode)
         val key = steps.getOrNull(s.step)?.key
         when (key) {
@@ -466,30 +483,29 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    fun loadJavaOptions() {
-        viewModelScope.launch {
-            val locals = repository.javaList(refresh = false).getOrDefault(emptyList())
-            val status = repository.getStatus().getOrNull()
-            val os = status?.systemInfo?.osType?.lowercase()?.replaceFirst("os", "") ?: ""
-            val arch = when (status?.systemInfo?.osArchitecture?.lowercase()) {
-                "amd64", "x86_64" -> "x64"
-                "aarch64" -> "arm64"
-                else -> status?.systemInfo?.osArchitecture?.lowercase().orEmpty()
-            }
-            val online = if (os.isNotBlank() && arch.isNotBlank()) {
-                repository.onlineJavaVersions(os, arch).getOrDefault(emptyList())
-            } else emptyList()
-            _state.update {
-                it.copy(
-                    localJavas = locals,
-                    onlineJavaVersions = online,
-                    selectedJavaVersion = online.firstOrNull() ?: "21",
-                )
-            }
+    private suspend fun loadJavaOptions(selected: InstanceRepository) {
+        val locals = selected.javaList(refresh = false).getOrDefault(emptyList())
+        val status = selected.getStatus().getOrNull()
+        val os = status?.systemInfo?.osType?.lowercase()?.replaceFirst("os", "") ?: ""
+        val arch = when (status?.systemInfo?.osArchitecture?.lowercase()) {
+            "amd64", "x86_64" -> "x64"
+            "aarch64" -> "arm64"
+            else -> status?.systemInfo?.osArchitecture?.lowercase().orEmpty()
+        }
+        val online = if (os.isNotBlank() && arch.isNotBlank()) {
+            selected.onlineJavaVersions(os, arch).getOrDefault(emptyList())
+        } else emptyList()
+        coroutineContext.ensureActive()
+        _state.update {
+            it.copy(
+                localJavas = locals,
+                onlineJavaVersions = online,
+                selectedJavaVersion = online.firstOrNull() ?: "21",
+            )
         }
     }
 
-    fun loadCoreCategories() {
+    private fun loadCoreCategories() {
         _state.update { it.copy(coreSelectorLoading = true) }
         viewModelScope.launch {
             repository.serverCoreClassify().fold(
@@ -522,6 +538,7 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun openCoreSelector() {
+        if (_state.value.coreCategories.isEmpty() && !_state.value.coreSelectorLoading) loadCoreCategories()
         _state.update {
             // 基岩版模式强制从基岩版分类开始
             it.copy(coreSelectorVisible = true, selectedCategoryKey = if (it.mode == 3) "bedrock" else it.selectedCategoryKey)
@@ -714,13 +731,25 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
     private val CreateInstanceUiState.dockerImage: String
         get() = if (dockerImageType == "preset") "MSLX://DockerImage/Java/$dockerImagePresetVersion" else dockerCustomImage
 
+    private fun checkDaemonTarget(state: CreateInstanceUiState): Boolean {
+        val message = when {
+            state.bindingDaemon -> "正在准备远端连接，请稍候。"
+            state.selectedDaemonId.isBlank() -> "请选择目标 Daemon。"
+            repository === unavailableRepository -> "目标连接不可用，请检查连接。"
+            else -> return true
+        }
+        _message.tryEmit(message)
+        return false
+    }
+
     fun submit() {
-        if (_state.value.submitting || _state.value.creating) return
+        if (_state.value.submitting || _state.value.creating || _state.value.uploading) return
         if (_state.value.target == "local") {
             submitLocal()
             return
         }
         val s = _state.value
+        if (!checkDaemonTarget(s)) return
         if (s.name.isBlank()) {
             _message.tryEmit("请填写实例名称")
             return
@@ -967,20 +996,28 @@ class CreateInstanceViewModel(application: Application) : AndroidViewModel(appli
 
     fun reset() {
         creationClient?.disconnect()
+        val previous = _state.value
         _state.value = CreateInstanceUiState(
-            resetGeneration = _state.value.resetGeneration + 1,
+            target = previous.target,
+            bindingDaemon = previous.bindingDaemon,
+            javaType = if (previous.target == "local") "local" else "online",
+            resetGeneration = previous.resetGeneration + 1,
             onlineJavaVersions = _state.value.onlineJavaVersions,
             localJavas = _state.value.localJavas,
             coreCategories = _state.value.coreCategories,
             localRuntimes = _state.value.localRuntimes,
             // 目标 Daemon 与已加载列表跨表单复用，避免重置后回到未选中状态
             availableDaemons = _state.value.availableDaemons,
-            selectedDaemonId = _state.value.selectedDaemonId,
+            selectedDaemonId = previous.selectedDaemonId,
+            publicStorageSupported = previous.publicStorageSupported,
+            publicStorageGranted = previous.publicStorageGranted,
+            localInstanceStorage = previous.localInstanceStorage,
         )
     }
 
     override fun onCleared() {
         creationClient?.disconnect()
+        unavailableRepository.close()
         super.onCleared()
     }
 }

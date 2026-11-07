@@ -3,6 +3,7 @@ package com.wludy.rolithax.launcher.ui.create
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
@@ -61,8 +62,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -81,7 +80,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.localengine.InstanceStorage
 import com.wludy.rolithax.launcher.data.localengine.LocalStorage
@@ -91,16 +89,17 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.wludy.rolithax.launcher.ui.WorkspaceBar
+import com.wludy.rolithax.launcher.ui.WorkspaceBody
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CreateInstanceScreen(
-    onOpenHome: () -> Unit,
-    onOpenInstances: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onBack: () -> Unit,
+    onOpenInstances: (String) -> Unit,
     /** 创建完成后打开实例控制台：本机/远程统一用 [ServerRef]（远程带目标 daemonId）。 */
     onOpenServer: (ServerRef) -> Unit,
-    viewModel: CreateInstanceViewModel = viewModel(),
+    viewModel: CreateInstanceViewModel,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -118,10 +117,15 @@ fun CreateInstanceScreen(
         onPauseOrDispose { }
     }
 
-    // 重按"新建"tab（Dock 在 NavHost 外层）→ 重置表单
-    LaunchedEffect(Unit) {
-        CreateResetBus.events.collect { viewModel.reset() }
+    val busy = state.creating || state.submitting || state.uploading
+    val leave: () -> Unit = {
+        if (state.creating) {
+            showCancelDialog = true
+        } else if (!busy) {
+            onBack()
+        }
     }
+    BackHandler(enabled = busy, onBack = leave)
 
     val jarLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -144,25 +148,16 @@ fun CreateInstanceScreen(
         // 页面透明：透出全局毛玻璃背景层
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
-                title = { Text("新建实例", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                ),
-            )
+            WorkspaceBar("新建实例", navigationIcon = {
+                IconButton(onClick = leave, enabled = state.creating || !busy) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
+                }
+            })
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                // 键盘弹起时底部按钮上移，避免被 IME 遮挡
-                .imePadding(),
-        ) {
+        WorkspaceBody(Modifier.padding(innerPadding).imePadding()) {
             when {
                 state.success -> SuccessContent(
                     serverId = if (state.target == "local") state.createdDirName else state.createdServerId,
@@ -181,9 +176,7 @@ fun CreateInstanceScreen(
                     },
                     onReset = viewModel::reset,
                     onBackToList = {
-                        // 返回实例列表同样重置，防止删除实例后误进旧实例控制台
-                        viewModel.reset()
-                        onOpenInstances()
+                        onOpenInstances(if (state.target == "local") ServerRef.LOCAL_DAEMON_ID else state.selectedDaemonId)
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -328,50 +321,18 @@ private fun FormContent(
     // 只用于把"下一步被拦下"的必填错误显示到字段上；真正的校验仍在 ViewModel
     var nextAttempted by remember(state.step, state.mode, state.target) { mutableStateOf(false) }
     Column(modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
-        // 创建目标：Daemon / 本机
-        Text("创建目标", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("daemon" to "远程 Daemon", "local" to "本机").forEach { (value, label) ->
-                SelectChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = label)
-            }
+        val targetName = if (isLocal) {
+            "本机"
+        } else {
+            state.availableDaemons.firstOrNull { it.id == state.selectedDaemonId }?.name ?: "选择 Daemon"
         }
-        // 远程目标：选择实例落到哪台 Daemon（去主连接后不再隐含“当前连接”）
-        if (!isLocal) {
-            Spacer(Modifier.height(12.dp))
-            if (state.availableDaemons.size > 1) {
-                Text("目标服务端", style = MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    state.availableDaemons.forEach { daemon ->
-                        SelectChip(
-                            selected = state.selectedDaemonId == daemon.id,
-                            onClick = { onDaemonChange(daemon.id) },
-                            label = daemon.name.ifBlank { daemon.id },
-                        )
-                    }
-                }
-            } else if (state.availableDaemons.isEmpty()) {
-                Text(
-                    "尚未配置 Daemon，请先到设置页添加连接，或选择「本机」创建。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        // 模式选择
-        Text("创建模式", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            visibleModes.forEach { (value, label) ->
-                SelectChip(selected = state.mode == value, onClick = { onModeChange(value) }, label = label)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
+        Text(
+            text = targetName,
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(8.dp))
         StepIndicator(steps, state.step)
         Spacer(Modifier.height(12.dp))
 
@@ -400,7 +361,41 @@ private fun FormContent(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 when (paneStep?.key) {
-                    "basic" -> BasicStep(state, onUpdate, onSelectStorage, showNameError = nextAttempted && state.name.isBlank())
+                    "basic" -> {
+                        SectionCard("创建目标") {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("daemon" to "远端 Daemon", "local" to "本机").forEach { (value, label) ->
+                                    SelectChip(selected = state.target == value, onClick = { onTargetChange(value) }, label = label)
+                                }
+                            }
+                            if (!isLocal) {
+                                if (state.availableDaemons.isEmpty()) {
+                                    Text(
+                                        if (state.bindingDaemon) "正在读取连接…" else "请在「连接」中添加 Daemon，或选择在本机创建。",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                } else {
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        state.availableDaemons.forEach { daemon ->
+                                            SelectChip(
+                                                selected = state.selectedDaemonId == daemon.id,
+                                                onClick = { onDaemonChange(daemon.id) },
+                                                label = daemon.name,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SectionCard("创建模式") {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                visibleModes.forEach { (value, label) ->
+                                    SelectChip(selected = state.mode == value, onClick = { onModeChange(value) }, label = label)
+                                }
+                            }
+                        }
+                        BasicStep(state, onUpdate, onSelectStorage, showNameError = nextAttempted && state.name.isBlank())
+                    }
                     "core" -> CoreStep(state, onUpdate, onOpenCoreSelector, onClearCore, onRemoveUpload, onPickJar)
                     "package" -> PackageStep(state, onUpdate, onOpenCoreSelector, onClearCore, onPickPackage)
                     "java" -> JavaStep(state, onUpdate, onSelectLocalRuntime)
@@ -427,14 +422,14 @@ private fun FormContent(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.step > 0) {
-                OutlinedButton(onClick = onPrev, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("上一步") }
+                OutlinedButton(onClick = onPrev, enabled = !state.uploading && !state.submitting, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("上一步") }
             } else {
                 Spacer(Modifier.weight(1f))
             }
             if (current?.key == "confirm") {
                 Button(
                     onClick = onSubmit,
-                    enabled = !state.submitting,
+                    enabled = !state.submitting && !state.uploading,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 ) {
                     if (state.submitting) {
@@ -449,6 +444,7 @@ private fun FormContent(
                 }
             } else {
                 Button(
+                    enabled = !state.uploading && (isLocal || !state.bindingDaemon),
                     onClick = {
                         nextAttempted = true
                         onNext()

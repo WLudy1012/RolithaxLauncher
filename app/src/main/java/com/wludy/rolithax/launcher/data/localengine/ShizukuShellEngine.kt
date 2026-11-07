@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,8 +52,12 @@ class ShizukuShellEngine(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val _logs = Channel<String>(Channel.BUFFERED)
-    override val logs: Flow<String> = _logs.receiveAsFlow()
+    private val _logs = Channel<LocalEngineLine>(Channel.BUFFERED)
+    override val logs: Flow<LocalEngineLine> = _logs.receiveAsFlow()
+
+    override fun closeLogs() {
+        _logs.close()
+    }
 
     private val _running = MutableStateFlow(false)
     override val running: StateFlow<Boolean> = _running.asStateFlow()
@@ -184,12 +189,12 @@ class ShizukuShellEngine(
         }
     }
 
-    override fun sendCommand(command: String) {
-        val out = stdin ?: return
-        runCatching {
+    override fun sendCommand(command: String): Boolean {
+        val out = stdin ?: return false
+        return runCatching {
             out.write((command + "\n").toByteArray(Charsets.UTF_8))
             out.flush()
-        }.onFailure { AppLogger.w(TAG, "发送控制台命令失败: $command", it) }
+        }.onFailure { AppLogger.w(TAG, "发送控制台命令失败", it) }.isSuccess
     }
 
     /** 优雅停止：先发 stop，轮询等待 8s；未退出则强杀子进程（暂存模式仍会回同步）。 */
@@ -235,12 +240,12 @@ class ShizukuShellEngine(
 
     private suspend fun pumpLines(input: InputStream) = withContext(Dispatchers.IO) {
         runCatching {
-            input.bufferedReader(Charsets.UTF_8).forEachLine { _logs.trySend(it) }
+            input.bufferedReader(Charsets.UTF_8).forEachLine { _logs.trySendBlocking(LocalEngineLine(it.take(8193))) }
         }.onFailure { AppLogger.w(TAG, "读取子进程输出中断", it) }
     }
 
     private fun emit(line: String) {
-        _logs.trySend(line)
+        _logs.trySendBlocking(LocalEngineLine(line, system = true))
         AppLogger.i(TAG, "[shizuku] $line")
     }
 

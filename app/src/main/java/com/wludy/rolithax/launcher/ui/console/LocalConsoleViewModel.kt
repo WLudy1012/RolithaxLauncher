@@ -7,6 +7,7 @@ import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.data.localengine.EngineKind
 import com.wludy.rolithax.launcher.data.localengine.LocalInstanceStore
 import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
+import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -30,6 +31,12 @@ class LocalConsoleViewModel(
 ) : AndroidViewModel(application), ConsoleController {
 
     private val manager = getApplication<RolithaxApplication>().container.localServerManager
+    private val panelState = ConsolePanelState()
+    override val panel = panelState.state
+    private val ansiParser = AnsiStreamParser()
+    private val rendered = linkedMapOf<Long, LogLine>()
+    private var observedGeneration = -1L
+    private var lastLineId: Long? = null
 
     private val _state = MutableStateFlow(
         ConsoleUiState(
@@ -49,7 +56,7 @@ class LocalConsoleViewModel(
     init {
         // 运行状态 → 状态码（仅当运行中的正是本实例）
         viewModelScope.launch {
-            LocalServerRuntime.running.collect { running ->
+            LocalServerRuntime.running.collect {
                 val mine = manager.isRunning(dirName)
                 val status = when {
                     mine -> 2
@@ -64,23 +71,70 @@ class LocalConsoleViewModel(
                 }
             }
         }
-        // 日志：引擎输出为共享流（单活跃实例），映射为可渲染行
         viewModelScope.launch {
-            LocalServerRuntime.logs.collect { lines ->
-                _logs.value = lines.map { LogLine(it) }
+            LocalServerRuntime.consoleOutput.collect { output ->
+                if (observedGeneration != output.generation) {
+                    observedGeneration = output.generation
+                    lastLineId = null
+                    rendered.clear()
+                    ansiParser.reset()
+                    panelState.reset()
+                }
+                if (output.directory == dirName) {
+                    val previous = lastLineId
+                    val first = output.lines.firstOrNull()?.id
+                    if (first != null && first > (previous ?: 0L) + 1L) {
+                        rendered[first - 1] = LogLine("部分输出已超出缓冲范围", system = true)
+                        panelState.markGap()
+                        ansiParser.reset()
+                    }
+                    if (first != null) rendered.keys.removeAll { it < first - 1 }
+                    for (line in output.lines) {
+                        if (previous != null && line.id <= previous) continue
+                        if (!line.system) panelState.onLine(line.text)
+                        val segments = if (line.system) null else ansiParser.append(line.text).ifEmpty { listOf(AnsiSegment("")) }
+                        rendered[line.id] = LogLine(line.text, system = line.system, segments = segments)
+                        lastLineId = line.id
+                    }
+                }
+                _logs.value = rendered.values.toList()
+                panelState.publish()
             }
         }
     }
 
-    override fun sendCommand(command: String) {
+    override suspend fun sendCommand(command: String): Boolean {
         val cmd = command.trim()
-        if (cmd.isEmpty()) return
-        if (!manager.isRunning(dirName)) {
-            _events.tryEmit(ConsoleEvent.Toast("服务端未运行，无法发送命令"))
-            return
+        if (cmd.isEmpty()) return false
+        if (cmd.length > MAX_CONSOLE_COMMAND_CHARS || cmd.any(Char::isISOControl)) {
+            _events.tryEmit(ConsoleEvent.Toast("请输入不超过 1024 字符的单行命令"))
+            return false
         }
-        _logs.update { (it + LogLine("> $cmd")).takeLast(3000) }
-        manager.sendCommand(cmd)
+        if (!_state.value.canSendCommand || !LocalServerRuntime.sendCommand(dirName, cmd)) {
+            _events.tryEmit(ConsoleEvent.Toast("无法写入本机控制台，输入已保留"))
+            return false
+        }
+        return true
+    }
+
+    override fun previewPanelAction(actionId: String, arguments: Map<String, String>, packageRevision: Long): String? =
+        panelState.command(actionId, arguments, packageRevision)
+
+    override suspend fun sendPanelAction(actionId: String, arguments: Map<String, String>, packageRevision: Long): Boolean {
+        val command = previewPanelAction(actionId, arguments, packageRevision)
+        if (command == null) {
+            _events.tryEmit(ConsoleEvent.Toast("该操作未获授权或参数无效"))
+            return false
+        }
+        return sendCommand(command)
+    }
+
+    override fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String>) {
+        try {
+            panelState.load(source, allowedCommands)
+        } catch (_: IllegalArgumentException) {
+            _events.tryEmit(ConsoleEvent.Toast("扩展加载失败，请检查包格式"))
+        }
     }
 
     override fun sendAction(action: String) {
@@ -88,22 +142,20 @@ class LocalConsoleViewModel(
         when (action) {
             "start" -> doStart()
             "stop" -> {
-                if (!manager.isRunning(dirName)) {
+                if (!LocalServerRuntime.stop(dirName)) {
                     _events.tryEmit(ConsoleEvent.Toast("服务端未运行"))
                     return
                 }
                 _state.update { it.copy(status = 3, statusText = "停止中") }
-                manager.stop()
                 _events.tryEmit(ConsoleEvent.Toast("已发送 stop，等待服务端保存并退出"))
             }
             "restart" -> doRestart()
             "forceExit" -> {
-                if (!manager.isRunning(dirName)) {
+                if (!LocalServerRuntime.stop(dirName)) {
                     _events.tryEmit(ConsoleEvent.Toast("服务端未运行"))
                     return
                 }
                 _state.update { it.copy(status = 3, statusText = "停止中") }
-                manager.stop()
                 _events.tryEmit(ConsoleEvent.Toast("已请求结束服务端"))
             }
             "backup" -> _events.tryEmit(ConsoleEvent.Toast("本机实例备份暂未提供，请通过文件管理导出世界目录"))
@@ -113,8 +165,6 @@ class LocalConsoleViewModel(
 
     private fun doStart() {
         _state.update { it.copy(busy = true, status = 1, statusText = "启动中") }
-        manager.clearLogs()
-        _logs.value = emptyList()
         viewModelScope.launch {
             manager.start(dirName)
                 .onSuccess {
@@ -161,7 +211,7 @@ class LocalConsoleViewModel(
     }
 
     override fun clearLogs() {
-        manager.clearLogs()
+        rendered.clear()
         _logs.value = emptyList()
     }
 

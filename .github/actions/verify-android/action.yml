@@ -1,0 +1,50 @@
+name: 验证 Android 构建
+description: 运行 Android 单元测试并验证 Debug 与 Release APK
+
+inputs:
+  gradle-cache-read-only:
+    description: 只读取 Gradle 与 NDK 缓存
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: 准备 Android 构建环境
+      uses: ./.github/actions/setup-android
+      with:
+        gradle-cache-read-only: ${{ inputs.gradle-cache-read-only }}
+
+    - name: 运行测试并构建 APK
+      shell: bash
+      run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon --build-cache --stacktrace
+
+    - name: 验证 APK 内容
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        import json
+        from pathlib import Path
+        from zipfile import ZipFile
+
+        required = {
+            "AndroidManifest.xml",
+            "assets/jre/jre17-arm64-20210825-release.tar.xz",
+            "assets/legal/THIRD_PARTY_NOTICES.md",
+            "assets/legal/java-keyring-LICENSE.txt",
+            "lib/arm64-v8a/librolithaxvm.so",
+            "lib/x86_64/librolithaxvm.so",
+        }
+
+        for variant in ("debug", "release"):
+            output = Path("app/build/outputs/apk") / variant
+            metadata = json.loads((output / "output-metadata.json").read_text(encoding="utf-8"))
+            (artifact,) = metadata["elements"]
+            apk = output / artifact["outputFile"]
+            with ZipFile(apk) as archive:
+                missing = required.difference(archive.namelist())
+                if missing:
+                    raise SystemExit(f"{apk} 缺少文件: {', '.join(sorted(missing))}")
+                if damaged := archive.testzip():
+                    raise SystemExit(f"{apk} 的文件损坏: {damaged}")
+            print(f"{apk} 已通过内容校验")
+        PY

@@ -1,18 +1,23 @@
 package com.wludy.rolithax.launcher.ui.console
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +26,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -35,6 +42,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -51,8 +60,6 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -68,7 +75,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +88,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wludy.rolithax.launcher.ui.RolithaxCard
 import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.StatusBadge
+import com.wludy.rolithax.launcher.ui.WorkspaceBar
+import com.wludy.rolithax.launcher.ui.WorkspaceBody
 import com.wludy.rolithax.launcher.ui.theme.ConsoleBackground
 import com.wludy.rolithax.launcher.ui.theme.ConsoleFont
 import com.wludy.rolithax.launcher.ui.theme.ConsoleSystem
@@ -88,10 +98,14 @@ import com.wludy.rolithax.launcher.ui.theme.ConsoleTextStyle
 import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.theme.LocalRolithaxDarkTheme
+import com.wludy.rolithax.launcher.shared.console.ConsolePluginException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // 页面级间距约定：水平边距 16dp、卡片间距 12dp、卡片内边距 16dp
 private val PageHorizontalPadding = 16.dp
@@ -101,6 +115,14 @@ private val CardInnerPadding = 16.dp
 // 终端卡片刻意不套玻璃：高对比不透明深色底才能保证 ANSI 日志可读，且不干扰背景图
 private val TerminalHeaderDividerColor = Color(0xFF2A2E35)
 
+private data class PanelCommandConfirmation(
+    val action: String,
+    val arguments: Map<String, String>,
+    val packageRevision: Long,
+    val command: String,
+    val instanceName: String,
+)
+
 @OptIn(ExperimentalMaterial3Api::class, FlowPreview::class)
 @Composable
 fun ConsoleScreen(
@@ -109,19 +131,46 @@ fun ConsoleScreen(
     onOpenSettings: () -> Unit,
 ) {
     val viewModel = controller
-
     val state by viewModel.state.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
+    val panel by viewModel.panel.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val focusManager = LocalFocusManager.current
 
     var autoScroll by rememberSaveable { mutableStateOf(true) }
     var command by rememberSaveable { mutableStateOf("") }
     var confirmAction by remember { mutableStateOf<String?>(null) }
+    var showControls by rememberSaveable { mutableStateOf(false) }
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var showEulaDialog by remember { mutableStateOf(false) }
+    var showPanel by rememberSaveable { mutableStateOf(true) }
+    var sending by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+    var pendingImport by remember { mutableStateOf<ConsolePluginImport?>(null) }
+    var pendingCommand by remember { mutableStateOf<PanelCommandConfirmation?>(null) }
+    val resolver = LocalContext.current.contentResolver
+    val importPlugin = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null || importing) return@rememberLauncherForActivityResult
+        importing = true
+        scope.launch {
+            val error = try {
+                pendingImport = withContext(Dispatchers.IO) { readConsolePlugin(resolver, uri) }
+                showPanel = true
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ConsolePluginException) {
+                "扩展格式错误：${e.file} 第 ${e.line} 行"
+            } catch (_: Exception) {
+                "无法读取扩展包，请选择 SDK 生成的 ZIP"
+            } finally {
+                importing = false
+            }
+            if (error != null) snackbarHostState.showSnackbar(error)
+        }
+    }
 
     val atBottom by remember {
         derivedStateOf {
@@ -131,18 +180,34 @@ fun ConsoleScreen(
         }
     }
 
+    fun sendPanelCommand(action: String, arguments: Map<String, String>, packageRevision: Long) {
+        if (sending) return
+        sending = true
+        scope.launch {
+            try {
+                viewModel.sendPanelAction(action, arguments, packageRevision)
+            } finally {
+                sending = false
+            }
+        }
+    }
+
     // 日志高频输出时合并滚动请求，避免每个微批都触发一次布局滚动。
-    LaunchedEffect(autoScroll) {
-        snapshotFlow { logs.size }
-            .filter { autoScroll && it > 0 }
+    LaunchedEffect(autoScroll, showPanel) {
+        if (!autoScroll || showPanel) return@LaunchedEffect
+        snapshotFlow { logs.lastOrNull()?.id }
+            .filter { it != null }
             .sample(100)
-            .collect { size -> listState.scrollToItem(size - 1) }
+            .collect {
+                if (logs.isNotEmpty()) listState.scrollToItem(logs.lastIndex)
+            }
     }
 
     // 视口高度变化（点击输入框弹出 IME / 收起键盘/旋转）后，日志区需要重新贴底，
     // 否则键盘会遮住最新日志（仅靠 logs.size 变化无法触发，因为此次没有新日志）
     val latestLogCount by rememberUpdatedState(logs.size)
-    LaunchedEffect(listState, autoScroll) {
+    LaunchedEffect(listState, autoScroll, showPanel) {
+        if (showPanel) return@LaunchedEffect
         snapshotFlow { listState.layoutInfo.viewportSize.height }
             .filter { it > 0 }
             .collect {
@@ -153,7 +218,7 @@ fun ConsoleScreen(
     }
 
     // 处理一次性事件(提示 / EULA 弹窗)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
                 is ConsoleEvent.Toast -> snackbarHostState.showSnackbar(event.message)
@@ -163,96 +228,187 @@ fun ConsoleScreen(
     }
 
     Scaffold(
-        // 页面透明：透出全局毛玻璃背景层（日志区自绘深色终端卡片）
         containerColor = Color.Transparent,
-        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        modifier = Modifier.imePadding(),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = state.instanceName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                ),
+            WorkspaceBar(
+                title = state.instanceName,
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "实例设置")
-                    }
-                },
-            )
+            ) {
+                TextButton(onClick = { showControls = true }) { Text("状态与操作", maxLines = 1) }
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "实例设置") }
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = PageHorizontalPadding, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(CardSpacing),
-        ) {
-            StatusOverviewCard(state = state, onRetryConnect = viewModel::retryConnect)
-
-            ActionCard(
-                status = state.status,
-                busy = state.busy,
-                onAction = { action ->
-                    if (action in CONFIRM_REQUIRED_ACTIONS) {
-                        confirmAction = action
-                    } else {
-                        viewModel.sendAction(action)
-                    }
-                },
-            )
-
-            // 终端卡片：自绘不透明深色底，不使用玻璃组件
-            TerminalCard(
+        WorkspaceBody(Modifier.padding(innerPadding)) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                logs = logs,
-                listState = listState,
-                autoScroll = autoScroll,
-                atBottom = atBottom,
-                onToggleAutoScroll = { checked ->
-                    autoScroll = checked
-                    if (checked && logs.isNotEmpty()) {
-                        scope.launch { listState.scrollToItem(logs.size - 1) }
+                    .fillMaxSize()
+                    .padding(horizontal = PageHorizontalPadding, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(CardSpacing),
+            ) {
+                if (!imeVisible) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StatusBadge(status = state.status, statusText = state.statusText)
+                        Box(Modifier.weight(1f)) {
+                            if (!state.connected || state.connectionError != null || state.connecting) {
+                                ConnectionStatus(
+                                    connecting = state.connecting,
+                                    connected = state.connected,
+                                    error = state.connectionError,
+                                    onRetry = viewModel::retryConnect,
+                                )
+                            }
+                        }
+                        if (state.status == 0 || state.status == 2) {
+                            FilledTonalButton(
+                                onClick = {
+                                    if (state.status == 0) viewModel.sendAction("start") else confirmAction = "stop"
+                                },
+                                enabled = !state.busy,
+                            ) { Text(if (state.status == 0) "启动" else "停止") }
+                        }
                     }
-                },
-                onClearLogs = viewModel::clearLogs,
-                onJumpToLatest = {
-                    autoScroll = true
-                    if (logs.isNotEmpty()) {
-                        scope.launch { listState.scrollToItem(logs.size - 1) }
-                    }
-                },
-            )
+                }
 
-            // 命令输入栏：键盘回车与发送按钮行为一致
-            CommandInputBar(
-                value = command,
-                onValueChange = { command = it },
-                connected = state.connected,
-                onSend = {
-                    if (command.isNotBlank() && state.connected) {
-                        viewModel.sendCommand(command)
-                        command = ""
-                        focusManager.clearFocus()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !showPanel, onClick = { showPanel = false }, label = { Text("原始控制台") })
+                    FilterChip(selected = showPanel, onClick = { showPanel = true }, label = { Text("结构化面板") })
+                }
+
+                val consoleModifier = Modifier.fillMaxWidth().weight(1f)
+                if (showPanel) {
+                    ConsolePluginPanel(
+                        panel = panel,
+                        actionsEnabled = state.canSendCommand && !sending,
+                        importing = importing,
+                        onImport = { importPlugin.launch(arrayOf("*/*")) },
+                        onRestore = { viewModel.loadPanel(null) },
+                        onAction = { action, arguments, packageRevision ->
+                            if (panel.snapshot.pluginId == "rolithax.paper") {
+                                sendPanelCommand(action, arguments, packageRevision)
+                            } else {
+                                val exactCommand = viewModel.previewPanelAction(action, arguments, packageRevision)
+                                if (exactCommand != null) {
+                                    pendingCommand = PanelCommandConfirmation(
+                                        action, arguments, packageRevision, exactCommand, state.instanceName,
+                                    )
+                                }
+                            }
+                        },
+                        modifier = consoleModifier,
+                    )
+                } else {
+                    TerminalCard(
+                        modifier = consoleModifier,
+                        logs = logs,
+                        listState = listState,
+                        autoScroll = autoScroll,
+                        atBottom = atBottom,
+                        onToggleAutoScroll = { checked ->
+                            autoScroll = checked
+                            if (checked && logs.isNotEmpty()) {
+                                scope.launch { listState.scrollToItem(logs.lastIndex) }
+                            }
+                        },
+                        onClearLogs = viewModel::clearLogs,
+                        onJumpToLatest = {
+                            autoScroll = true
+                            if (logs.isNotEmpty()) {
+                                scope.launch { listState.scrollToItem(logs.lastIndex) }
+                            }
+                        },
+                    )
+                    CommandInputBar(
+                        value = command,
+                        onValueChange = { command = it },
+                        ready = state.canSendCommand,
+                        sending = sending,
+                        onSend = {
+                            if (command.isNotBlank() && state.canSendCommand && !sending) {
+                                val submitted = command
+                                sending = true
+                                scope.launch {
+                                    try {
+                                        if (viewModel.sendCommand(submitted) && command == submitted) command = ""
+                                    } finally {
+                                        sending = false
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    pendingImport?.let { imported ->
+        ConsolePluginPermissionDialog(
+            imported = imported,
+            onDismiss = { pendingImport = null },
+            onConfirm = { grants ->
+                viewModel.loadPanel(imported.source, grants)
+                pendingImport = null
+            },
+        )
+    }
+
+    pendingCommand?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingCommand = null },
+            title = { Text("发送扩展命令") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("目标实例：${pending.instanceName}")
+                    SelectionContainer {
+                        Text(pending.command, fontFamily = ConsoleFont)
                     }
-                },
-            )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = state.canSendCommand && !sending,
+                    onClick = {
+                        pendingCommand = null
+                        val exactCommand = viewModel.previewPanelAction(
+                            pending.action, pending.arguments, pending.packageRevision,
+                        )
+                        if (exactCommand == pending.command) {
+                            sendPanelCommand(pending.action, pending.arguments, pending.packageRevision)
+                        } else {
+                            scope.launch { snackbarHostState.showSnackbar("面板已变更，请重新选择操作") }
+                        }
+                    },
+                ) { Text("发送") }
+            },
+            dismissButton = { TextButton(onClick = { pendingCommand = null }) { Text("取消") } },
+        )
+    }
+
+    if (showControls) {
+        ModalBottomSheet(onDismissRequest = { showControls = false }) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                StatusOverviewCard(state = state, onRetryConnect = viewModel::retryConnect)
+                ActionCard(
+                    status = state.status,
+                    busy = state.busy,
+                    onAction = { action ->
+                        showControls = false
+                        if (action in CONFIRM_REQUIRED_ACTIONS) confirmAction = action else viewModel.sendAction(action)
+                    },
+                )
+            }
         }
     }
 
@@ -428,7 +584,7 @@ private fun MetaText(text: String) {
     )
 }
 
-/** 操作按钮组：横向滚动，按钮满足 48dp 最小触控高度。 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ActionCard(
     status: Int,
@@ -447,11 +603,9 @@ private fun ActionCard(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             RolithaxSectionHeader(title = "实例操作")
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ActionButton(
                     text = if (transitioning) "操作中…" else "启动",
@@ -580,31 +734,33 @@ private fun TerminalCard(
                         .padding(16.dp),
                 )
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                ) {
-                    // key = 日志行稳定 id：列表裁剪/追加时保持条目身份，避免整表重组
-                    items(items = logs, key = { it.id }) { line ->
-                        // ANSI 原彩：按转义序列拆段着色，未着色段继承默认前景色
-                        val segments = line.segments ?: remember(line.text) { parseAnsiLog(line.text) }
-                        val baseColor = if (line.system) ConsoleSystem else ConsoleText
-                        Text(
-                            text = buildAnnotatedString {
-                                segments.forEach { seg ->
-                                    withStyle(
-                                        SpanStyle(
-                                            color = seg.color ?: baseColor,
-                                            fontWeight = seg.ansiFontWeight,
-                                            background = seg.background ?: Color.Unspecified,
-                                        ),
-                                    ) { append(seg.text) }
-                                }
-                            },
-                            style = ConsoleTextStyle,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+                SelectionContainer {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        // key = 日志行稳定 id：列表裁剪/追加时保持条目身份，避免整表重组
+                        items(items = logs, key = { it.id }) { line ->
+                            // ANSI 原彩：按转义序列拆段着色，未着色段继承默认前景色
+                            val segments = line.segments ?: remember(line.text) { parseAnsiLog(line.text) }
+                            val baseColor = if (line.system) ConsoleSystem else ConsoleText
+                            Text(
+                                text = buildAnnotatedString {
+                                    segments.forEach { seg ->
+                                        withStyle(
+                                            SpanStyle(
+                                                color = seg.color ?: baseColor,
+                                                fontWeight = seg.ansiFontWeight,
+                                                background = seg.background ?: Color.Unspecified,
+                                            ),
+                                        ) { append(seg.text) }
+                                    }
+                                },
+                                style = ConsoleTextStyle,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
@@ -631,15 +787,14 @@ private fun TerminalCard(
 private fun CommandInputBar(
     value: String,
     onValueChange: (String) -> Unit,
-    connected: Boolean,
+    ready: Boolean,
+    sending: Boolean,
     onSend: () -> Unit,
 ) {
-    val canSend = connected && value.isNotBlank()
+    val canSend = ready && !sending && value.isNotBlank()
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            // adjustResize 已由 Activity 处理键盘避让，这里只补系统导航栏
-            .navigationBarsPadding()
             .padding(bottom = 4.dp),
         shape = RoundedCornerShape(24.dp),
     ) {
@@ -655,7 +810,6 @@ private fun CommandInputBar(
                 placeholder = { Text("输入命令…", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = ConsoleFont),
                 singleLine = true,
-                enabled = connected,
                 shape = RoundedCornerShape(18.dp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { onSend() }),

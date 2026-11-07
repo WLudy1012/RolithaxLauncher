@@ -1,239 +1,154 @@
 name: Android 发布
 
-# 两种触发方式：
-#   1. release* 分支流程（release-branch.yml）验证并合并 main 后通过 workflow_call 调用；
-#   2. 手动推送 v* tag（兜底/补发），行为与之前一致。
 on:
   push:
-    tags:
-      - "v*"
+    tags: ['v*']
   workflow_call:
     inputs:
       tag:
-        description: 要发布的 tag（必须已存在）
+        description: 已存在的发布 tag
         required: true
         type: string
+      sha:
+        description: 已验证的合并提交
+        required: true
+        type: string
+    secrets:
+      KEYSTORE_BASE64:
+        required: true
+      KEYSTORE_PASSWORD:
+        required: true
+      KEY_PASSWORD:
+        required: true
+      CNB_TOKEN:
+        required: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: android-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    name: 构建并发布签名 APK
-    runs-on: ubuntu-latest
+  build:
+    name: 构建并校验签名 APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      sha: ${{ steps.source.outputs.sha }}
     env:
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      MSLX_MAVEN_GOOGLE_MIRROR: https://maven.aliyun.com/repository/google
-      MSLX_MAVEN_CENTRAL_MIRROR: https://maven.aliyun.com/repository/public
-      # workflow_call 下 github.ref_name 是调用方的分支名，必须显式使用传入的 tag
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_SHA: ${{ inputs.sha || github.sha }}
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
-          # 完整克隆以获取历史提交与 tag
           fetch-depth: 0
-          # 必须显式取 tag：否则 git tag --list 为空 → 找不到"上一版本"，
-          # release notes 会退化成"把以往所有提交都列出来"
-          fetch-tags: true
+          persist-credentials: false
 
-      - name: 准备 Android 构建环境
-        uses: ./.github/actions/setup-android
-
-      # Java 21/25 运行时不入库、不进 APK，只在发版时从上游
-      # 镜像尽力获取。失败只告警，并由后续步骤动态排除缺失附件。
-      - name: 获取 JRE 21 运行时归档
+      - name: 核对标记指向已验证提交
+        id: source
         run: |
-          JRE21=jre21-arm64-20260223-release.tar.xz
-          SHA=d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc
-          URL="https://pan.huang1111.cn/f/eWkQI1/$JRE21"
-          if curl -fL --retry 3 --max-time 900 -o "$JRE21" "$URL" && echo "$SHA  $JRE21" | sha256sum -c -; then
-            ls -lh "$JRE21"
-          else
-            rm -f "$JRE21"
-            echo "::warning::获取 jre21 归档失败，本次 Release 将不含该附件（客户端会回退到 FCL 直链）"
-          fi
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          commit=$(git rev-parse --verify "$RELEASE_SHA^{commit}")
+          [[ "$(git rev-parse HEAD)" == "$commit" ]] || {
+            echo "::error::发布 tag 已移动"
+            exit 1
+          }
+          echo "sha=$commit" >> "$GITHUB_OUTPUT"
 
-      # 客户端已支持 Java 25；同步发布 GitHub 镜像，避免该下载来源固定返回 404。
-      - name: 获取 JRE 25 运行时归档
-        run: |
-          JRE25=jre25-arm64-20260223-release.tar.xz
-          SHA=0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286
-          URL="https://pan.huang1111.cn/f/5NOltm/$JRE25"
-          if curl -fL --retry 3 --max-time 900 -o "$JRE25" "$URL" && echo "$SHA  $JRE25" | sha256sum -c -; then
-            ls -lh "$JRE25"
-          else
-            rm -f "$JRE25"
-            echo "::warning::获取 jre25 归档失败，本次 Release 将不含该附件（客户端会回退到 FCL 直链）"
-          fi
+      - uses: ./.github/actions/setup-android
+        id: android
 
-      # 从仓库 Secrets 恢复签名密钥并生成 keystore.properties。
-      # 需在仓库 Settings → Secrets and variables → Actions 配置：
-      #   KEYSTORE_BASE64   = base64 编码后的 .jks 文件内容
-      #   KEYSTORE_PASSWORD = 密钥库密码
-      #   KEY_PASSWORD      = 密钥密码
-      - name: 恢复签名密钥
+      - name: 构建和校验发布附件
         env:
+          ANDROID_BUILD_TOOLS: ${{ steps.android.outputs.build-tools }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: bash .github/scripts/prepare-android-release.sh
+
+      - name: 保存签名产物
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-release-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-assets/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: 发布已校验的附件
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_SHA: ${{ needs.build.outputs.sha }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: release-assets
+
+      - name: 发布 Release
+        working-directory: release-assets
         run: |
           set -euo pipefail
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Secret KEYSTORE_BASE64 is empty. 请在仓库 Secrets 中配置 Rolithax release JKS 的 Base64 内容。"
-            exit 1
-          fi
-          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Secret KEYSTORE_PASSWORD / KEY_PASSWORD 不能为空。"
-            exit 1
-          fi
-          mkdir -p keystore
-          # 校验 base64 值是否合法（必须是单行、无空格/换行/表格符号的纯 base64）
-          echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks || {
-            echo "::error::KEYSTORE_BASE64 解码失败。请重新生成并配置 Rolithax release JKS 的纯 Base64 内容。"
-            exit 1
+          check_tag() {
+            [[ "$(gh api "repos/$GH_REPO/commits/$RELEASE_TAG" --jq .sha)" == "$RELEASE_SHA" ]] || {
+              echo "::error::发布 tag 已移动"
+              exit 1
+            }
           }
-          keytool -list -keystore keystore/release.jks -storepass "$KEYSTORE_PASSWORD" -alias wludy > /dev/null 2>&1 || {
-            echo "::error::签名密钥无效或缺少 wludy 别名，请更新 GitHub 签名 Secrets。"
-            exit 1
-          }
-          cat > keystore.properties <<EOF
-          storeFile=keystore/release.jks
-          storePassword=$KEYSTORE_PASSWORD
-          keyAlias=wludy
-          keyPassword=$KEY_PASSWORD
-          EOF
-
-      # 同一 Release 发布两个变体：
-      #   app-release.apk      完整版（内嵌 JRE 运行时，可离线开服）
-      #   app-release-lite.apk 精简版（不含运行时，体积小；本机开服首次使用需联网下载运行时）
-      # 并把 JRE 归档本身作为资产挂上，供精简版在应用内下载（客户端按 CNB → GitHub 顺序尝试）。
-      - name: 构建签名 Release APK（完整版，内嵌 JRE）
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
-
-      - name: 构建签名 Release APK（精简版，不含 JRE）
-        run: |
-          ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk ./app-release-lite.apk
-          ls -lh app-release.apk app-release-lite.apk
-          # 自检：完整版必须含内嵌 JRE，精简版必须不含
-          unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "::error::完整版缺少内嵌 JRE"; exit 1; }
-          if unzip -l app-release-lite.apk | grep -q 'assets/jre/'; then
-            echo "::error::精简版不应包含内嵌 JRE"
-            exit 1
-          fi
-
-      # 生成 release notes：取"上一版"并列出其到本版的全部提交。
-      # 层级规则（正式版 x.x / Beta x.x.x）：
-      #   - 正式版/强制版：上一版 = 最近一个不带 -Beta 后缀的 v* tag（跳过中间所有 Beta，保证
-      #     release note 包含"直至上一正式版的全部 Beta 更新"）；
-      #   - Beta 版：上一版 = 最近一个带 -Beta 后缀的 v* tag；若无，
-      #     回退到最近一个不带 -Beta 的 tag。
-      - name: 生成发布说明
-        run: |
-          set -e
-          CUR_TAG="$RELEASE_TAG"
-          # 双保险：显式同步远端 tag（checkout 已带 fetch-tags，这里再兜一次）
-          git fetch --tags --force --quiet || true
-          echo "当前 tag: $CUR_TAG；可见 v* tag 数量: $(git tag --list 'v*' | wc -l)"
-          IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
-          if [ "$IS_BETA" = "1" ]; then
-            PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
-            if [ -z "$PREV_TAG" ]; then
-              PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
+          check_tag
+          sha256sum --strict --check SHA256SUMS.txt
+          assets=(app-release.apk app-release-lite.apk jre17-arm64-20210825-release.tar.xz SHA256SUMS.txt)
+          for asset in jre21-arm64-20260223-release.tar.xz jre25-arm64-20260223-release.tar.xz; do
+            [[ ! -f "$asset" ]] || assets+=("$asset")
+          done
+          prerelease=false
+          [[ "$RELEASE_TAG" != *-Beta ]] || prerelease=true
+          if state=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
+            gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/released-assets"
+            if [[ "$state" == false ]]; then
+              for asset in app-release.apk app-release-lite.apk jre17-arm64-20210825-release.tar.xz; do
+                grep -Fxq "$asset" "$RUNNER_TEMP/released-assets" || {
+                  echo "::error::已发布的 Release 缺少必需附件 $asset"
+                  exit 1
+                }
+              done
+              echo "Release 已发布，保留现有附件。"
+              exit 0
             fi
-          else
-            PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1)
-          fi
-          echo "上一版本 tag: ${PREV_TAG:-<无>}"
-          {
-            echo "# Rolithax Launcher $CUR_TAG"
-            echo ""
-            if [ -n "$PREV_TAG" ]; then
-              echo "自 \`$PREV_TAG\` 以来的提交："
-              echo ""
-              git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..${CUR_TAG}"
-            else
-              # 绝不回退成"列出全部历史提交"：只给最近若干条并说明原因
-              echo "> 未能确定上一版本 tag（首个版本或 tag 未同步），仅列出最近 15 条提交。"
-              echo ""
-              git log -n 15 --no-merges --pretty=format:"- %s" "${CUR_TAG}"
-            fi
-            echo ""
-            echo ""
-            echo "> 上一版本：\`${PREV_TAG:-无}\`"
-          } > release_notes.md
-
-      # 计算两个变体的 SHA256 并写入 release notes，供用户校验文件完整性
-      - name: 计算 APK SHA-256
-        run: |
-          FULL_SHA=$(sha256sum app-release.apk | awk '{print $1}')
-          LITE_SHA=$(sha256sum app-release-lite.apk | awk '{print $1}')
-          FULL_MB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s app-release.apk)/1048576}")
-          LITE_MB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s app-release-lite.apk)/1048576}")
-          {
-            echo ""
-            echo "## 两个变体（按需选择）"
-            echo ""
-            echo "| 包 | 说明 | 大小 | SHA-256 |"
-            echo "| --- | --- | --- | --- |"
-            echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | ${FULL_MB} MB | \`$FULL_SHA\` |"
-            echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | ${LITE_MB} MB | \`$LITE_SHA\` |"
-            echo ""
-            echo "实际成功校验的 jre21/jre25 归档才会作为附件上传；缺失或摘要不匹配时不会生成空附件。"
-            echo ""
-            echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
-            echo ""
-            echo "校验命令（Windows PowerShell）："
-            echo "\`\`\`powershell"
-            echo "Get-FileHash app-release.apk -Algorithm SHA256"
-            echo "Get-FileHash app-release-lite.apk -Algorithm SHA256"
-            echo "\`\`\`"
-          } >> release_notes.md
-
-      - name: 准备 Release 附件清单
-        run: |
-          set -e
-          {
-            echo 'RELEASE_ASSETS<<MSLX_RELEASE_ASSETS'
-            echo 'app-release.apk'
-            echo 'app-release-lite.apk'
-            echo 'app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz'
             for asset in jre21-arm64-20260223-release.tar.xz jre25-arm64-20260223-release.tar.xz; do
-              if [ -f "$asset" ]; then
-                echo "$asset"
+              if [[ ! -f "$asset" ]] && grep -Fxq "$asset" "$RUNNER_TEMP/released-assets"; then
+                gh release delete-asset "$RELEASE_TAG" "$asset" --yes
               fi
             done
-            echo 'MSLX_RELEASE_ASSETS'
-          } >> "$GITHUB_ENV"
-
-      - name: 上传 APK 到 Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: ${{ env.RELEASE_ASSETS }}
-          body_path: release_notes.md
-
-
-      - name: 同步 main 源码和 Release 标签到 CNB
-        env:
-          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${CNB_TOKEN:-}" ]; then
-            echo "::warning::未配置 CNB_TOKEN，跳过 CNB 源码和 tag 同步；GitHub Release 已完成。"
-            exit 0
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --draft \
+              --title "Rolithax Launcher $RELEASE_TAG" --notes-file release-notes.md --prerelease="$prerelease"
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote add cnb "https://cnb:${CNB_TOKEN}@cnb.cool/WLudy/RolithaxLauncher.git"
-          git fetch origin refs/heads/main:refs/remotes/origin/main --quiet
-          git fetch cnb refs/heads/main:refs/remotes/cnb/main --quiet
-          git switch --create cnb-main-sync refs/remotes/origin/main
-          git merge --no-edit --no-ff refs/remotes/cnb/main
-          git push cnb "HEAD:refs/heads/main"
-          git push cnb "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          check_tag
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease="$prerelease" \
+            --title "Rolithax Launcher $RELEASE_TAG" --notes-file release-notes.md
+
+  sync:
+    name: 同步 CNB
+    needs: [build, publish]
+    uses: ./.github/workflows/cnb-sync.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+      sha: ${{ needs.build.outputs.sha }}
+    secrets:
+      CNB_TOKEN: ${{ secrets.CNB_TOKEN }}

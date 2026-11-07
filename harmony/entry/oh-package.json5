@@ -1,0 +1,8 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "Rolithax Launcher entry module",
+  "main": "",
+  "license": "AGPL-3.0-only",
+  "dependencies": { "librolithax_business.so": "file:./src/main/cpp/types/librolithax_business" }
+}

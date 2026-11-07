@@ -27,9 +27,6 @@ class LocalServerManager(
     /** 是否正在运行（进程级单活跃实例）。 */
     val running: StateFlow<Boolean> = LocalServerRuntime.running
 
-    /** 运行日志行流。 */
-    val logs: StateFlow<List<String>> = LocalServerRuntime.logs
-
     /** 当前引擎类型（进程内 / Shizuku exec）。 */
     val activeKind: EngineKind? get() = LocalServerRuntime.activeKind
 
@@ -39,11 +36,6 @@ class LocalServerManager(
     /** 指定实例是否正在运行。 */
     fun isRunning(dirName: String): Boolean =
         running.value && currentDirName == dirName
-
-    /** 向当前运行实例发送控制台命令。 */
-    fun sendCommand(command: String) = LocalServerRuntime.sendCommand(command)
-
-    fun clearLogs() = LocalServerRuntime.clearLogs()
 
     fun stop() = LocalServerRuntime.stop()
 
@@ -121,18 +113,16 @@ class LocalServerManager(
             completed
         }
         val extraArgs = effective.jvmArgs.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-        LocalServerRuntime.clearLogs()
-        if (fit == LocalJreManager.RuntimeFit.TOO_NEW) {
-            LocalServerRuntime.append(
-                "提示：当前运行时为 ${runtime.label}，该核心推荐 Java $recommendedMajor；" +
-                    "旧版核心跑在更新的 Java 上可能启动失败或崩溃（可先试旧版端如 Fabric/Spigot 对应版本）。",
-            )
-        }
-        if (storage == InstanceStorage.PUBLIC) {
-            LocalServerRuntime.append("实例位置：${serverDir.absolutePath}（公共目录）")
-            if (!useExec) {
-                // 共享存储走 FUSE，文件锁与原子重命名不如内部存储可靠，先把退路说清
-                LocalServerRuntime.append("提示：未开启增强模式，服务端直接在公共目录读写；若遇到文件锁/重命名类报错，多为共享存储限制所致。")
+        val initialLogs = buildList {
+            if (fit == LocalJreManager.RuntimeFit.TOO_NEW) {
+                add(
+                    "提示：当前运行时为 ${runtime.label}，该核心推荐 Java $recommendedMajor。" +
+                        "旧版核心跑在更新的 Java 上可能启动失败。",
+                )
+            }
+            if (storage == InstanceStorage.PUBLIC) {
+                add("实例位置：${serverDir.absolutePath}（公共目录）")
+                if (!useExec) add("提示：未开启增强模式。若共享存储出现文件锁或重命名错误，请改用私有目录。")
             }
         }
         return LocalServerRuntime.start(
@@ -148,6 +138,7 @@ class LocalServerManager(
             keepAlive = effective.keepAlive,
             runtime = runtime,
             useExec = useExec,
+            initialLogs = initialLogs,
         )
     }
 
@@ -165,9 +156,11 @@ class LocalServerManager(
                 IllegalStateException("进程内模式停止后需完全退出 App 才能再启动；如需原地重启请开启增强模式（Shizuku）"),
             )
         }
-        stop()
+        if (!LocalServerRuntime.stop(dirName)) {
+            return Result.failure(IllegalStateException("该实例已停止，请重新启动"))
+        }
         var waited = 0
-        while (running.value && waited < 40) {
+        while (isRunning(dirName) && waited < 40) {
             delay(500)
             waited++
         }

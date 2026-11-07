@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor
 import com.wludy.rolithax.launcher.data.AppLogger
 import com.wludy.rolithax.launcher.localengine.NativeVm
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import java.io.File
@@ -38,8 +39,12 @@ class LocalJvmLauncher(
     @Volatile
     var onExit: ((Int) -> Unit)? = null
 
-    private val _logs = Channel<String>(Channel.BUFFERED)
-    val logs: Flow<String> = _logs.receiveAsFlow()
+    private val _logs = Channel<LocalEngineLine>(Channel.BUFFERED)
+    val logs: Flow<LocalEngineLine> = _logs.receiveAsFlow()
+
+    fun closeLogs() {
+        _logs.close()
+    }
 
     private var cmdPfd: ParcelFileDescriptor? = null
     private var logPfd: ParcelFileDescriptor? = null
@@ -153,12 +158,12 @@ class LocalJvmLauncher(
     }
 
     /** 向服务端 stdin 发送一条控制台命令（如 stop / say hi）。 */
-    fun sendCommand(command: String) {
-        val out = cmdOut ?: return
-        runCatching {
+    fun sendCommand(command: String): Boolean {
+        val out = cmdOut ?: return false
+        return runCatching {
             out.write((command + "\n").toByteArray(Charsets.UTF_8))
             out.flush()
-        }.onFailure { AppLogger.w("LocalEngine", "发送控制台命令失败: $command", it) }
+        }.onFailure { AppLogger.w("LocalEngine", "发送控制台命令失败", it) }.isSuccess
     }
 
     /** 优雅关服：Minecraft 服务端收到 stdin 的 stop 后会自行保存并退出。 */
@@ -221,7 +226,7 @@ class LocalJvmLauncher(
         logPump = Thread({
             runCatching {
                 input.bufferedReader(Charsets.UTF_8).forEachLine { line ->
-                    _logs.trySend(line)
+                    _logs.trySendBlocking(LocalEngineLine(line.take(8193)))
                 }
             }.onFailure { AppLogger.w("LocalEngine", "读取服务端输出中断", it) }
         }, "rolithax-server-log").apply {
@@ -246,7 +251,7 @@ class LocalJvmLauncher(
     }
 
     private fun emit(line: String) {
-        _logs.trySend(line)
+        _logs.trySendBlocking(LocalEngineLine(line, system = true))
         AppLogger.i("LocalEngine", "[engine] $line")
     }
 }

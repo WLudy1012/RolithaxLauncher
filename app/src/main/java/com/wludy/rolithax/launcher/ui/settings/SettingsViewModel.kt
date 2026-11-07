@@ -17,8 +17,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
@@ -34,6 +37,28 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     )
 
     val daemonStatuses = container.daemonRegistry.statuses
+    private val _refreshingConnections = MutableStateFlow(false)
+    val refreshingConnections = _refreshingConnections.asStateFlow()
+
+    fun refreshConnections() {
+        if (!_refreshingConnections.compareAndSet(expect = false, update = true)) return
+        viewModelScope.launch {
+            try {
+                val current = store.settingsFlow.first()
+                container.daemonRegistry.sync(current)
+                coroutineScope {
+                    current.daemons.forEach { daemon -> launch { container.daemonRegistry.refreshOne(daemon) } }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                AppLogger.w("Settings", "检测 Daemon 连接失败", e)
+                _message.emit("无法检测连接，请重试。")
+            } finally {
+                _refreshingConnections.value = false
+            }
+        }
+    }
     private val _message = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val message = _message.asSharedFlow()
 
@@ -148,7 +173,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setActiveDaemon(id: String) {
         viewModelScope.launch {
             runCatching { store.setActiveDaemon(id) }
-                .onFailure { AppLogger.w("Settings", "保存默认 Daemon 失败", it) }
+                .onFailure {
+                    AppLogger.w("Settings", "保存默认 Daemon 失败", it)
+                    _message.emit("未能保存默认连接。")
+                }
             syncRegistry()
         }
     }
@@ -156,7 +184,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun removeDaemon(id: String) {
         viewModelScope.launch {
             runCatching { store.removeDaemon(id) }
-                .onFailure { AppLogger.w("Settings", "删除 Daemon 失败", it) }
+                .onFailure {
+                    AppLogger.w("Settings", "删除 Daemon 失败", it)
+                    _message.emit("未能移除连接。")
+                }
             syncRegistry()
         }
     }

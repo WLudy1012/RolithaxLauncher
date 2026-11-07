@@ -2,7 +2,7 @@
 
 ## 产品身份
 
-Rolithax Launcher 是面向 MSLX Daemon 的 Android 客户端，也支持在 Android 设备上直接运行 Minecraft Java 服务端。项目以 Kotlin 和 Jetpack Compose 为主，遵循 AGPL-3.0，并作为独立第三方应用与上游 MSLTeam 保持清晰的项目边界。
+Rolithax Launcher 是面向 MSLX Daemon 的多平台客户端。Android 支持远端管理与本机 Minecraft Java 开服，Windows、Linux 和 HarmonyOS NEXT 面向远端 Daemon。界面使用 Material 3 Compose、WinUI 3、Compose Desktop 和 ArkTS，公共模型与远端业务按平台复用 Kotlin Multiplatform。项目遵循 AGPL-3.0，由本项目独立实现。
 
 - 系统显示名：`Rolithax Launcher`
 - Android `namespace` / `applicationId`：`com.wludy.rolithax.launcher`
@@ -49,7 +49,7 @@ Rolithax Launcher 是面向 MSLX Daemon 的 Android 客户端，也支持在 And
 - 本机开服：内嵌 Android JRE、进程内 JVM、可选 Shizuku 增强引擎、前台服务保活。
 - 资源中心：Modrinth 资源、MSLAPI 服务端核心、Room 缓存、依赖/冲突检查和目标端安装。
 - 服务端文件管理、插件/模组管理、`server.properties` 编辑、备份与加密迁移。
-- 稳定版和 Beta 更新渠道、应用内下载校验、运行日志、崩溃报告与首次使用导览。
+- 稳定版和 Beta 更新渠道、应用内下载校验（下载域名白名单与 SHA-256）、更新检查元数据 GitHub → CNB 回退、运行日志、崩溃报告与首次使用导览。
 - 暗色主题、自定义外观、MSLAPI 署名与第三方许可展示。
 
 ## 目录结构
@@ -73,12 +73,12 @@ app/src/main/java/com/wludy/rolithax/launcher/
 │   ├── AppLogger.kt                脱敏运行日志
 │   └── AppContainer.kt             手动依赖注入
 └── ui/
-    ├── home/                      主页、一言、负载和 Daemon 概览
+    ├── home/                      概览、实例摘要和 Daemon 负载
     ├── connect/                   连接、扫码配对
     ├── instances/                统一实例列表
     ├── console/                  远程/本地统一控制台
     ├── create/                   创建实例向导
-    ├── servers/                  服务端总览与资源中心
+    ├── servers/                  资源中心
     ├── settings/                 设置、外观、文件、插件模组和日志
     ├── user/                     用户中心
     ├── update/                   更新、免责和崩溃报告

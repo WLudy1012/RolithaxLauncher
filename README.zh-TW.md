@@ -4,10 +4,11 @@
 
 # Rolithax Launcher
 
-**一個 App，同時管理遠端 MSLX Daemon 與手機本機上的 Minecraft Java 伺服器。**
+**Android 本機開服，Windows、Linux 和 HarmonyOS NEXT 遠端管理。**
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Android CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml/badge.svg)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/android.yml)
+[![Desktop CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml/badge.svg?branch=dev)](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml)
 [![Release](https://img.shields.io/github/v/release/WLudy1012/RolithaxLauncher?include_prereleases&label=release)](https://github.com/WLudy1012/RolithaxLauncher/releases)
 ![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-3DDC84)
 
@@ -15,8 +16,7 @@
 
 </div>
 
-Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三方** Android 用戶端，以 Kotlin 與 Jetpack Compose 打造。
-它把「連線遠端 Daemon 管理實例」與「直接在手機上開伺服器」放進同一份實例清單與主控台，並針對觸控螢幕重新設計了操作流程。
+Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的獨立第三方用戶端。Android 使用 Material 3 Compose 管理本機和遠端實例。Windows 使用 .NET 10 與 WinUI 3，Linux 使用 Compose Desktop，HarmonyOS NEXT 使用 ArkTS。各平台依工具鏈能力共用 Kotlin Multiplatform 的遠端邏輯和模型。
 
 > 本應用程式與 MSLTeam 沒有任何隸屬或關聯關係，使用前請先閱讀[免責聲明](#免責聲明)。
 > 套件名稱 `com.wludy.rolithax.launcher`。更換套件名稱與簽章後，舊版需全新安裝，舊資料可透過應用程式內的加密匯出／匯入遷移。
@@ -25,7 +25,7 @@ Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三
 
 ## 下載
 
-可從 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 或 [CNB 鏡像](https://cnb.cool/WLudy/RolithaxLauncher/-/releases)（中國大陸網路較快）下載，每個版本提供兩種安裝包：
+Android 正式版本可從 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 或 [CNB 鏡像](https://cnb.cool/WLudy/RolithaxLauncher/-/releases)（中國大陸網路較快）下載，每個版本提供兩種安裝包：
 
 | 安裝包 | 說明 |
 | --- | --- |
@@ -33,6 +33,19 @@ Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三
 | `app-release-lite.apk` 精簡版 | 體積較小，首次本機開服需連網下載約 36 MB 的執行環境 |
 
 兩個安裝包簽章相同，可互相覆蓋安裝。應用程式內也能直接檢查並安裝更新，見[更新與版本](#更新與版本)。
+
+## 平台與遷移範圍
+
+| 平台 | 目前範圍 | 驗證邊界 |
+| --- | --- | --- |
+| Android | 遠端管理、本機開服與資源中心 | 保留既有能力，部分遠端呼叫已接入共用層 |
+| [Windows](windows/README.md) | 多 Daemon、實例控制、主控台、檔案、設定、插件及使用者管理 | x64 開發版本，透過 C ABI 共用 Kotlin/Native 用戶端 |
+| [Linux](desktop/README.md) | 多 Daemon、實例控制、主控台、檔案、設定、資源及使用者管理 | Compose Desktop 開發版本 |
+| [HarmonyOS NEXT](harmony/README.md) | 儲存多個 Daemon、搜尋和控制實例、主控台及檔案管理 | 原生 ARM64 專案，HAP 與實機驗收待驗證 |
+
+桌面介面參考 MSLX 的管理頁面層級，以本專案 Compose 元件獨立實作。桌面功能與 Android 尚未完全對齊；下方功能說明主要描述 Android 端。鴻蒙的具體範圍見 [harmony/README.md](harmony/README.md)。
+
+桌面開發包可在成功的[桌面持續整合](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml)執行中下載；它們是 CI 產物，不等同於正式 Release。桌面使用與建置說明見 [desktop/README.md](desktop/README.md)。
 
 ## 功能
 
@@ -69,7 +82,7 @@ Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三
 
 **直接在手機上開伺服器**
 
-1. 點底部 Dock 中央的「+」，目標選「本機」。
+1. 在「概覽」或「實例」點選「新增實例」，目標選「本機」。
 2. 選擇伺服器核心與版本並完成精靈；首次使用時會視需要安裝 Java 執行環境。
 3. 啟動實例，在主控台中照常操作。
 
@@ -128,7 +141,18 @@ Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的**第三
 首次同步需要連網。中國大陸網路可設定 `MSLX_MAVEN_GOOGLE_MIRROR` 與 `MSLX_MAVEN_CENTRAL_MIRROR` 以使用鏡像倉庫。
 內嵌 JRE 以 `fetch-jre-assets.ps1` 取得，`LD_PRELOAD` 墊片以 `build-shim.ps1` 重新編譯。
 
+Linux 桌面打包使用 JDK 21，沒有顯示工作階段時透過 Xvfb 執行 UI 測試。Windows 原生建置需要 .NET 10 與 Kotlin/Native，見 [Windows 建置說明](windows/README.md)。
+
+```bash
+./gradlew :shared:desktopTest :desktop:test
+./gradlew :desktop:createDistributable
+```
+
+Windows/Linux 工作流程會分別上傳包含執行環境的應用程式壓縮包。HarmonyOS 的工具鏈與驗證邊界見[鴻蒙建置說明](harmony/README.md)。
+
 ## 專案結構
+
+多平台模組包括 Android 的 `app`、KMP 遠端核心 `shared`、Windows 的 `windows`、Linux 的 `desktop` 和 HarmonyOS NEXT 的 `harmony`。
 
 ```text
 app/src/main/java/com/wludy/rolithax/launcher/

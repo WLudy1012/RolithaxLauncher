@@ -66,11 +66,26 @@ class ServerCatalog(
     private val contextProvider: () -> Context,
 ) {
 
-    suspend fun load(settings: AppSettings, refreshDaemonStatuses: Boolean = true): List<ManagedServer> = coroutineScope {
-        if (refreshDaemonStatuses) registry.refreshAll(settings) else registry.sync(settings)
+    suspend fun load(settings: AppSettings, refreshDaemonStatuses: Boolean = true): ServerCatalogSnapshot = coroutineScope {
+        registry.sync(settings)
         val localDeferred = async(Dispatchers.IO) { localServers() }
-        val remoteDeferred = settings.daemons.map { daemon -> async { remoteServers(daemon) } }
-        (listOf(localDeferred) + remoteDeferred).awaitAll().flatten()
+        val remote = settings.daemons.map { daemon ->
+            async {
+                val lastChecked = registry.statusOf(daemon.id).checkedAt
+                if (refreshDaemonStatuses || System.currentTimeMillis() - lastChecked >= 60_000L) {
+                    registry.refreshOne(daemon)
+                }
+                val result = remoteServers(daemon)
+                registry.recordInstanceCount(daemon, result.getOrNull()?.size)
+                daemon.id to result
+            }
+        }.awaitAll()
+        ServerCatalogSnapshot(
+            servers = localDeferred.await() + remote.flatMap { (_, result) -> result.getOrNull().orEmpty() },
+            daemonFailures = remote.mapNotNull { (id, result) ->
+                result.exceptionOrNull()?.let { id to (it.message ?: "无法读取实例") }
+            }.toMap(),
+        )
     }
 
     /** 仅本机实例（不触发 Daemon 探测）。 */
@@ -91,23 +106,27 @@ class ServerCatalog(
         }
     }
 
-    private suspend fun remoteServers(daemon: DaemonConfig): List<ManagedServer> {
-        val repository = registry.repositoryFor(daemon.id) ?: return emptyList()
-        val instances = repository.listInstances().getOrElse { return emptyList() }
-        return instances.map { instance ->
-            ManagedServer(
-                key = ServerRef.remote(daemon.id, instance.id).catalogKey,
-                name = instance.name?.takeIf { it.isNotBlank() } ?: "实例 ${instance.id}",
-                source = ServerSource.Daemon(daemon.id, daemon.name),
-                detail = listOfNotNull(
-                    instance.core?.takeIf { it.isNotBlank() },
-                    instance.statusText?.takeIf { it.isNotBlank() },
-                ).joinToString(" · "),
-                running = isRunningStatus(instance.status, instance.statusText),
-                status = instance.status,
-                onlinePlayers = instance.extra?.onlinePlayers ?: 0,
-                remoteId = instance.id,
-            )
+    private suspend fun remoteServers(daemon: DaemonConfig): Result<List<ManagedServer>> {
+        val repository = registry.repositoryFor(daemon.id)
+            ?: return Result.failure(IllegalStateException("连接已移除"))
+        return repository.listInstances().map { instances ->
+            instances.map { instance ->
+                ManagedServer(
+                    key = ServerRef.remote(daemon.id, instance.id).catalogKey,
+                    name = instance.name?.takeIf { it.isNotBlank() } ?: "实例 ${instance.id}",
+                    source = ServerSource.Daemon(daemon.id, daemon.name),
+                    detail = listOfNotNull(
+                        instance.core?.takeIf { it.isNotBlank() },
+                        instance.statusText?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · "),
+                    running = isRunningStatus(instance.status, instance.statusText),
+                    status = instance.status,
+                    onlinePlayers = instance.extra?.onlinePlayers ?: 0,
+                    remoteId = instance.id,
+                )
+            }
         }
     }
 }
+
+data class ServerCatalogSnapshot(val servers: List<ManagedServer>, val daemonFailures: Map<String, String>)

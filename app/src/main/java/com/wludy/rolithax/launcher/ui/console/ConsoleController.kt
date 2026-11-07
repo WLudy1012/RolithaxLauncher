@@ -1,5 +1,6 @@
 package com.wludy.rolithax.launcher.ui.console
 
+import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -23,7 +24,15 @@ interface ConsoleController {
     val events: SharedFlow<ConsoleEvent>
 
     /** 发送一条控制台命令。 */
-    fun sendCommand(command: String)
+    suspend fun sendCommand(command: String): Boolean
+
+    val panel: StateFlow<ConsolePanelUiState>
+
+    fun previewPanelAction(actionId: String, arguments: Map<String, String>, packageRevision: Long): String?
+
+    suspend fun sendPanelAction(actionId: String, arguments: Map<String, String>, packageRevision: Long): Boolean
+
+    fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String> = emptySet())
 
     /** 发送一个操作动作：start / stop / restart / forceExit / backup。 */
     fun sendAction(action: String)

@@ -26,6 +26,12 @@ Daemon 接口使用统一响应包装：
 
 认证凭据由统一网络客户端注入并从安全存储读取；文档、日志、异常和截图中不得出现凭据值。
 
+## Windows C ABI
+
+`windows/rolithax_core.h` 声明 WinUI 3 使用的 C ABI。会话接收 UTF-8 JSON 配置并持有独立的 REST、SignalR 客户端和流任务。操作参数为 UTF-8 JSON，返回结果包含 `ok` 和 `data`，失败返回 `error`，可附 HTTP 状态与 Daemon 业务码。
+
+宿主通过 ABI 版本判断兼容性，使用 `rolithax_string_free` 释放返回字符串。会话由 .NET `SafeHandle` 持有，释放前等待正在进行的原生调用结束。控制台通过序号增量取回日志，文件上传和下载在原生层分块处理。
+
 ## 地址与 TLS
 
 `ApiClient.normalizeDaemonUrl` 的默认行为是：去除首尾空白和多余斜杠；缺少协议时补 HTTPS；未明确允许明文时把 `http://` 升级为 `https://`。只有用户在连接页明确启用并确认风险后，才允许可信内网使用 HTTP。
@@ -36,12 +42,16 @@ Daemon 可能使用自签证书。客户端对用户自己配置的 Daemon REST�
 
 | Hub | 客户端操作 | 主要推送 |
 | --- | --- | --- |
-| `/api/hubs/instanceControlHub` | 加入/离开实例组、发送命令 | 日志、命令结果、EULA 请求 |
+| `/api/hubs/instanceControlHub` | 按游标续接或加入实例组、发送命令 | 日志、提交回执、EULA 请求 |
 | `/api/hubs/updateProgressHub` | 加入更新组 | 更新消息、进度和错误 |
 | `/api/hubs/creationProgressHub` | 跟踪/取消跟踪创建任务 | 创建消息和进度 |
 | `/api/hubs/system` | 开始/结束监视 | 本机与从节点 CPU、内存和时间戳 |
 
 对象推送必须注册为对应的数据类接收。不要把对象载荷注册为 `String` 再自行解析，否则 GsonHubProtocol 可能静默丢弃参数。连接重试要带连接代际校验，旧连接关闭后不能继续写入当前状态。
+
+共享控制台优先调用 `ResumeConsole`。支持游标的 Daemon 返回历史批次，实时日志带 `streamId` 与 `sequence`。客户端合并、排序和去重，发现缺口时向宿主发出 `ConsoleEvent.Gap`。服务端明确表示该方法不存在时才回退到旧的 `JoinGroup`。旧版单参数日志没有来源标记，断线后的历史与实时日志可能重叠。
+
+`CommandResult` 表示 Daemon 提交结果，现有载荷没有请求 ID。面板只从日志提取显示数据。宿主负责绑定目标实例、授权和确认，重放日志或重连不会重发命令。插件文件约定见 [控制台插件 SDK](../../console-sdk/README.md)。
 
 ## MSLAPI
 
@@ -61,6 +71,15 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 - 强制更新判定：CNB 路径用全部候选 tag 的 `-Force` 后缀，加上实际取到页面的最新 release 说明中是否含「强制更新」（旧版兼容）。
 - CNB 标签页属于 Web 载体而非开放 API，解析失败按「该版本无可用元数据」跳过更早版本，不降级到无校验数据；请求带应用 User-Agent，响应体限 4MB。
 
+### 更新下载域名信任
+
+更新 APK 的下载域名由 `isTrustedUpdateHost`（`ui/update/UpdateViewModel.kt`）白名单控制，防止任意主机被拉起安装：候选域名在下载前和每次重定向后都要校验，任一环节不受信即失败关闭。
+
+- GitHub 系：`github.com`、`www.github.com`、`objects.githubusercontent.com`、`release-assets.githubusercontent.com`。
+- CNB 系：`cnb.cool` 精确匹配加 `.cnb.cool` 子域后缀匹配（Release 链接会 302 到 `asset.cnb.cool`）。
+- 主机名先 trim、转小写再匹配；只接受精确域名或子域后缀，`evilcnb.cool` 这类相似域名必须拒绝。
+- 新增下载源时必须同步扩充白名单并补充单测；域名规则变化属于发布契约变化，需在 Release notes 说明。
+
 ## Rolithax Daemon 插件
 
 远程扫码、图标和云端资源直装使用插件前缀：
@@ -69,16 +88,19 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 /api/plugin/mslx-plugin-rolithax/...
 ```
 
-插件包标识为 `mslx-plugin-rolithax`，最低支持的 MSLX Daemon 版本为 `1.5.10.2`。插件程序集、目录和前端资源继续使用 Rolithax 命名。
+插件包标识为 `mslx-plugin-rolithax`，最低支持的 MSLX Daemon 版本为 `1.7.3`。插件程序集、目录和前端资源继续使用 Rolithax 命名。
 
 当前使用的路由包括：
 
+- `/features`：已认证用户查询配对、实例图标和资源安装扩展 API 的启用状态；管理员通过 `/features/{feature}` 修改状态。
 - `/pair/codes`：生成一次性配对码
 - `/pair/redeem`：兑换二维码载荷
 - `/icon/server/{id}`：实例图标
 - `/resources/install`：在 Daemon 所在机器创建资源安装任务
 - `/resources/install/{id}`：查询安装任务
 - `/resources/install/{id}/cancel`：取消安装任务
+
+新安装和旧配置中缺失的开关默认启用。关闭资源安装后不再创建新任务，已有任务仍可查询或取消；关闭配对接口不取消已有配对设备的租约校验。实例图标 GET 端点支持 Media Scoped Token，仍按实例权限授权。
 
 客户端不应恢复已移除的旧版 `/api/plugins/...` 兼容路由。资源安装由 Daemon 侧下载并落地，客户端不把远程文件先下载再上传一遍。
 

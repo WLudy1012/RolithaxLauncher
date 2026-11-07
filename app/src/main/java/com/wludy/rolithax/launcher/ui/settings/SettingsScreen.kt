@@ -23,17 +23,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -42,8 +39,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,14 +51,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.wludy.rolithax.launcher.data.DaemonConfig
 import com.wludy.rolithax.launcher.data.UpdateChannel
 import com.wludy.rolithax.launcher.ui.RolithaxCard
-import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
+import com.wludy.rolithax.launcher.ui.WorkspaceBar
+import com.wludy.rolithax.launcher.ui.WorkspaceBody
 import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.update.UpdateViewModel
@@ -71,19 +67,15 @@ import com.wludy.rolithax.launcher.ui.update.UpdateViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onAddDaemon: () -> Unit,
-    onEditDaemon: (String) -> Unit,
     onOpenUserCenter: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenLocalServerSettings: () -> Unit,
-    onOpenServers: () -> Unit,
+    onOpenConnections: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val daemonStatuses by viewModel.daemonStatuses.collectAsStateWithLifecycle()
-    var pendingDelete by remember { mutableStateOf<DaemonConfig?>(null) }
     var backupMode by remember { mutableStateOf<String?>(null) }
     var backupPassword by remember { mutableStateOf("") }
     var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -127,228 +119,144 @@ fun SettingsScreen(
         containerColor = Color.Transparent,
         // Dock 已提升至 NavHost 外层；页面 Scaffold 不再自绘底栏
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = { Text("设置", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
-                ),
-            )
-        },
+        topBar = { WorkspaceBar("设置") },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-        ) {
-            // ---- 账号 ----
-            SectionTitle("账号")
-            RolithaxCard(
-                onClick = onOpenUserCenter,
-                modifier = Modifier.fillMaxWidth(),
-                highlighted = true,
+        WorkspaceBody(Modifier.padding(innerPadding)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                // ---- 账号 ----
+                SectionTitle("账号")
+                RolithaxCard(
+                    onClick = onOpenUserCenter,
+                    modifier = Modifier.fillMaxWidth(),
+                    highlighted = true,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "用户中心",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
-                        Text(
-                            text = "查看头像与名称",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.size(12.dp))
-
-            // ---- 更新渠道 ----
-            SectionTitle("更新渠道")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                    ChannelOption(
-                        title = "稳定版",
-                        subtitle = "仅接收正式稳定版更新（推荐）",
-                        selected = settings.updateChannel == UpdateChannel.STABLE,
-                        onClick = { viewModel.setUpdateChannel(UpdateChannel.STABLE) },
-                    )
-                    ChannelOption(
-                        title = "测试版",
-                        subtitle = "同时接收 Beta 测试版更新",
-                        selected = settings.updateChannel == UpdateChannel.BETA,
-                        onClick = { viewModel.setUpdateChannel(UpdateChannel.BETA) },
-                    )
-                }
-            }
-
-            Spacer(Modifier.size(12.dp))
-
-            // ---- 服务端 ----
-            // 「本机开服」入口已删除（与底部「新建」tab 完全重复）；
-            // 本机运行时的配置统一收敛到「本机运行时与开服设置」。
-            SectionTitle("服务端")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column {
-                    EntryRow(
-                        icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "服务端总览",
-                        subtitle = "多 Daemon 连接状态 + 本机/云端实例统一管理",
-                        onClick = onOpenServers,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "本机运行时与开服设置",
-                        subtitle = "内存、JVM 参数、后台保活、Java 运行时",
-                        onClick = onOpenLocalServerSettings,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "导出应用数据",
-                        subtitle = "加密迁移 Daemon 配置与本机实例",
-                        onClick = { backupMode = "export"; backupPassword = "" },
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "导入应用数据",
-                        subtitle = "从加密备份恢复配置与实例文件",
-                        onClick = { openBackup.launch(arrayOf("application/octet-stream", "application/zip", "*/*")) },
-                    )
-                }
-            }
-
-            Spacer(Modifier.size(12.dp))
-
-            // ---- 通用 ----
-            SectionTitle("通用")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column {
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "外观",
-                        subtitle = "主题颜色与动态取色",
-                        onClick = onOpenAppearance,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "运行日志",
-                        subtitle = "查看与导出应用日志",
-                        onClick = onOpenLogs,
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Refresh, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "检查更新",
-                        subtitle = if (versionName.isBlank()) "Rolithax Launcher" else "Rolithax Launcher v$versionName",
-                        onClick = { if (!updateState.checking) updateViewModel.checkManually() },
-                        trailing = {
-                            if (updateState.checking) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            }
-                        },
-                    )
-                    EntryRow(
-                        icon = { Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.primary) },
-                        title = "关于",
-                        subtitle = "版本、更新说明与贡献者",
-                        onClick = onOpenAbout,
-                    )
-                }
-            }
-
-            Spacer(Modifier.size(12.dp))
-
-            // ---- Daemon 管理 ----
-            SectionTitle("Daemon 管理")
-            if (settings.daemonDecodeFailed) {
-                // 解析失败时清理不可恢复数据并写入运行日志
-                // alpha = 1f：错误提示需要高于玻璃面板的对比度，不参与背景透光
-                GlassSurface(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
-                    tint = MaterialTheme.colorScheme.errorContainer,
-                    alpha = 1f,
-                ) {
-                    Text(
-                        text = "Daemon 配置解析失败，原始数据已备份到运行日志，请重新添加连接。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-            }
-            if (settings.daemons.isEmpty()) {
-                RolithaxEmptyState(
-                    icon = Icons.Filled.Add,
-                    title = "尚未添加任何 Daemon",
-                    description = "添加连接后可在这里选择与管理",
-                    actionLabel = "添加 Daemon",
-                    onAction = onAddDaemon,
-                )
-            } else {
-                GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        settings.daemons.forEach { daemon ->
-                            DaemonRow(
-                                daemon = daemon,
-                                status = daemonStatuses[daemon.id],
-                                isActive = daemon.id == settings.activeDaemonId,
-                                onSelect = { viewModel.setActiveDaemon(daemon.id) },
-                                onEdit = { onEditDaemon(daemon.id) },
-                                onDelete = { pendingDelete = daemon },
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "用户中心",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Text(
+                                text = "查看头像与名称",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                             )
                         }
-                        TextButton(
-                            onClick = onAddDaemon,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        ) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("添加 Daemon")
-                        }
                     }
                 }
+                Spacer(Modifier.size(12.dp))
+
+                // ---- 更新渠道 ----
+                SectionTitle("更新渠道")
+                GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        ChannelOption(
+                            title = "稳定版",
+                            subtitle = "仅接收正式稳定版更新（推荐）",
+                            selected = settings.updateChannel == UpdateChannel.STABLE,
+                            onClick = { viewModel.setUpdateChannel(UpdateChannel.STABLE) },
+                        )
+                        ChannelOption(
+                            title = "测试版",
+                            subtitle = "同时接收 Beta 测试版更新",
+                            selected = settings.updateChannel == UpdateChannel.BETA,
+                            onClick = { viewModel.setUpdateChannel(UpdateChannel.BETA) },
+                        )
+                    }
+                }
+
+                Spacer(Modifier.size(12.dp))
+
+                // ---- 服务端 ----
+                SectionTitle("服务端")
+                GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        EntryRow(
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "连接管理",
+                            subtitle = "管理远端 Daemon 和本机实例入口",
+                            onClick = onOpenConnections,
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "本机运行时与开服设置",
+                            subtitle = "内存、JVM 参数、后台保活、Java 运行时",
+                            onClick = onOpenLocalServerSettings,
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Build, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "导出应用数据",
+                            subtitle = "加密迁移 Daemon 配置与本机实例",
+                            onClick = { backupMode = "export"; backupPassword = "" },
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Add, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "导入应用数据",
+                            subtitle = "从加密备份恢复配置与实例文件",
+                            onClick = { openBackup.launch(arrayOf("application/octet-stream", "application/zip", "*/*")) },
+                        )
+                    }
+                }
+
+                Spacer(Modifier.size(12.dp))
+
+                // ---- 通用 ----
+                SectionTitle("通用")
+                GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Star, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "外观",
+                            subtitle = "主题颜色与动态取色",
+                            onClick = onOpenAppearance,
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "运行日志",
+                            subtitle = "查看与导出应用日志",
+                            onClick = onOpenLogs,
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Refresh, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "检查更新",
+                            subtitle = if (versionName.isBlank()) "Rolithax Launcher" else "Rolithax Launcher v$versionName",
+                            onClick = { if (!updateState.checking) updateViewModel.checkManually() },
+                            trailing = {
+                                if (updateState.checking) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                }
+                            },
+                        )
+                        EntryRow(
+                            icon = { Icon(Icons.Filled.Info, null, tint = MaterialTheme.colorScheme.primary) },
+                            title = "关于",
+                            subtitle = "版本、更新说明与贡献者",
+                            onClick = onOpenAbout,
+                        )
+                    }
+                }
+
             }
         }
-    }
-
-    // 删除确认
-    val target = pendingDelete
-    if (target != null) {
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("删除 Daemon") },
-            text = { Text("确定删除「${target.name.ifBlank { target.baseUrl }}」吗？") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.removeDaemon(target.id)
-                        pendingDelete = null
-                    },
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
-            },
-        )
     }
 
     backupMode?.let { mode ->
@@ -361,6 +269,7 @@ fun SettingsScreen(
                     onValueChange = { backupPassword = it },
                     label = { Text("口令（至少 8 位）") },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
                 )
             },
             confirmButton = {
@@ -371,12 +280,14 @@ fun SettingsScreen(
                             createBackup.launch("rolithax-backup.rlxb")
                         } else {
                             importUri?.let { viewModel.importBackup(it, backupPassword) }
+                            backupPassword = ""
+                            importUri = null
                             backupMode = null
                         }
                     },
                 ) { Text(if (mode == "export") "选择保存位置" else "导入") }
             },
-            dismissButton = { TextButton(onClick = { backupMode = null }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { backupMode = null; backupPassword = "" }) { Text("取消") } },
         )
     }
 
@@ -465,70 +376,6 @@ private fun EntryRow(
     }
 }
 
-@Composable
-private fun DaemonRow(
-    daemon: DaemonConfig,
-    status: com.wludy.rolithax.launcher.data.DaemonStatus?,
-    isActive: Boolean,
-    onSelect: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp)
-            .selectable(selected = isActive, role = Role.RadioButton, onClick = onSelect)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = isActive, onClick = null)
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = daemon.name.ifBlank { daemon.baseUrl },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = buildString {
-                    append(daemon.baseUrl)
-                    if (daemon.endpoints.isNotEmpty()) append(" · 备用地址 ${daemon.endpoints.size} 个")
-                    status?.let {
-                        append(" · ").append(it.stateText)
-                        it.latencyMs?.let { latency -> append(" ${latency}ms") }
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                color = when (status?.state) {
-                    com.wludy.rolithax.launcher.data.DaemonState.ONLINE -> MaterialTheme.colorScheme.primary
-                    com.wludy.rolithax.launcher.data.DaemonState.OFFLINE -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        IconButton(onClick = onEdit) {
-            Icon(
-                imageVector = Icons.Filled.Settings,
-                contentDescription = "编辑",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onDelete) {
-            Icon(
-                imageVector = Icons.Filled.Delete,
-                contentDescription = "删除",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** 从任意 Compose Context 向上查找宿主 Activity。 */
 private tailrec fun Context.findActivity(): ComponentActivity? = when (this) {
     is ComponentActivity -> this
     is ContextWrapper -> baseContext.findActivity()

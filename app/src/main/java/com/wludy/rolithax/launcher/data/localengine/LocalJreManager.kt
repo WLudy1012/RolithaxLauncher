@@ -295,20 +295,8 @@ object LocalJreManager {
      * 按 Minecraft 游戏版本推荐 Java 主版本（与 MSLAPI / 创建向导规则一致）：
      * 1.16 及以下 → 8；1.17–1.20.4 → 17；1.20.5 及以上 → 21；26.x+ → 25。版本串无法识别返回 null。
      */
-    fun recommendedMajorForGame(gameVersion: String): Int? {
-        val version = gameVersion.trim().removePrefix("v")
-        val match = Regex("^(\\d+)\\.(\\d+)(?:\\.(\\d+))?").find(version) ?: return null
-        val major = match.groupValues[1].toIntOrNull() ?: return null
-        val minor = match.groupValues[2].toIntOrNull() ?: return null
-        val patch = match.groupValues.getOrNull(3)?.toIntOrNull() ?: 0
-        if (major >= 26) return 25
-        if (major != 1) return null
-        return when {
-            minor <= 16 -> 8
-            minor <= 20 && (minor < 20 || patch <= 4) -> 17
-            else -> 21
-        }
-    }
+    fun recommendedMajorForGame(gameVersion: String): Int? =
+        com.wludy.rolithax.launcher.shared.recommendedJavaMajor(gameVersion)
 
     /** 运行时与核心游戏版本的匹配度。 */
     enum class RuntimeFit { MATCH, TOO_OLD, TOO_NEW, UNKNOWN }

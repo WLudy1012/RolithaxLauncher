@@ -24,9 +24,9 @@ android {
         applicationId = "com.wludy.rolithax.launcher"
         minSdk = 24
         targetSdk = 35
-        versionCode = 46
+        versionCode = 47
         // 本地打包脚本可通过 -PversionName 覆盖版本名。
-        versionName = (project.findProperty("versionName") as String?) ?: "1.8.1"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.8.2"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）
@@ -123,6 +123,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":shared"))
+    implementation("io.ktor:ktor-client-okhttp:2.3.13")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.coil.compose)
@@ -156,6 +158,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
 
     // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
     implementation(libs.xz)

@@ -1,11 +1,7 @@
 package com.wludy.rolithax.launcher.data
 
 import android.util.Base64
-import com.wludy.rolithax.launcher.data.model.ActionRequest
-import com.wludy.rolithax.launcher.data.model.CancelCreationRequest
-import com.wludy.rolithax.launcher.data.model.CommandResultPayload
 import com.wludy.rolithax.launcher.data.model.CreateServerRequest
-import com.wludy.rolithax.launcher.data.model.DeleteServerRequest
 import com.wludy.rolithax.launcher.data.model.ServerCoreClassify
 import com.wludy.rolithax.launcher.data.model.ServerCoreDownloadInfo
 import com.wludy.rolithax.launcher.data.model.ServerCoreGameVersion
@@ -18,24 +14,26 @@ import com.wludy.rolithax.launcher.data.model.InstanceSummary
 import com.wludy.rolithax.launcher.data.model.LocalJava
 import com.wludy.rolithax.launcher.data.model.PmListData
 import com.wludy.rolithax.launcher.data.model.PmSetRequest
-import com.wludy.rolithax.launcher.data.model.SaveFileRequest
 import com.wludy.rolithax.launcher.data.model.SaveUploadRequest
 import com.wludy.rolithax.launcher.data.model.ServerSettings
 import com.wludy.rolithax.launcher.data.model.StatusData
 import com.wludy.rolithax.launcher.data.model.UploadFinishRequest
 import com.wludy.rolithax.launcher.data.model.UpdateSelfRequest
-import com.wludy.rolithax.launcher.data.model.UpdateSettingsData
 import com.wludy.rolithax.launcher.data.model.ResourceInstallBatchRequest
 import com.wludy.rolithax.launcher.data.model.ResourceInstallTaskData
 import com.wludy.rolithax.launcher.data.model.UserInfo
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.wludy.rolithax.launcher.data.remote.ApiClient
-import com.wludy.rolithax.launcher.data.remote.ConsoleHubClient
 import com.wludy.rolithax.launcher.data.remote.DaemonApi
 import com.wludy.rolithax.launcher.data.remote.SystemMonitorClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -56,6 +54,9 @@ class InstanceRepository {
 
     @Volatile
     private var httpClient: OkHttpClient? = null
+
+    @Volatile
+    private var sharedConnection: SharedDaemonConnection? = null
 
     private val hubClients = CopyOnWriteArrayList<com.wludy.rolithax.launcher.data.remote.ReconnectingHubClient>()
 
@@ -89,6 +90,7 @@ class InstanceRepository {
         val connection = ApiClient.buildDaemonConnection(normalized, this.apiKey)
         this.api = connection.api
         this.httpClient = connection.client
+        this.sharedConnection = SharedDaemonConnection(normalized, this.apiKey, connection.client)
         AppLogger.i("Repository", "configure: ${normalized.trimEnd('/')} allowHttp=$allowHttp")
     }
 
@@ -103,6 +105,8 @@ class InstanceRepository {
     private fun closeResources() {
         hubClients.forEach { runCatching { it.close() } }
         hubClients.clear()
+        sharedConnection?.close()
+        sharedConnection = null
         httpClient?.let { client ->
             runCatching { client.dispatcher.cancelAll() }
             runCatching { client.dispatcher.executorService.shutdown() }
@@ -119,45 +123,30 @@ class InstanceRepository {
     private fun requireApi(): DaemonApi =
         api ?: throw IllegalStateException("尚未配置连接信息")
 
-    private suspend fun <T> daemonResult(block: suspend () -> T): Result<T> = runCatching {
-        try {
-            block()
-        } catch (e: HttpException) {
-            throw IllegalStateException(
+    private suspend fun <T> daemonResult(block: suspend () -> T): Result<T> = try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HttpException) {
+        Result.failure(IllegalStateException(
                 ApiClient.errorMessageFrom(e) ?: "HTTP ${e.code()} 请求失败",
                 e,
-            )
-        }
+            ))
+    } catch (e: Throwable) {
+        Result.failure(e)
     }
 
     suspend fun verify(): Result<Unit> = daemonResult {
-        try {
-            val resp = requireApi().status()
-            if (resp.code != 200) {
-                throw IllegalStateException(resp.message ?: "Daemon 鉴权失败，请检查 API Key")
-            }
-            if (resp.data == null) {
-                throw IllegalStateException("Daemon 鉴权失败：未返回有效状态")
-            }
-            AppLogger.i("Repository", "verify 成功")
-        } catch (e: HttpException) {
-            if (e.code() == 401 || e.code() == 403) {
-                throw IllegalStateException("Daemon 鉴权失败，请检查 API Key", e)
-            }
-            throw e
-        }
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).verify()
+        AppLogger.i("Repository", "verify 成功")
     }
 
     suspend fun getStatus(): Result<StatusData> = daemonResult {
-        val resp = requireApi().status()
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取状态失败")
-        resp.data ?: throw IllegalStateException("返回数据为空")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).status()
     }
 
     suspend fun javaList(refresh: Boolean = false): Result<List<LocalJava>> = daemonResult {
-        val resp = requireApi().javaList(refresh)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取 Java 列表失败")
-        resp.data ?: emptyList()
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).javaList(refresh)
     }
 
     /** 从 MSLAPI 获取在线 Java 版本，失败时回退到 Microsoft OpenJDK。 */
@@ -192,60 +181,43 @@ class InstanceRepository {
         .sortedWith(compareByDescending { it.toIntOrNull() ?: 0 })
 
     suspend fun listInstances(): Result<List<InstanceSummary>> = daemonResult {
-        val resp = requireApi().instanceList()
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取实例列表失败")
-        resp.data ?: emptyList()
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).listInstances()
     }
 
     suspend fun instanceInfo(id: Long): Result<InstanceInfo> = daemonResult {
-        val resp = requireApi().instanceInfo(id)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取实例信息失败")
-        resp.data ?: throw IllegalStateException("返回数据为空")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).instanceInfo(id)
     }
 
     suspend fun installResources(request: ResourceInstallBatchRequest): Result<ResourceInstallTaskData> = daemonResult {
-        val response = requireApi().installResources(request)
-        if (response.code !in 200..299) throw IllegalStateException(response.message ?: "资源安装任务创建失败")
-        response.data ?: throw IllegalStateException("Daemon 未返回安装任务")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).installResources(request)
     }
 
     suspend fun resourceInstallTask(id: String): Result<ResourceInstallTaskData> = daemonResult {
-        val response = requireApi().resourceInstallTask(id)
-        if (response.code != 200) throw IllegalStateException(response.message ?: "读取资源安装进度失败")
-        response.data ?: throw IllegalStateException("Daemon 未返回安装进度")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).resourceInstallTask(id)
     }
 
     suspend fun cancelResourceInstall(id: String): Result<Unit> = daemonResult {
-        val response = requireApi().cancelResourceInstall(id)
-        if (response.code != 200) throw IllegalStateException(response.message ?: "取消资源安装失败")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).cancelResourceInstall(id)
     }
 
     suspend fun createInstance(request: CreateServerRequest): Result<String> = daemonResult {
-        val resp = requireApi().createServer(request)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "创建失败")
-        resp.data?.serverId?.takeIf { it.isNotBlank() }
-            ?: throw IllegalStateException("服务器未返回 ServerId")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).createInstance(request)
     }
 
     suspend fun deleteInstance(id: Long, deleteFiles: Boolean): Result<String> = daemonResult {
         AppLogger.i("Repository", "删除实例 id=$id deleteFiles=$deleteFiles")
-        val resp = requireApi().deleteInstance(DeleteServerRequest(id, deleteFiles))
-        if (resp.code != 200) {
-            // 400 等业务失败（如实例仍在运行）也走异常分支，message 直接透传给 UI
-            throw IllegalStateException(resp.message ?: "删除实例失败")
-        }
+        val message = (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).deleteInstance(id, deleteFiles)
         AppLogger.i("Repository", "删除实例成功 id=$id")
-        resp.message ?: "实例已删除"
+        message
     }
 
     suspend fun cancelCreation(serverId: String, cleanupFiles: Boolean = false): Result<String> = daemonResult {
-        val resp = requireApi().cancelCreation(CancelCreationRequest(serverId, cleanupFiles))
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "取消失败")
-        resp.message ?: "取消信号已发送"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).cancelCreation(serverId, cleanupFiles)
     }
 
     suspend fun deleteUpload(uploadId: String): Result<Unit> = daemonResult {
-        requireApi().deleteUpload(uploadId)
+        val response = requireApi().deleteUpload(uploadId)
+        if (response.code != 200) throw IllegalStateException(response.message ?: "清理上传失败")
     }
 
     /**
@@ -260,7 +232,7 @@ class InstanceRepository {
         input: () -> java.io.InputStream,
         totalBytes: Long,
         onProgress: (Int) -> Unit,
-    ): Result<String> = runCatching {
+    ): Result<String> = try {
         val uploadId = uploadInit().getOrThrow()
         try {
             val chunkSize = 10 * 1024 * 1024
@@ -270,6 +242,7 @@ class InstanceRepository {
             withContext(Dispatchers.IO) {
                 input().use { stream ->
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val read = stream.read(buffer)
                         if (read < 0) break
                         if (read == 0) continue
@@ -287,13 +260,23 @@ class InstanceRepository {
                 index = 1
             }
             uploadFinish(uploadId, index).getOrThrow()
-            uploadId
+            Result.success(uploadId)
         } catch (e: Exception) {
             AppLogger.w("Repository", "上传失败，清理服务端临时分片 uploadId=$uploadId", e)
-            runCatching { deleteUpload(uploadId) }
-                .onFailure { AppLogger.w("Repository", "清理服务端临时分片失败 uploadId=$uploadId", it) }
+            withContext(NonCancellable) {
+                val cleaned = withTimeoutOrNull(5_000) {
+                    deleteUpload(uploadId).onFailure {
+                        AppLogger.w("Repository", "清理服务端临时分片失败 uploadId=$uploadId", it)
+                    }
+                }
+                if (cleaned == null) AppLogger.w("Repository", "清理服务端临时分片超时 uploadId=$uploadId")
+            }
             throw e
         }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     suspend fun serverCoreClassify(): Result<ServerCoreClassify> = runCatching {
@@ -341,22 +324,16 @@ class InstanceRepository {
     }
 
     suspend fun sendAction(id: Long, action: String): Result<String> = daemonResult {
-        val resp = requireApi().action(ActionRequest(id, action))
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "操作失败")
-        resp.message ?: "操作成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).sendAction(id, action)
     }
 
     suspend fun getSettings(id: Long): Result<ServerSettings> = daemonResult {
-        val resp = requireApi().instanceSettings(id)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取设置失败")
-        resp.data ?: throw IllegalStateException("返回数据为空")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).getSettings(id)
     }
 
     suspend fun updateSettings(id: Long, settings: ServerSettings): Result<Pair<String, Boolean>> = daemonResult {
         val normalized = settings.copy(java = normalizeJavaConfig(settings.java))
-        val resp = requireApi().updateInstanceSettings(id, normalized)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "保存失败")
-        (resp.message ?: "保存成功") to (resp.data?.needListen == true)
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).updateSettings(id, normalized)
     }
 
     private fun normalizeJavaConfig(java: String): String {
@@ -369,82 +346,52 @@ class InstanceRepository {
     }
 
     suspend fun updateSelf(body: UpdateSelfRequest): Result<String> = daemonResult {
-        val resp = requireApi().updateSelf(body)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "更新用户信息失败")
-        resp.message ?: "更新成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).updateSelf(body)
     }
 
     suspend fun adminUserList(): Result<List<UserInfo>> = daemonResult {
-        val resp = requireApi().adminUserList()
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取用户列表失败")
-        resp.data.orEmpty()
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).adminUserList()
     }
 
     suspend fun adminCreateUser(body: AdminCreateUserRequest): Result<String> = daemonResult {
-        val resp = requireApi().adminCreateUser(body)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "创建用户失败")
-        resp.message ?: "创建成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).adminCreateUser(body)
     }
 
     suspend fun adminUpdateUser(id: String, body: AdminUpdateUserRequest): Result<String> = daemonResult {
-        val resp = requireApi().adminUpdateUser(id, body)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "更新用户失败")
-        resp.message ?: "更新成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).adminUpdateUser(id, body)
     }
 
     suspend fun adminDeleteUser(id: String): Result<String> = daemonResult {
-        val resp = requireApi().adminDeleteUser(id)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "删除用户失败")
-        resp.message ?: "删除成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).adminDeleteUser(id)
     }
 
     suspend fun frpList(): Result<List<FrpSummary>> = daemonResult {
-        val resp = requireApi().frpList()
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取 FRP 列表失败")
-        resp.data.orEmpty()
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).frpList()
     }
 
     suspend fun pmList(id: Long, mode: String): Result<PmListData> = daemonResult {
-        val resp = requireApi().pmList(id, mode)
-        val body = resp.body()
-        when {
-            // 目录不存在(如纯模组服没有插件目录)→ 当作空列表，避免报 404
-            resp.code() == 404 -> PmListData()
-            !resp.isSuccessful || body == null -> throw IllegalStateException(body?.message ?: "获取列表失败")
-            body.code != 200 -> throw IllegalStateException(body.message ?: "获取列表失败")
-            else -> body.data ?: PmListData()
-        }
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).pmList(id, mode)
     }
 
     suspend fun pmSet(id: Long, mode: String, action: String, targets: List<String>): Result<String> = daemonResult {
-        val resp = requireApi().pmSet(id, PmSetRequest(mode, action, targets))
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "操作失败")
-        resp.message ?: "操作成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).pmSet(id, PmSetRequest(mode, action, targets))
     }
 
     suspend fun fileContent(id: Long, path: String): Result<String> = daemonResult {
-        val resp = requireApi().fileContent(id, path)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "读取失败")
-        resp.data ?: throw IllegalStateException("返回数据为空")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).fileContent(id, path)
     }
 
     /** 列出实例目录下的文件/子目录（path 为空表示实例根目录）。 */
     suspend fun fileList(id: Long, path: String = ""): Result<List<FileItem>> = daemonResult {
-        val resp = requireApi().fileList(id, path)
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取文件列表失败")
-        resp.data.orEmpty()
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).fileList(id, path)
     }
 
     suspend fun saveFileContent(id: Long, path: String, content: String): Result<String> = daemonResult {
-        val resp = requireApi().saveFileContent(id, SaveFileRequest(path, content))
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "保存失败")
-        resp.message ?: "保存成功"
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).saveFileContent(id, path, content)
     }
 
     suspend fun userMe(): Result<UserInfo> = daemonResult {
-        val resp = requireApi().userMe()
-        if (resp.code != 200) throw IllegalStateException(resp.message ?: "获取用户信息失败")
-        resp.data ?: throw IllegalStateException("返回数据为空")
+        (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).userMe()
     }
 
     suspend fun uploadInit(): Result<String> = daemonResult {
@@ -475,13 +422,7 @@ class InstanceRepository {
         resp.message ?: "保存成功"
     }
 
-    fun createConsoleClient(
-        instanceId: Long,
-        onLog: (String) -> Unit,
-        onCommandResult: (CommandResultPayload) -> Unit,
-        onEulaRequired: () -> Unit,
-    ): ConsoleHubClient = ConsoleHubClient(baseUrl, apiKey, instanceId, onLog, onCommandResult, onEulaRequired)
-        .also { hubClients += it }
+    internal val consoleConnection: SharedDaemonConnection? get() = sharedConnection
 
     /** 创建系统负载监视客户端(订阅 /api/hubs/system 的 ReceiveSystemStats)。 */
     fun createSystemMonitorClient(

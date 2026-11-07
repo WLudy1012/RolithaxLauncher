@@ -66,13 +66,13 @@ private data class GuideStep(
 private val guideSteps = listOf(
     GuideStep(
         title = "连接你的 Daemon",
-        description = "从主页打开连接入口，可以扫描 Rolithax 配对二维码，也可以手动填写地址和 API Key。",
-        hint = "还没有远程 Daemon？可以直接使用手机本机开服。",
+        description = "在「连接」中添加 Daemon。可以扫描配对二维码，也可以填写地址和 API 密钥。",
+        hint = "也可以直接在手机上运行服务器。",
         icon = Icons.Filled.Info,
     ),
     GuideStep(
         title = "创建远程或本机服务端",
-        description = "点击底部 Dock 的“新建”，选择运行位置，再按向导选择服务端核心、版本和 Java。",
+        description = "从「概览」或「实例」新建，选择本机或某个 Daemon，再按向导配置核心和 Java。",
         hint = "本机实例不需要连接远程 Daemon。",
         icon = Icons.Filled.Add,
     ),
@@ -84,7 +84,7 @@ private val guideSteps = listOf(
     ),
     GuideStep(
         title = "按习惯调整设置",
-        description = "你可以在设置中调整外观、管理 Daemon 连接并检查应用更新。",
+        description = "在「设置」中调整主题、管理备份或检查更新。",
         hint = "第三方免责声明与组件许可可在设置中的关于页面查看。",
         icon = Icons.Filled.Settings,
     ),

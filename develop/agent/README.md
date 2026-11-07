@@ -16,6 +16,7 @@
 | [`project.md`](project.md) | 产品身份、包名、技术栈、目录结构和功能边界 |
 | [`architecture.md`](architecture.md) | MVVM、依赖容器、数据流、导航和核心模块职责 |
 | [`contracts.md`](contracts.md) | Daemon REST、MSLAPI、SignalR、插件路由和网络约束 |
+| [控制台插件 SDK](../../console-sdk/README.md) | Android 与 Windows 的面板格式、日志规则、命令授权、热加载和工具链 |
 | [`local-server.md`](local-server.md) | 本机实例、JVM 引擎、运行时、存储和保活 |
 | [`resource-center.md`](resource-center.md) | Provider、Modrinth、MSLAPI、缓存、安装与依赖校验 |
 | [`security.md`](security.md) | 凭据保护、HTTPS、日志、下载校验、备份和权限边界 |

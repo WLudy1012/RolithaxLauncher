@@ -5,6 +5,14 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import com.wludy.rolithax.launcher.BuildConfig
 import com.wludy.rolithax.launcher.data.AppLogger
+import com.wludy.rolithax.launcher.shared.MslApiRateLimiter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import java.io.IOException
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -35,7 +43,7 @@ object ApiClient {
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader("User-Agent", USER_AGENT)
-                    .apply { if (apiKey.isNotBlank()) addHeader("x-api-key", apiKey) }
+                    .apply { if (apiKey.isNotBlank()) header("x-api-key", apiKey) }
                     .build()
                 chain.proceed(request)
             }
@@ -115,7 +123,7 @@ object ApiClient {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
-                MslApiRateLimiter.awaitSlot()
+                awaitMslApiSlot(chain)
                 chain.proceed(chain.request())
             }
             .addInterceptor { chain ->
@@ -141,7 +149,7 @@ object ApiClient {
         val client = OkHttpClient.Builder()
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
-                MslApiRateLimiter.awaitSlot()
+                awaitMslApiSlot(chain)
                 chain.proceed(chain.request())
             }
             .addInterceptor { chain ->
@@ -327,17 +335,28 @@ object ApiClient {
     private val sharedGson by lazy { com.google.gson.Gson() }
 }
 
-private object MslApiRateLimiter {
-    private const val SPACING_MS = 150L
-    private var nextSlotAt = 0L
-
-    fun awaitSlot() {
-        val waitMs = synchronized(this) {
-            val now = android.os.SystemClock.elapsedRealtime()
-            val slot = maxOf(now, nextSlotAt)
-            nextSlotAt = slot + SPACING_MS
-            slot - now
+private fun awaitMslApiSlot(chain: okhttp3.Interceptor.Chain) {
+    try {
+        runBlocking {
+            if (chain.call().isCanceled()) throw IOException("Canceled")
+            val cancellationWatcher = launch {
+                while (isActive) {
+                    if (chain.call().isCanceled()) {
+                        this@runBlocking.cancel()
+                        break
+                    }
+                    delay(25)
+                }
+            }
+            try {
+                MslApiRateLimiter.awaitSlot()
+            } finally {
+                cancellationWatcher.cancel()
+            }
+            if (chain.call().isCanceled()) throw IOException("Canceled")
         }
-        if (waitMs > 0) Thread.sleep(waitMs)
+    } catch (e: CancellationException) {
+        if (chain.call().isCanceled()) throw IOException("Canceled", e)
+        throw e
     }
 }

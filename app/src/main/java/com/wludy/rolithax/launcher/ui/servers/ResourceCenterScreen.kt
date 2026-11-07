@@ -7,18 +7,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -76,6 +74,8 @@ import com.wludy.rolithax.launcher.data.resources.isCompatibleWith
 import com.wludy.rolithax.launcher.ui.RolithaxCard
 import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
 import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
+import com.wludy.rolithax.launcher.ui.WorkspaceBar
+import com.wludy.rolithax.launcher.ui.WorkspaceBody
 import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import java.text.NumberFormat
@@ -115,7 +115,8 @@ fun ResourceCenterScreen(
 
     Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        modifier = Modifier.imePadding(),
+        topBar = { WorkspaceBar("资源中心") },
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         bottomBar = {
             when {
@@ -124,99 +125,93 @@ fun ResourceCenterScreen(
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .widthIn(max = 920.dp)
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
+        WorkspaceBody(Modifier.padding(padding)) {
+            val refresh = projects.loadState.refresh
+            val append = projects.loadState.append
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("资源中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "为目标实例挑选资源，统一检查依赖后再安装",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                item("target") {
+                    TargetSelector(
+                        servers = state.servers,
+                        selectedKey = state.selectedServerKey,
+                        loading = state.loadingTargets,
+                        gameVersion = state.gameVersion,
+                        loader = state.loader,
+                        onClick = viewModel::showTargetPicker,
+                    )
+                }
+                item("filters") {
+                    FilterBar(
+                        query = state.query,
+                        onQueryChange = viewModel::setSearch,
+                        serverOnly = state.serverOnly,
+                        onServerOnlyChange = viewModel::setServerOnly,
+                        category = state.category,
+                        onCategoryChange = viewModel::setCategory,
+                    )
+                }
+                if (state.cores.isNotEmpty()) {
+                    item("server-cores") { MslApiBanner(state.cores.size, onOpenCreate) }
+                }
+                item("project-heading") {
+                    RolithaxSectionHeader(
+                        title = when (state.category) {
+                            "plugin" -> "插件"
+                            "modpack" -> "整合包"
+                            "datapack" -> "数据包"
+                            else -> "模组"
+                        },
+                        subtitle = listOfNotNull(
+                            state.gameVersion.takeIf(String::isNotBlank)?.let { "Minecraft $it" },
+                            state.loader.takeIf(String::isNotBlank)?.replaceFirstChar(Char::uppercase),
+                        ).joinToString(" · ").ifBlank { "选择实例后可按版本和加载器筛选" },
                     )
                 }
 
-                TargetSelector(
-                    servers = state.servers,
-                    selectedKey = state.selectedServerKey,
-                    loading = state.loadingTargets,
-                    gameVersion = state.gameVersion,
-                    loader = state.loader,
-                    onClick = viewModel::showTargetPicker,
-                )
-
-                if (state.cores.isNotEmpty()) MslApiBanner(state.cores.size, onOpenCreate)
-
-                FilterBar(
-                    query = state.query,
-                    onQueryChange = viewModel::setSearch,
-                    serverOnly = state.serverOnly,
-                    onServerOnlyChange = viewModel::setServerOnly,
-                    category = state.category,
-                    onCategoryChange = viewModel::setCategory,
-                )
-
-                RolithaxSectionHeader(
-                    title = when (state.category) {
-                        "plugin" -> "适合此服务端的插件"
-                        "modpack" -> "可以直接部署的整合包"
-                        "datapack" -> "为世界添加数据包"
-                        else -> "适合此服务端的模组"
-                    },
-                    subtitle = listOfNotNull(
-                        state.gameVersion.takeIf(String::isNotBlank)?.let { "Minecraft $it" },
-                        state.loader.takeIf(String::isNotBlank)?.replaceFirstChar(Char::uppercase)?.let { "适配 $it" },
-                    ).joinToString(" · ").ifBlank { "未选定版本与加载器" },
-                )
-
-                val refreshState = projects.loadState.refresh
-                val appendState = projects.loadState.append
-                val listModifier = Modifier.fillMaxWidth().weight(1f)
-                when {
-                    refreshState is LoadState.Loading && projects.itemCount == 0 -> {
-                        LoadingState("正在加载资源")
+                if (projects.itemCount == 0) {
+                    item("initial-state") {
+                        when {
+                            refresh is LoadState.Loading -> LoadingState("正在加载资源")
+                            refresh is LoadState.Error -> EmptyState(
+                                title = "资源暂时无法加载",
+                                description = refresh.error.message ?: "检查网络后重试。",
+                                actionLabel = "重试",
+                                onAction = projects::retry,
+                            )
+                            append is LoadState.Loading -> LoadingState("正在扫描兼容资源")
+                            append is LoadState.Error -> EmptyState(
+                                title = "无法继续查找资源",
+                                description = append.error.message ?: "检查网络后重试。",
+                                actionLabel = "重试",
+                                onAction = projects::retry,
+                            )
+                            !append.endOfPaginationReached -> EmptyState(
+                                title = "首批资源中没有匹配项",
+                                description = "还有资源待检查。",
+                                actionLabel = "继续扫描",
+                                onAction = projects::refresh,
+                            )
+                            else -> EmptyState(
+                                title = "没有匹配的资源",
+                                description = "可以试试其他关键词、版本或资源类型。",
+                                actionLabel = if (state.query.isNotBlank()) "清除搜索" else null,
+                                onAction = { viewModel.setSearch("") },
+                            )
+                        }
                     }
-                    refreshState is LoadState.Error && projects.itemCount == 0 -> {
-                        EmptyState(
-                            title = "资源暂时无法加载",
-                            description = refreshState.error.message ?: "检查网络后重试",
-                            actionLabel = "重试",
-                            onAction = projects::retry,
-                        )
+                } else {
+                    if (refresh is LoadState.Error) {
+                        item("refresh-error") {
+                            InlineRefreshError("刷新失败", refresh.error.message ?: "检查网络后重试。", projects::retry)
+                        }
                     }
-                    refreshState is LoadState.Error -> {
-                        InlineRefreshError("刷新资源失败", refreshState.error.message ?: "检查网络后重试", projects::retry)
+                    items(projects.itemCount, key = projects.itemKey { "project_${it.id}" }) { index ->
+                        projects[index]?.let { project -> ResourceRow(project) { viewModel.openVersions(project) } }
                     }
-                    projects.itemCount == 0 && appendState is LoadState.Loading -> {
-                        LoadingState("正在扫描兼容资源")
-                    }
-                    projects.itemCount == 0 && appendState is LoadState.NotLoading && !appendState.endOfPaginationReached -> {
-                        EmptyState(
-                            title = "正在查找兼容资源",
-                            description = "首批扫描还没有找到匹配项目，远端仍有内容待检查。",
-                            actionLabel = "继续扫描",
-                            onAction = projects::refresh,
-                        )
-                    }
-                    projects.itemCount == 0 -> {
-                        EmptyState(
-                            title = "没有匹配的资源",
-                            description = "试试其他关键词、版本或资源类型。",
-                            actionLabel = "清空搜索词",
-                            onAction = { viewModel.setSearch("") },
-                        )
-                    }
-                    else -> {
-                        ProjectList(projects, viewModel, listModifier)
-                        ListFooter(projects, refreshState, appendState)
-                    }
+                    item("paging-footer") { ListFooter(projects, refresh, append) }
                 }
             }
         }
@@ -380,18 +375,6 @@ fun ResourceCenterScreen(
     }
 }
 
-@Composable
-private fun ProjectList(projects: LazyPagingItems<ResourceProject>, viewModel: ResourceCenterViewModel, modifier: Modifier) {
-    LazyColumn(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(9.dp),
-    ) {
-        items(projects.itemCount, key = projects.itemKey { it.id }) { index ->
-            projects[index]?.let { ResourceRow(it) { viewModel.openVersions(it) } }
-        }
-    }
-}
-
 /** 列表尾部：分页加载中 / 加载失败 / 到底，并保留 Modrinth 数据署名。 */
 @Composable
 private fun ListFooter(
@@ -543,7 +526,6 @@ private fun ResourceTag(text: String) {
     }
 }
 
-/** 搜索 + 筛选条：贴底固定，保留输入控件语义，只把容器换成玻璃面板。 */
 @Composable
 private fun FilterBar(
     query: String,
@@ -811,8 +793,8 @@ private fun MslApiBanner(count: Int, onOpenCreate: () -> Unit) {
 }
 
 @Composable
-private fun ColumnScope.EmptyState(title: String, description: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
-    Box(Modifier.fillMaxWidth().weight(1f, fill = false), contentAlignment = Alignment.Center) {
+private fun EmptyState(title: String, description: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         RolithaxEmptyState(
             icon = Icons.Filled.Info,
             title = title,
@@ -824,8 +806,8 @@ private fun ColumnScope.EmptyState(title: String, description: String, actionLab
 }
 
 @Composable
-private fun ColumnScope.LoadingState(text: String) {
-    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+private fun LoadingState(text: String) {
+    Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CircularProgressIndicator()
             Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
