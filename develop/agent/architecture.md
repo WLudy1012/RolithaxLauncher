@@ -54,6 +54,8 @@ ViewModel 通过 `AndroidViewModel` 获取 Application，再从容器取得仓�
 
 `DaemonRegistry` 为每台 Daemon 保持独立配置和探测状态。默认 Daemon 用于概览的初始选择和新建实例的默认目标。`ServerCatalog` 并行查询本机与各 Daemon，返回已加载实例和按 Daemon 分组的错误。操作按 `ServerRef` 中的来源和实例 ID 寻址，本机命令按目录绑定正在运行的引擎。
 
+新增或编辑 Daemon 时，连接页按主地址、备用地址的顺序验证，验证通过才保存配置。注册表将通过验证的地址作为当前连接，并保留配置中原有的主地址。
+
 ### 本机资源
 
 `LocalStorage` 负责本机运行时、实例目录和下载缓存；`LocalInstanceStore` 负责扫描、加载、分配目录名和删除；`ServerFiles` 负责幂等补全 EULA、配置、元数据和核心目录。所有路径操作都需要保持在允许的实例根目录内，并拒绝路径穿越。

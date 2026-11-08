@@ -7,12 +7,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.data.DaemonConfig
-import com.wludy.rolithax.launcher.data.InstanceRepository
 import com.wludy.rolithax.launcher.data.model.PairCodeData
 import com.wludy.rolithax.launcher.data.model.PairCodeRequest
 import com.wludy.rolithax.launcher.data.model.PairRedeemRequest
 import com.wludy.rolithax.launcher.data.remote.ApiClient
 import com.wludy.rolithax.launcher.data.remote.PairingPayloadCodec
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -48,11 +48,7 @@ class ConnectViewModel(
 ) : AndroidViewModel(application) {
 
     private val container = getApplication<RolithaxApplication>().container
-    /**
-     * 连通性测试用的一次性仓储：绝不复用注册表里的实例仓储，
-     * 否则编辑某台 Daemon 时会把未保存的地址写进正在使用的连接（去主连接后的隔离）。
-     */
-    private val probeRepository = InstanceRepository()
+    private val registry = container.daemonRegistry
     private val store = container.settingsStore
 
     private val _state = MutableStateFlow(ConnectUiState())
@@ -154,18 +150,17 @@ class ConnectViewModel(
                 _state.update { it.copy(loading = false, autoChecking = false, error = "同一 API Key 已连接此 Daemon，不能重复添加。") }
                 return@launch
             }
-            // 地址已由 normalize 规范化（默认升级 https，勾选允许 HTTP 后保留明文）
-            val result = runCatching {
-                probeRepository.configure(config.baseUrl, config.apiKey, config.allowHttp)
-                probeRepository.verify()
+            val result = try {
+                val verified = registry.verifyConnection(config)
+                store.upsertDaemon(config)
+                registry.syncVerified(store.settingsFlow.first(), config, verified)
+                Result.success(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
             }
             if (result.isSuccess) {
-                // 持久化失败不应阻断本次连接（验证通过后由注册表下次 sync 建立正式连接）
-                runCatching { store.upsertDaemon(config) }
-                    .onFailure { com.wludy.rolithax.launcher.data.AppLogger.w("Connect", "保存 Daemon 配置失败", it) }
-                // 立刻把新配置同步进注册表，使主页/二级页无需等 5 秒心跳即可拿到可用连接
-                runCatching { container.daemonRegistry.sync(store.settingsFlow.first()) }
-                    .onFailure { com.wludy.rolithax.launcher.data.AppLogger.w("Connect", "同步 Daemon 连接失败", it) }
                 _state.update { it.copy(loading = false, autoChecking = false) }
                 _connected.tryEmit(Unit)
             } else {
@@ -309,8 +304,4 @@ class ConnectViewModel(
     /** 关闭配对二维码弹窗。 */
     fun dismissPairCode() = _state.update { it.copy(pairCode = null) }
 
-    override fun onCleared() {
-        probeRepository.close()
-        super.onCleared()
-    }
 }
