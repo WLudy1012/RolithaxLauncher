@@ -1,6 +1,8 @@
 package com.wludy.rolithax.launcher.data
 
 import com.wludy.rolithax.launcher.data.remote.ApiClient
+import com.wludy.rolithax.launcher.data.model.StatusData
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -9,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /** 单个 Daemon 的连接状态。 */
@@ -152,35 +155,60 @@ class DaemonRegistry {
         _statuses.update { map -> map + (config.id to statusOf(config.id).copy(instanceCount = count)) }
     }
 
+    internal suspend fun verifyConnection(config: DaemonConfig): EndpointProbe {
+        var failure: Throwable? = null
+        for (endpoint in endpoints(config)) {
+            val probe = withContext(Dispatchers.IO) { probeEndpoint(config, endpoint, verify = true) }
+            if (probe.result.isSuccess) return probe
+            if (failure == null) failure = probe.result.exceptionOrNull()
+        }
+        throw failure ?: IllegalArgumentException("Daemon 地址无效")
+    }
+
+    @Synchronized
+    internal fun syncVerified(settings: AppSettings, config: DaemonConfig, probe: EndpointProbe) {
+        sync(settings)
+        if (configured[config.id] != config) return
+        val version = ++nextProbeVersion
+        probeVersions[config.id] = version
+        applyProbe(config, version, listOf(probe))
+    }
+
     /** 刷新单个 Daemon 状态。 */
     suspend fun refreshOne(config: DaemonConfig) {
         val version = synchronized(this) {
             if (configured[config.id]?.copy(name = "") != config.copy(name = "")) return
             (++nextProbeVersion).also { probeVersions[config.id] = it }
         }
-        val candidates = listOf(config.baseUrl) + config.endpoints
-        val endpoints = candidates
-            .map { ApiClient.normalizeDaemonUrl(it, config.allowHttp) }
-            .filter { it.isNotBlank() }
-            .distinct()
         val results = coroutineScope {
-            endpoints.map { endpoint ->
-                async(Dispatchers.IO) {
-                    val probe = InstanceRepository()
-                    try {
-                        probe.configure(endpoint, config.apiKey, config.allowHttp)
-                        val started = System.currentTimeMillis()
-                        val status = probe.getStatus()
-                        EndpointProbe(endpoint, System.currentTimeMillis() - started, status)
-                    } catch (e: IllegalArgumentException) {
-                        EndpointProbe(endpoint, 0, Result.failure(IllegalArgumentException("Daemon 地址无效")))
-                    } finally {
-                        probe.close()
-                    }
-                }
+            endpoints(config).map { endpoint ->
+                async(Dispatchers.IO) { probeEndpoint(config, endpoint) }
             }.awaitAll()
         }
         applyProbe(config, version, results)
+    }
+
+    private fun endpoints(config: DaemonConfig): List<String> =
+        (listOf(config.baseUrl) + config.endpoints)
+            .map { ApiClient.normalizeDaemonUrl(it, config.allowHttp) }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+    private suspend fun probeEndpoint(config: DaemonConfig, endpoint: String, verify: Boolean = false): EndpointProbe {
+        val probe = InstanceRepository()
+        val started = System.currentTimeMillis()
+        try {
+            probe.configure(endpoint, config.apiKey, config.allowHttp)
+            val result = if (verify) Result.success(probe.verify()) else probe.getStatus()
+            return EndpointProbe(endpoint, System.currentTimeMillis() - started, result)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val failure = if (e is IllegalArgumentException) IllegalArgumentException("Daemon 地址无效") else e
+            return EndpointProbe(endpoint, System.currentTimeMillis() - started, Result.failure(failure))
+        } finally {
+            probe.close()
+        }
     }
 
     @Synchronized
@@ -245,10 +273,10 @@ class DaemonRegistry {
         AppLogger.i("DaemonRegistry", "Daemon 在线：${latest.name.ifBlank { config.id }} v${status.version ?: "?"} ${latency}ms")
     }
 
-    private data class EndpointProbe(
+    internal data class EndpointProbe(
         val endpoint: String,
         val latencyMs: Long,
-        val result: Result<com.wludy.rolithax.launcher.data.model.StatusData>,
+        val result: Result<StatusData>,
     )
 
     private companion object {

@@ -136,10 +136,8 @@ class InstanceRepository {
         Result.failure(e)
     }
 
-    suspend fun verify(): Result<Unit> = daemonResult {
+    internal suspend fun verify(): StatusData =
         (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).verify()
-        AppLogger.i("Repository", "verify 成功")
-    }
 
     suspend fun getStatus(): Result<StatusData> = daemonResult {
         (sharedConnection ?: throw IllegalStateException("尚未配置连接信息")).status()

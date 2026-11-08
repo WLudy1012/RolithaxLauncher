@@ -75,7 +75,7 @@ internal class SharedDaemonConnection(
 
     private fun jsonObject(value: Any): JsonObject = Json.parseToJsonElement(gson.toJson(value)).jsonObject
 
-    suspend fun verify() {
+    suspend fun verify(): StatusData =
         try {
             request("Daemon 鉴权失败，请检查 API Key") {
                 val data = daemon.statusPayload()
@@ -92,8 +92,6 @@ internal class SharedDaemonConnection(
             }
             throw e
         }
-    }
-
     suspend fun status(): StatusData = request("获取状态失败") {
         val data = daemon.statusPayload() ?: throw IllegalStateException("返回数据为空")
         Gson().fromJson(data.toString(), StatusData::class.java) ?: throw IllegalStateException("返回数据为空")
