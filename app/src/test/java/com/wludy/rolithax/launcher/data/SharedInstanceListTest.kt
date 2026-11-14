@@ -5,6 +5,7 @@ import com.google.gson.reflect.TypeToken
 import com.wludy.rolithax.launcher.data.model.ApiResponse
 import com.wludy.rolithax.launcher.data.model.InstanceSummary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -71,7 +72,7 @@ class SharedInstanceListTest {
     }
 
     @Test
-    fun cancellingListCallerAndClosingConnectionStopTheirRequests() = runBlocking {
+    fun callerCancellationAndConnectionClosureAreReportedSeparately() = runBlocking {
         val server = MockWebServer()
         server.start()
         server.enqueue(MockResponse().setBody("{}").setBodyDelay(4, TimeUnit.SECONDS))
@@ -83,11 +84,10 @@ class SharedInstanceListTest {
             assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
             first.cancelAndJoin()
             assertTrue(first.isCancelled)
-            val second = launch { shared.listInstances() }
+            val second = async { runCatching { shared.listInstances() } }
             assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
             shared.close()
-            withTimeout(5_000) { second.join() }
-            assertTrue(second.isCancelled)
+            assertTrue(withTimeout(5_000) { second.await().exceptionOrNull() } is DaemonConnectionClosedException)
             assertTrue(!original.dispatcher.executorService.isShutdown)
         } finally {
             shared.close()

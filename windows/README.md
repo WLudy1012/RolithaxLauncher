@@ -2,6 +2,16 @@
 
 Windows 客户端使用 .NET 10 和 WinUI 3，面向 x64 Windows 10 1809 及以上版本。界面沿用 Windows 系统主题、原生窗口和 Fluent 控件。Linux 继续使用 [Compose 桌面客户端](../desktop/README.md)。
 
+## 安装
+
+从 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 下载 `RolithaxLauncher-Windows-x64-Setup.exe`，按向导选择目录和快捷方式。安装包内含 .NET、Windows App SDK 和 Rolithax 原生桥接库，可离线安装。默认安装到当前 Windows 用户下，升级和卸载时保留连接与外观配置。
+
+## 窗口与快捷键
+
+- 在「设置 → 外观」选择跟随系统、浅色或深色，以及云母、云母 Alt 或纯色。选择会在下次启动时恢复。在不支持云母的系统上，窗口使用纯色。
+- 导航栏随窗口收窄变为图标栏，服务器筛选和操作区会重新排列。窗口使用 Per-Monitor V2 DPI 缩放。
+- `Ctrl+1` 至 `Ctrl+5` 切换主页面，`Ctrl+F` 聚焦服务器搜索或原始控制台的输出筛选，`F5` 刷新概览或服务器列表。原始控制台内可用 `Ctrl+L` 清空当前显示。
+
 ## 远端管理
 
 - 可以同时连接多个 Daemon，并切换当前节点。服务器、文件、控制台和账户操作都指向当前节点。
@@ -22,6 +32,7 @@ PowerShell：
 .\gradlew.bat '-Prolithax.windowsNative=true' '-Pkotlin.native.distribution.downloadFromMaven=true' :shared:linkReleaseSharedMingwX64
 $core = (Get-ChildItem .\shared\build\bin\mingwX64\releaseShared\*rolithax_core.dll | Select-Object -First 1).FullName
 dotnet publish .\windows\Rolithax.Windows.csproj -c Release -r win-x64 --self-contained -p:RolithaxCorePath="$core" -o .\windows\build\publish
+.\windows\installer\build.ps1 -AppVersion 1.8.2 -PublishDir .\windows\build\publish -OutputDir .\windows\build\installer
 ~~~
 
-保留发布目录中的全部文件，启动其中的 RolithaxLauncher.exe。目录同时包含 .NET、Windows App SDK 和 Rolithax 原生桥接库。
+将 `-AppVersion` 替换为目标版本。安装器输出到 `windows/build/installer`。直接调试应用时，保留 `windows/build/publish` 下的全部文件并启动其中的 `RolithaxLauncher.exe`。

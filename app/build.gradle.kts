@@ -24,9 +24,9 @@ android {
         applicationId = "com.wludy.rolithax.launcher"
         minSdk = 24
         targetSdk = 35
-        versionCode = 48
+        versionCode = 49
         // 本地打包脚本可通过 -PversionName 覆盖版本名。
-        versionName = (project.findProperty("versionName") as String?) ?: "1.8.2"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.8.3"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）
@@ -47,6 +47,8 @@ android {
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -105,21 +107,6 @@ android {
         }
     }
 
-    androidResources {
-        // 内嵌 JRE 是 .tar.xz，再压缩没有收益，跳过以加快打包
-        noCompress += "xz"
-    }
-
-    // 内嵌 JRE 运行时放在独立源集：默认打进 APK（完整版）；
-    // 传 -PwithoutJre=true 即产出不含运行时的精简版（CI 同一 Release 发布两个包）。
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs("src/main/assets")
-            if (project.findProperty("withoutJre") != "true") {
-                assets.srcDirs("src/jreRuntime/assets")
-            }
-        }
-    }
 }
 
 dependencies {
@@ -161,7 +148,7 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
 
-    // 本机开服：解压内嵌 Android JRE（上游 .tar.xz）
+    // 本机开服：解压 Android JRE 归档
     implementation(libs.xz)
     implementation(libs.commons.compress)
 

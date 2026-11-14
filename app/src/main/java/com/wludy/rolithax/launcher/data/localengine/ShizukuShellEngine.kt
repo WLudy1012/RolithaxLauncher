@@ -232,7 +232,7 @@ class ShizukuShellEngine(
         add("-Dterminal.jline=false")
         add("-Dterminal.ansi=true")
         add("-Dlog4j2.formatMsgNoLookups=true")
-        // 内嵌 JRE 是上游自制构建，java.version 形如 `17-internal`（含 `-`），Paper 会把它
+        // 部分 JRE 构建的 java.version 形如 `17-internal`，Paper 会把它
         // 当成非 GA 预发布版本并拒绝启动（Unsupported Java detected）；这是其官方跳过开关。
         add("-DPaper.IgnoreJavaVersion=true")
         addAll(extraArgs)

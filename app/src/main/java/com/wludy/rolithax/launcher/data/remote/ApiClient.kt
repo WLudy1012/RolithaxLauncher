@@ -81,6 +81,8 @@ object ApiClient {
     fun configureDaemonHttpClient(builder: OkHttpClient.Builder) {
         val manager = trustAllManager()
         builder
+            .followRedirects(false)
+            .followSslRedirects(false)
             .sslSocketFactory(trustAllSslSocketFactory(manager), manager)
             .hostnameVerifier { _, _ -> true }
     }

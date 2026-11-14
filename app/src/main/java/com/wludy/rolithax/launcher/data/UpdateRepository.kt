@@ -20,7 +20,7 @@ data class AppUpdateInfo(
     val apkName: String,
     /** APK 大小（字节）。 */
     val apkSize: Long,
-    /** 完整版 APK 的可信 SHA-256；缺失时拒绝安装。 */
+    /** APK 的可信 SHA-256；缺失时拒绝安装。 */
     val sha256: String? = null,
     /** 是否为测试版（tag 带 -Beta 后缀）。 */
     val beta: Boolean = false,
@@ -34,10 +34,7 @@ data class AppUpdateInfo(
      * 下载失败时客户端自动回退 [downloadUrl]（GitHub）。为 null 时仅使用 GitHub。
      */
     val cnbUrl: String? = null,
-    /**
-     * 精简版 APK（**不含**内嵌 JRE 运行时，体积小）直链；为 null 表示该 Release 只提供完整版。
-     * 同一个 Release 会同时挂载完整版与精简版两个包（见 CI 配置）。
-     */
+    /** 历史 Release 同时提供两种 APK 时使用的精简版直链。 */
     val liteUrl: String? = null,
     /** 精简版 APK 大小（字节）。 */
     val liteSize: Long = 0,
@@ -45,7 +42,7 @@ data class AppUpdateInfo(
     val liteSha256: String? = null,
     /** 精简版 CNB 镜像直链。 */
     val liteCnbUrl: String? = null,
-    /** 该更新包是否内嵌 JRE 运行时（本机开服可离线使用），按体积判定。 */
+    /** 历史 APK 是否内嵌 JRE。 */
     val embeddedJre: Boolean = false,
 ) {
     /** 该 Release 是否同时提供精简版。 */
@@ -58,7 +55,7 @@ private const val CNB_RELEASE_DOWNLOAD_BASE = "https://cnb.cool/WLudy/RolithaxLa
 /** 内嵌 JRE 运行时的包体积下限（arm64 运行时约 36MB，远大于无 JRE 的 ~10MB）。 */
 private const val EMBEDDED_JRE_MIN_BYTES = 30L * 1024 * 1024
 
-/** 完整版 / 精简版资产名（CI 固定命名，见 .github/workflows/release.yml 与 .cnb.yml）。 */
+private const val APK_NAME = "RolithaxLauncher.apk"
 private const val APK_FULL_NAME = "app-release.apk"
 private const val APK_LITE_NAME = "app-release-lite.apk"
 
@@ -69,8 +66,6 @@ private const val MAX_CNB_PAGE_FETCHES = 5
 private data class ParsedRelease(
     val tag: ParsedTag,
     val release: GitHubRelease,
-    val apk: GitHubReleaseAsset,
-    val lite: GitHubReleaseAsset? = null,
 )
 
 /** tag 解析结果：语义化版本 + Beta/Force 后缀 + 原始 tag 名（用于拼 CNB 地址）。 */
@@ -126,15 +121,12 @@ class UpdateRepository(
         currentVersion: String,
         channel: UpdateChannel,
     ): AppUpdateInfo? {
-        // 过滤出正式(非预发布)且带 APK 资产的版本，解析 tag 的 Beta/Force 后缀
         val parsed = releases
-            .filter { !it.prerelease }
             .mapNotNull { release ->
                 val tag = parseTag(release.tagName) ?: return@mapNotNull null
-                val (full, lite) = pickApkAssets(release)
-                val url = full?.browserDownloadUrl
-                if (full == null || url.isNullOrBlank()) null
-                else ParsedRelease(tag, release, full, lite)
+                if (release.prerelease && !tag.beta) return@mapNotNull null
+                if (pickApkAssets(release).first == null) return@mapNotNull null
+                ParsedRelease(tag, release)
             }
 
         // 渠道过滤：稳定渠道只出稳定版；测试渠道稳定+测试都出
@@ -150,7 +142,7 @@ class UpdateRepository(
         if (compareVersions(newest.tag.version, currentVersion) <= 0) return null
 
         // 强制判定：任一高于当前版本的 release 带 Force 后缀或说明含"强制更新"（旧版兼容）
-        val forceUpdate = parsed.any { p ->
+        val forceUpdate = candidates.any { p ->
             compareVersions(p.tag.version, currentVersion) > 0 &&
                 (p.tag.force || p.release.body.orEmpty().contains("强制更新", ignoreCase = true))
         }
@@ -187,21 +179,21 @@ class UpdateRepository(
 
     /** 组装更新信息；release 不带可用 APK 资产时返回 null（调用方继续尝试更早的版本）。 */
     private fun buildUpdateInfo(tag: ParsedTag, release: GitHubRelease, forceUpdate: Boolean): AppUpdateInfo? {
-        val (full, lite) = pickApkAssets(release)
-        val url = full?.browserDownloadUrl
-        if (full == null || url.isNullOrBlank()) return null
-        val apkName = full.name ?: APK_FULL_NAME
+        val (primary, lite) = pickApkAssets(release)
+        val url = primary?.browserDownloadUrl ?: return null
+        val apkName = primary.name ?: return null
         val rawTag = tag.rawTag?.takeIf { it.isNotBlank() }
         return AppUpdateInfo(
             version = tag.version,
             notes = release.body.orEmpty(),
             downloadUrl = url,
             apkName = apkName,
-            apkSize = full.size ?: 0,
-            sha256 = assetSha256(full, release.body),
+            apkSize = primary.size,
+            sha256 = assetSha256(primary, release.body),
             beta = tag.beta,
             forceUpdate = forceUpdate,
-            embeddedJre = (full.size ?: 0) >= EMBEDDED_JRE_MIN_BYTES,
+            embeddedJre = !apkName.equals(APK_NAME, ignoreCase = true) &&
+                !apkName.equals(APK_LITE_NAME, ignoreCase = true) && primary.size >= EMBEDDED_JRE_MIN_BYTES,
             // CNB 首选：镜像仓库同名 tag 的 Release 资产（下载失败时由客户端回退 GitHub）
             cnbUrl = rawTag?.let { "$CNB_RELEASE_DOWNLOAD_BASE/$it/$apkName" },
             liteUrl = lite?.browserDownloadUrl,
@@ -217,9 +209,11 @@ class UpdateRepository(
 
     private fun parseAssetSha256(body: String?, assetName: String?): String? {
         if (body.isNullOrBlank() || assetName.isNullOrBlank()) return null
+        val filename = Regex("(?i)(?<![\\w.-])${Regex.escape(assetName)}(?![\\w.-])")
+        val digest = Regex("(?i)\\b[0-9a-f]{64}\\b")
         return body.lineSequence()
-            .firstOrNull { it.contains(assetName, ignoreCase = true) }
-            ?.let { Regex("(?i)\\b[0-9a-f]{64}\\b").find(it)?.value?.lowercase() }
+            .filter { filename.containsMatchIn(it) }
+            .firstNotNullOfOrNull { digest.find(it)?.value?.lowercase() }
     }
 
     private fun assetSha256(asset: GitHubReleaseAsset, body: String?): String? {
@@ -228,19 +222,17 @@ class UpdateRepository(
             ?: parseAssetSha256(body, asset.name)
     }
 
-    /**
-     * 从 release 资产里挑出「完整版（含内嵌 JRE）」与「精简版（不含 JRE）」。
-     * 命名不匹配时回退：把最大的 APK 当完整版，其余非同名 APK 视为候选精简版。
-     */
     private fun pickApkAssets(
         release: GitHubRelease,
     ): Pair<GitHubReleaseAsset?, GitHubReleaseAsset?> {
-        val apks = release.assets.filter { it.name?.endsWith(".apk", ignoreCase = true) == true }
-        if (apks.isEmpty()) return null to null
+        val apks = release.assets.filter {
+            it.name?.endsWith(".apk", ignoreCase = true) == true && !it.browserDownloadUrl.isNullOrBlank()
+        }
+        apks.firstOrNull { it.name.equals(APK_NAME, ignoreCase = true) }?.let { return it to null }
         val lite = apks.firstOrNull { it.name.equals(APK_LITE_NAME, ignoreCase = true) }
         val full = apks.firstOrNull { it.name.equals(APK_FULL_NAME, ignoreCase = true) }
-            ?: apks.filter { it !== lite }.maxByOrNull { it.size ?: 0 }
-        return full to lite
+            ?: apks.filter { it !== lite }.maxByOrNull { it.size }
+        return if (full == null) lite to null else full to lite
     }
 
     /** 解析 tag 为 (版本号, 是否测试版, 是否强制版, 原始 tag)。支持 v 前缀与 -Beta/-Force 后缀。 */

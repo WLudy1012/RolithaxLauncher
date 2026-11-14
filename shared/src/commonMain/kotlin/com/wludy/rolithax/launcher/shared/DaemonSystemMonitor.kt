@@ -85,6 +85,9 @@ class DaemonSystemMonitor(
                         throw e
                     } catch (e: MonitorCallbackFailed) {
                         throw e.cause ?: e
+                    } catch (_: SignalRAuthenticationException) {
+                        emitSystemEvent(onEvent, SystemMonitorEvent.Disconnected)
+                        return
                     } catch (_: Exception) {
                     }
                     emitSystemEvent(onEvent, SystemMonitorEvent.Disconnected)

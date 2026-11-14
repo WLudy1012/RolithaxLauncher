@@ -13,6 +13,8 @@ internal const val SIGNALR_SEPARATOR = '\u001e'
 internal const val MAX_SIGNALR_MESSAGE = 1024 * 1024
 private const val MAX_SIGNALR_MESSAGES_PER_FRAME = 4096
 
+internal class SignalRMessageTooLarge : Exception()
+
 internal class SignalRFrames(private val maxMessageSize: Int = MAX_SIGNALR_MESSAGE) {
     private val pending = StringBuilder()
 
@@ -23,13 +25,13 @@ internal class SignalRFrames(private val maxMessageSize: Int = MAX_SIGNALR_MESSA
         while (true) {
             val separator = pending.indexOf(SIGNALR_SEPARATOR, start)
             if (separator < 0) break
-            require(separator - start <= maxMessageSize) { "SignalR 消息过大" }
+            if (separator - start > maxMessageSize) throw SignalRMessageTooLarge()
             require(messages.size < MAX_SIGNALR_MESSAGES_PER_FRAME) { "SignalR 消息过多" }
             messages += pending.substring(start, separator)
             start = separator + 1
         }
         pending.deleteRange(0, start)
-        require(pending.length <= maxMessageSize) { "SignalR 消息过大" }
+        if (pending.length > maxMessageSize) throw SignalRMessageTooLarge()
         return messages
     }
 }

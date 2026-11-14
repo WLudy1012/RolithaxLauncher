@@ -50,7 +50,7 @@ git diff --check
 1. **校验版本**。分支名去掉 `release` 前缀和分隔符后加 `v` 即为 tag。例如 `release/1.8.1-Beta` 对应 `v1.8.1-Beta`。`versionName` 必须匹配版本号。首次合并要求 `versionCode` 大于 `main` 且 tag 未被占用。
 2. **构建验证**。共用 Android 验证 Action，运行单元测试、构建 Debug/Release 并检查 APK 内容。作业名保留为分支保护要求的「构建验证」。
 3. **合并到 main 并打 tag**。创建 Pull Request，以已验证的提交 SHA 锁定合并目标，在合并提交上创建 tag。重试时可识别同一提交已完成的合并和 tag。
-4. **发布和同步**。`release.yml` 在只读权限的构建作业中签名并校验两个 APK。独立的发布作业复核 `SHA256SUMS.txt`，上传附件并公开 Release 草稿，然后调用 CNB 同步流程。
+4. **发布和同步**。`release.yml` 锁定 tag 对应的提交，并行构建 `RolithaxLauncher.apk`、Windows x64 安装 EXE 和 Linux x64 归档。发布作业按 artifact ID 取回三端产物，验证来自 `runtimes/android` 的 JRE 附件，再计算统一的 `SHA256SUMS.txt`。必需附件上传齐全后公开同一个 Release，然后同步 CNB 源码和 tag。
 5. **清理分支**。发布和同步流程完成后，只有 release 分支仍指向本次验证的提交才会删除。
 
 发版步骤：在 `dev` 上提升 `versionName`/`versionCode` 并合并通过验证，然后 `git push origin dev:release-<版本>`。手动推送 `v*` tag 仍会触发 `release.yml`，仅作补发兜底。
@@ -59,7 +59,7 @@ git diff --check
 
 - 流程可用性已在 1.8.1 正式版实测：推送 `release-1.8.1` 后依次完成版本校验（`versionName` 与分支一致、`versionCode` 大于 `main`）、构建验证、PR 合并 `main`、在合并提交上创建 tag、发布签名资产、同步 `main` 与 tag 到 CNB。
 - 1.8.1 发布时，自动创建的 PR 触发了独立的 Android CI，随后该运行被取消。发布分支自己的「构建验证」完成后，才执行了合并。
-- 发版后核对清单：tag 与 `main` 的合并提交一致且双远端（GitHub/CNB）都存在；Release 资产齐全（完整版/精简版 APK 及 JRE 运行时归档）且 notes 含 SHA-256 表格；`release*` 分支已被流程删除。
+- 发版后核对 tag 与 `main` 的合并提交一致，GitHub 和 CNB 都有 tag，GitHub Release 包含 Android APK、JRE 归档、Windows 安装 EXE、Linux 归档和 SHA-256 文件，随后确认已清理对应的 release 分支。
 
 依赖的仓库设置：`main` 保护规则（Pull Request + 状态检查「构建验证」+ 禁止强推与删除）；Actions 权限开启「Allow GitHub Actions to create and approve pull requests」。`github.token` 创建的 tag 不会触发其他工作流，所以发布必须走 `workflow_call`。
 
@@ -74,11 +74,10 @@ git diff --check
 ## GitHub Actions 与 CNB
 
 - `android.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中调用 `.github/actions/verify-android`，上传 Debug APK 和测试报告。Android 环境由 `.github/actions/setup-android` 准备，SDK 组件按需安装。
-- `desktop.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中构建桌面开发包，也提供手动与可复用入口。Linux 在 Xvfb 中运行共享层和 Compose 测试并打包。Windows 缓存 Kotlin/Native 与 NuGet 依赖，验证 C ABI 后打包，并检查 WinUI 运行时、XAML 资源和 DLL 摘要。
+- `desktop.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中构建桌面开发包，也供 Release 按指定提交调用。Linux 在 Xvfb 中运行共享层和 Compose 测试，并将应用和 Java 运行时一起归档。Windows 验证 C ABI、WinUI 运行时和 XAML 资源后生成单文件离线安装程序，日常 CI 额外提供便携 ZIP。
 - [控制台 SDK](https://github.com/WLudy1012/rolithax-console-sdk) 独立构建和分发。[Paper 面板模板](https://github.com/WLudy1012/rolithax-console-plugin-template) 的 CI 使用独立 SDK 校验配置、回放日志并打包。
-- 桌面应用由 Actions 工件提供开发构建，当前发布工作流仍只发布 Android 资产。不要把 Windows/Linux CI 包或鸿蒙领域库链接成功描述为正式发布、HAP 构建成功或真实 Daemon 验收通过。
 - `harmony-native.yml` 合入默认分支后可手动运行。它用校验过的公开 OpenHarmony API 18 SDK 编译 ARM64 原生桥接。完整 HAP 构建需要华为工具链，见 [鸿蒙构建说明](../../harmony/README.md)。
-- `cnb-sync.yml` 由 `main` 推送和 Android 发布共用，串行同步 CNB `main` 与可选 tag。遇到合并冲突会失败并保留 CNB 历史。
+- `cnb-sync.yml` 由 `main` 推送和多平台发布共用，串行同步 CNB `main` 与可选 tag。遇到合并冲突会失败并保留 CNB 历史。
 - `release.yml` 可由 release 分支流程调用，也可由手动推送的 `v*` Tag 触发。重试时只更新尚未公开的 Release 草稿。
 - CNB 工作流负责 main 构建和 Tag 发布；阶段名称、任务名称和关键输出以中文为主，保留 Gradle、Android、Release、CNB 等技术名词。
 - 签名和镜像认证只通过 CI 的受保护配置注入，具体凭据不进入仓库、脚本、文档或日志。
@@ -88,13 +87,39 @@ git diff --check
 
 ## 签名配置
 
-- 签名 JKS 的别名必须是 `wludy`。包名和签名已变更，GitHub Actions Secrets 与 CNB 密钥仓库都必须使用 Rolithax 的发布密钥，旧版签名不能用于发行包。
-- GitHub Actions 在仓库 Secrets 中配置 `KEYSTORE_BASE64`（`.jks` 的单行 Base64）、`KEYSTORE_PASSWORD`、`KEY_PASSWORD`；Windows 生成 Base64：`[Convert]::ToBase64String([IO.File]::ReadAllBytes('keystore\rolithax-release.jks'))`。
-- CNB 的同名变量由密钥仓库 `keystore.yml` 提供，见上文。
-- 本地 `keystore/`、`keystore.properties` 已被 `.gitignore` 忽略，只用于本机签名构建。
+发布使用当前已上线 APK 的 JKS，别名为 `wludy`。沿用原签名可以覆盖更新。流程通过 `apksigner` 验证 APK v2 和 v3。
+
+在 GitHub 仓库打开 **Settings → Secrets and variables → Actions → New repository secret**，添加三个仓库 Secret。
+
+| 名称 | 值 |
+| --- | --- |
+| `KEYSTORE_BASE64` | JKS 文件的单行 Base64 |
+| `KEYSTORE_PASSWORD` | JKS 容器密码 |
+| `KEY_PASSWORD` | `wludy` 条目的密码 |
+
+PowerShell 可以通过标准输入把 Base64 直接交给 GitHub CLI。先运行 `gh auth login`，再从仓库目录执行下面的命令。把 JKS 路径换成本机实际路径，后两条会分别提示输入密码。
+
+~~~powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path '.\keystore\rolithax-release.jks').Path)) |
+    gh secret set KEYSTORE_BASE64
+gh secret set KEYSTORE_PASSWORD
+gh secret set KEY_PASSWORD
+~~~
+
+只走 GitHub 发布时，以上三个 Secret 即可。需要 CNB 镜像时，在 CNB 创建「密钥仓库」`WLudy/Rolithax-secrets`，通过网页编辑 `main` 分支根目录的 `keystore.yml`。
+
+~~~yaml
+allow_slugs: [WLudy/RolithaxLauncher]
+allow_events: [tag_push]
+KEYSTORE_BASE64: "<JKS 文件的单行 Base64>"
+KEYSTORE_PASSWORD: "<JKS 容器密码>"
+KEY_PASSWORD: "<wludy 条目密码>"
+~~~
+
+如需从 GitHub 自动推送源码和 tag 到 CNB，再在 GitHub 配置 `CNB_TOKEN`，使用有权推送对应 CNB 仓库的访问令牌。本地 `keystore/` 和 `keystore.properties` 仅供本机使用。[GitHub 仓库 Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets) · [CNB 密钥仓库](https://docs.cnb.cool/zh/repo/secret.html)
 
 ## 版本和 Release notes
 
 - 无后缀 Tag 表示稳定版，`-Beta` 表示测试版，`-Force` 表示强制更新。应用按数字逐段比较版本号，正式版的版本号必须高于已发布的同号 Beta，否则 Beta 用户收不到。
 - 稳定版说明从上一稳定 Tag 起汇总；Beta 说明从上一 Beta Tag 起汇总；不能在找不到上一 Tag 时把整个仓库历史全部列入 Release notes。
-- Release 同时提供完整包和精简包时，资产名称、是否内嵌运行时和 SHA-256 必须清楚可辨；缺失或未校验的运行时不应伪装成可用附件。
+- Android 发布只包含一个 APK。APK 不内置 JRE，运行时归档及 SHA-256 都来自当前提交。

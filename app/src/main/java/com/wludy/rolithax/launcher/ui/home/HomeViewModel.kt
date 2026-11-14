@@ -306,7 +306,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * 启动某台 Daemon 的负载监视（/api/hubs/system，2s 推送）。
-     * 首连失败只丢这一路订阅，15s 轮询的下一轮会由 [ensureMonitors] 重建。
+     * 网络错误可在下一轮重建；鉴权被拒绝时保留这一路的终止状态。
      */
     private fun startMonitor(daemonId: String) {
         val repository = registry.repositoryFor(daemonId) ?: return
@@ -320,7 +320,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         monitorClients[daemonId] = url to client
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { runCatching { client.connect() }.isSuccess }
-            if (!ok && monitorClients[daemonId]?.second === client) closeMonitor(daemonId)
+            if (!ok && !client.authenticationRejected && monitorClients[daemonId]?.second === client) closeMonitor(daemonId)
         }
     }
 

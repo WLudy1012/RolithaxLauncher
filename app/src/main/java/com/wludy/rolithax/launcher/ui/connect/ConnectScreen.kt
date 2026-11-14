@@ -428,16 +428,20 @@ fun ConnectScreen(
     }
 
     // 允许 HTTP 明文连接警告（5 秒倒计时后可确认）
-    if (showHttpWarning) {
-        var countdown by remember { mutableIntStateOf(5) }
-        LaunchedEffect(Unit) {
+    if (showHttpWarning || state.confirmHttpPairing) {
+        val pairingConfirmation = state.confirmHttpPairing
+        var countdown by remember(pairingConfirmation) { mutableIntStateOf(5) }
+        LaunchedEffect(pairingConfirmation) {
             while (countdown > 0) {
                 kotlinx.coroutines.delay(1000)
                 countdown--
             }
         }
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showHttpWarning = false },
+            onDismissRequest = {
+                showHttpWarning = false
+                if (pairingConfirmation) viewModel.cancelHttpPairing()
+            },
             title = {
                 Text(
                     text = "安全警告：明文连接风险",
@@ -465,7 +469,8 @@ fun ConnectScreen(
                 TextButton(
                     enabled = countdown <= 0,
                     onClick = {
-                        viewModel.onAllowHttpChange(true)
+                        if (pairingConfirmation) viewModel.confirmHttpPairing()
+                        else viewModel.onAllowHttpChange(true)
                         showHttpWarning = false
                     },
                 ) {
@@ -480,7 +485,10 @@ fun ConnectScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showHttpWarning = false }) { Text("取消") }
+                TextButton(onClick = {
+                    showHttpWarning = false
+                    if (pairingConfirmation) viewModel.cancelHttpPairing()
+                }) { Text("取消") }
             },
         )
     }

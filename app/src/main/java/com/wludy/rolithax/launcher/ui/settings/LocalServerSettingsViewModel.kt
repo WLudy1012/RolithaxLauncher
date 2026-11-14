@@ -22,7 +22,6 @@ data class JreOption(
     val label: String,
     val javaMajor: Int,
     val installed: Boolean,
-    val embedded: Boolean,
     /** 是否存在可用的 Android 构建（false 时只展示、不可安装）。 */
     val supported: Boolean = true,
     val unavailableReason: String = "",
@@ -109,7 +108,6 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
                 label = rt.label,
                 javaMajor = rt.javaMajor,
                 installed = LocalJreManager.isInstalled(context, rt),
-                embedded = LocalJreManager.hasEmbeddedAsset(context, rt, abi),
                 supported = rt.supported,
                 unavailableReason = LocalJreManager.installBlockReason(rt, abi).orEmpty(),
             )
@@ -135,7 +133,7 @@ class LocalServerSettingsViewModel(application: Application) : AndroidViewModel(
         _state.update { it.copy(selectedRuntimeId = id, jreError = null) }
     }
 
-    /** 安装/修复选中的运行时：优先 APK 内嵌归档，缺失时按预设地址下载（含 SHA-256 校验）。 */
+    /** 从项目仓库下载并安装选中的运行时。 */
     fun installJre(id: String = _state.value.selectedRuntimeId) {
         if (_state.value.jreInstalling) return
         val runtime = LocalJreManager.runtimeById(id)

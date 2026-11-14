@@ -3,6 +3,7 @@ package com.wludy.rolithax.launcher.shared
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO as ServerCIO
@@ -10,6 +11,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.header
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.post
+import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.WebSockets
@@ -37,6 +39,128 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DaemonConsoleIntegrationTest {
+    @Test
+    fun authenticationFailureStopsWithoutRetry() = runBlocking {
+        for (status in listOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden)) {
+            val requests = AtomicInteger()
+            val events = Channel<ConsoleEvent>(Channel.UNLIMITED)
+            val server = embeddedServer(ServerCIO, host = "127.0.0.1", port = 0) {
+                routing {
+                    post("/api/hubs/instanceControlHub/negotiate") {
+                        requests.incrementAndGet()
+                        call.respondText("denied", status = status)
+                    }
+                }
+            }.start(wait = false)
+            val http = HttpClient(CIO)
+            try {
+                val port = server.resolvedConnectors().single().port
+                val console = DaemonConsole("http://127.0.0.1:$port", "test-key", http, allowHttp = true)
+                val job = launch { console.run(42) { events.send(it) } }
+                try {
+                    withTimeout(5_000) {
+                        assertEquals(ConsoleEvent.AuthenticationFailed(status.value), events.receive())
+                        job.join()
+                    }
+                    assertEquals(1, requests.get())
+                } finally { job.cancelAndJoin() }
+            } finally {
+                http.close()
+                server.stop(100, 1_000)
+            }
+        }
+    }
+
+    @Test
+    fun authenticationFailureDuringWebSocketUpgradeStopsWithoutRetry() = runBlocking {
+        for (status in listOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden)) {
+            val requests = AtomicInteger()
+            val events = Channel<ConsoleEvent>(Channel.UNLIMITED)
+            val server = embeddedServer(ServerCIO, host = "127.0.0.1", port = 0) {
+                routing {
+                    post("/api/hubs/instanceControlHub/negotiate") {
+                        requests.incrementAndGet()
+                        call.respondText(
+                            """{"connectionToken":"token","availableTransports":[{"transport":"WebSockets","transferFormats":["Text"]}]}""",
+                            ContentType.Application.Json,
+                        )
+                    }
+                    get("/api/hubs/instanceControlHub") { call.respondText("denied", status = status) }
+                }
+            }.start(wait = false)
+            val http = HttpClient(CIO)
+            try {
+                val port = server.resolvedConnectors().single().port
+                val console = DaemonConsole("http://127.0.0.1:$port", "test-key", http, allowHttp = true)
+                val job = launch { console.run(42) { events.send(it) } }
+                try {
+                    withTimeout(5_000) {
+                        assertEquals(ConsoleEvent.AuthenticationFailed(status.value), events.receive())
+                        job.join()
+                    }
+                    assertEquals(1, requests.get())
+                } finally { job.cancelAndJoin() }
+            } finally {
+                http.close()
+                server.stop(100, 1_000)
+            }
+        }
+    }
+
+    @Test
+    fun oversizedReplayFallsBackAndBoundsLegacyHistory() = runBlocking {
+        val connections = AtomicInteger()
+        val events = Channel<ConsoleEvent>(Channel.UNLIMITED)
+        val server = embeddedServer(ServerCIO, host = "127.0.0.1", port = 0) {
+            install(WebSockets)
+            routing {
+                post("/api/hubs/instanceControlHub/negotiate") {
+                    call.respondText(
+                        """{"negotiateVersion":1,"connectionToken":"token","availableTransports":[{"transport":"WebSockets","transferFormats":["Text"]}]}""",
+                        ContentType.Application.Json,
+                    )
+                }
+                webSocket("/api/hubs/instanceControlHub") {
+                    val connection = connections.incrementAndGet()
+                    incoming.receive()
+                    sendPacket("{}")
+                    val invocation = readInvocation()
+                    if (connection == 1) {
+                        assertEquals("ResumeConsole", invocation["target"]?.jsonPrimitive?.content)
+                        val id = invocation["invocationId"]!!.jsonPrimitive.content
+                        sendPacket("""{"type":3,"invocationId":"$id","result":{"log":{"streamId":"s","sequence":1,"gap":false,"frames":[{"sequence":1,"text":"${"x".repeat(4 * 1024 * 1024)}"}]}}}""")
+                    } else {
+                        assertEquals("JoinGroup", invocation["target"]?.jsonPrimitive?.content)
+                        repeat(2050) { sendPacket("""{"type":1,"target":"ReceiveLog","arguments":["line-$it"]}""") }
+                        val id = invocation["invocationId"]!!.jsonPrimitive.content
+                        sendPacket("""{"type":3,"invocationId":"$id"}""")
+                        incoming.receiveCatching()
+                    }
+                }
+            }
+        }.start(wait = false)
+        val http = HttpClient(CIO)
+        try {
+            val port = server.resolvedConnectors().single().port
+            val console = DaemonConsole("http://127.0.0.1:$port", "test-key", http, allowHttp = true)
+            val job = launch { console.run(42) { events.send(it) } }
+            try {
+                withTimeout(20_000) {
+                    assertEquals(ConsoleEvent.Disconnected, events.receive())
+                    assertEquals(ConsoleEvent.Connected, events.receive())
+                    assertEquals(ConsoleEvent.Gap, events.receive())
+                    assertEquals(ConsoleEvent.Log("line-2"), events.receive())
+                    repeat(2046) { events.receive() }
+                    assertEquals(ConsoleEvent.Log("line-2049"), events.receive())
+                    assertEquals(2, connections.get())
+                }
+            } finally { job.cancelAndJoin() }
+        } finally {
+            http.close()
+            server.stop(100, 1_000)
+        }
+    }
+
     @Test
     fun negotiatesHandshakesExchangesMessagesAndReconnects() = runBlocking {
         val connections = AtomicInteger()

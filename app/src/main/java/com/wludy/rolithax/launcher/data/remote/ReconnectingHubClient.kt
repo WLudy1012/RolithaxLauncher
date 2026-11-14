@@ -1,6 +1,7 @@
 package com.wludy.rolithax.launcher.data.remote
 
 import com.microsoft.signalr.HubConnection
+import com.microsoft.signalr.HttpRequestException
 import com.wludy.rolithax.launcher.data.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,10 @@ abstract class ReconnectingHubClient(private val tag: String) {
     var isConnected: Boolean = false
         private set
 
+    @Volatile
+    internal var authenticationRejected = false
+        private set
+
     /** 用户主动 disconnect() 后置位，阻止自动重连。 */
     @Volatile
     private var stopped = false
@@ -69,6 +74,7 @@ abstract class ReconnectingHubClient(private val tag: String) {
         check(!closed) { "SignalR 客户端已关闭" }
         stopped = false
         synchronized(connectLock) {
+            authenticationRejected = false
             ensureConnectedLocked()
         }
     }
@@ -116,12 +122,14 @@ abstract class ReconnectingHubClient(private val tag: String) {
             if (hub !== connection || generation != connectionGeneration) return@onClosed
             hub = null
             isConnected = false
+            if (cause.isAuthenticationFailure()) authenticationRejected = true
             onClosed(cause)
             scheduleReconnect()
         }
         try {
             connection.start().blockingAwait()
         } catch (error: Throwable) {
+            if (error.isAuthenticationFailure()) authenticationRejected = true
             if (hub === connection && generation == connectionGeneration) {
                 hub = null
                 isConnected = false
@@ -136,16 +144,16 @@ abstract class ReconnectingHubClient(private val tag: String) {
 
     /** 连接意外关闭后按退避序列重连；用户主动 disconnect 则不重连。 */
     private fun scheduleReconnect() {
-        if (closed || stopped || isConnected) return
+        if (closed || stopped || isConnected || authenticationRejected) return
         synchronized(connectLock) {
-            if (closed || stopped || isConnected) return
+            if (closed || stopped || isConnected || authenticationRejected) return
             if (reconnectJob?.isActive == true) return
             reconnectJob = scope.launch {
                 var attempt = 0
-                while (isActive && !stopped && !isConnected) {
+                while (isActive && !stopped && !isConnected && !authenticationRejected) {
                     attempt++
                     delay(RECONNECT_DELAYS_MS[(attempt - 1).coerceAtMost(RECONNECT_DELAYS_MS.lastIndex)])
-                    if (!isActive || stopped || isConnected) return@launch
+                    if (!isActive || stopped || isConnected || authenticationRejected) return@launch
                     val result = runCatching {
                         synchronized(connectLock) { ensureConnectedLocked() }
                     }
@@ -153,6 +161,7 @@ abstract class ReconnectingHubClient(private val tag: String) {
                         AppLogger.i(tag, "自动重连成功（第 $attempt 次尝试）")
                         return@launch
                     }
+                    if (authenticationRejected) return@launch
                     AppLogger.w(tag, "自动重连第 $attempt 次失败", result.exceptionOrNull())
                 }
             }
@@ -164,3 +173,8 @@ abstract class ReconnectingHubClient(private val tag: String) {
         val RECONNECT_DELAYS_MS = longArrayOf(1_000L, 2_000L, 5_000L, 10_000L, 30_000L)
     }
 }
+
+private fun Throwable?.isAuthenticationFailure(): Boolean =
+    generateSequence(this) { it.cause }.any {
+        it is HttpRequestException && (it.statusCode == 401 || it.statusCode == 403)
+    }

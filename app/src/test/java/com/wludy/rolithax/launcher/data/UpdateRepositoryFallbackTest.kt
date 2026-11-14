@@ -99,6 +99,89 @@ class UpdateRepositoryFallbackTest {
     }
 
     @Test
+    fun unifiedApkUsesExactChecksumRowAndDisablesLegacyVariants() = runBlocking {
+        val githubUrl = "https://github.com/WLudy1012/RolithaxLauncher/releases/download/v1.9.0/RolithaxLauncher.apk"
+        val published = release(
+            tag = "v1.9.0",
+            body = """
+                下载 `RolithaxLauncher.apk` 安装。
+                | `old-RolithaxLauncher.apk` | `$liteDigest` |
+                | `RolithaxLauncher.apk` | `$fullDigest` |
+            """.trimIndent(),
+        )
+        val repo = repository(
+            github = {
+                listOf(
+                    published.copy(
+                        assets = published.assets + GitHubReleaseAsset(
+                            name = "RolithaxLauncher.apk",
+                            browserDownloadUrl = githubUrl,
+                            size = 50_000_000,
+                        )
+                    )
+                )
+            },
+            tags = { error("不应查询 CNB 元数据") },
+            releasePage = { error("不应查询 CNB 元数据") },
+        )
+
+        val update = requireNotNull(repo.checkLatest("1.8.2", UpdateChannel.STABLE).getOrThrow())
+        assertEquals("RolithaxLauncher.apk", update.apkName)
+        assertEquals(githubUrl, update.downloadUrl)
+        assertEquals(
+            "https://cnb.cool/WLudy/RolithaxLauncher/-/releases/download/v1.9.0/RolithaxLauncher.apk",
+            update.cnbUrl,
+        )
+        assertEquals(fullDigest, update.sha256)
+        assertFalse(update.embeddedJre)
+        assertFalse(update.hasLiteVariant)
+    }
+
+    @Test
+    fun cnbCanServeUnifiedAndHistoricalLiteOnlyApks() = runBlocking {
+        val repo = repository(
+            github = { error("网络不可用") },
+            tags = { listOf("v1.9.0-Beta", "v1.8.3") },
+            releasePage = { tag ->
+                when (tag) {
+                    "v1.9.0-Beta" -> release(tag, full = "RolithaxLauncher.apk" to 13_000_000L, lite = null)
+                    else -> release(tag, full = null)
+                }
+            },
+        )
+
+        val stable = requireNotNull(repo.checkLatest("1.8.2", UpdateChannel.STABLE).getOrThrow())
+        assertEquals("app-release-lite.apk", stable.apkName)
+        assertEquals(liteDigest, stable.sha256)
+        assertFalse(stable.hasLiteVariant)
+        val beta = requireNotNull(repo.checkLatest("1.8.2", UpdateChannel.BETA).getOrThrow())
+        assertEquals("RolithaxLauncher.apk", beta.apkName)
+        assertEquals(fullDigest, beta.sha256)
+        assertFalse(beta.embeddedJre)
+    }
+
+    @Test
+    fun githubPrereleaseIsVisibleOnlyToBetaChannel() = runBlocking {
+        val repo = repository(
+            github = {
+                listOf(release(
+                    tag = "v1.9.0-Beta",
+                    full = "RolithaxLauncher.apk" to 13_000_000L,
+                    lite = null,
+                    prerelease = true,
+                ))
+            },
+            tags = { error("不应查询 CNB 元数据") },
+            releasePage = { error("不应查询 CNB 元数据") },
+        )
+
+        assertNull(repo.checkLatest("1.8.2", UpdateChannel.STABLE).getOrThrow())
+        val beta = requireNotNull(repo.checkLatest("1.8.2", UpdateChannel.BETA).getOrThrow())
+        assertEquals("RolithaxLauncher.apk", beta.apkName)
+        assertTrue(beta.beta)
+    }
+
+    @Test
     fun emptyGitHubListMeansNoUpdateWithoutFallback() = runBlocking {
         val repo = repository(
             github = { emptyList() },

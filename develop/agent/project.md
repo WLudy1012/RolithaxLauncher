@@ -46,7 +46,7 @@ Rolithax Launcher 是面向 MSLX Daemon 的多平台客户端。Android 支持�
 - 保存并管理多台 MSLX Daemon，统一查看远程和本地实例。
 - 连接、创建、启动、停止、重启、删除和设置 Minecraft 服务端实例。
 - SignalR 实时控制台、命令发送、EULA 处理和 ANSI 日志着色。
-- 本机开服：内嵌 Android JRE、进程内 JVM、可选 Shizuku 增强引擎、前台服务保活。
+- 本机开服：按需安装 Android JRE、进程内 JVM、可选 Shizuku 增强引擎、前台服务保活。
 - 资源中心：Modrinth 资源、MSLAPI 服务端核心、Room 缓存、依赖/冲突检查和目标端安装。
 - 服务端文件管理、插件/模组管理、`server.properties` 编辑、备份与加密迁移。
 - 稳定版和 Beta 更新渠道、应用内下载校验（下载域名白名单与 SHA-256）、更新检查元数据 GitHub → CNB 回退、运行日志、崩溃报告与首次使用导览。
@@ -87,7 +87,7 @@ app/src/main/java/com/wludy/rolithax/launcher/
 
 app/src/main/cpp/                  进程内 JVM Native 桥接
 app/src/main/assets/               法律和第三方许可资料
-app/src/jreRuntime/assets/        完整版 APK 的内嵌运行时资源
+runtimes/android/               Android 按需下载的 JRE 归档与 SHA-256
 ```
 
 ## 功能边界

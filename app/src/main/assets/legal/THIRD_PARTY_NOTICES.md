@@ -17,17 +17,16 @@
 本应用是**独立第三方应用**，并非 MSLX 官方或 MSLTeam 发布的产品，两者之间不存在责任、
 关联、代理或隶属关系；完整措辞见首次启动的「第三方免责声明」与仓库根目录 `DISCLAIMER.txt`。
 
-## 二、Java 运行时（本机开服随包/下载的 JRE）
+## 二、Java 运行时（本机开服按需下载）
 
 | 运行时 | 来源构建 | 许可 |
 | --- | --- | --- |
-| Java 17（完整版 APK 内嵌） | [PojavLauncherTeam/android-openjdk-build-multiarch](https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch) 发布标签 `jre17-ec28559`，产物 `jre17-arm64-20210825-release.tar.xz` / `jre17-x86_64-20210825-release.tar.xz` | OpenJDK：GPL-2.0 **with Classpath Exception**（SPDX 标识 `GPL-2.0-only with Classpath-exception-2.0`） |
-| Java 21（应用内下载 / Release 附件） | FCL 下载站同源构建 `jre21-arm64-20260223-release.tar.xz`，经 CNB 镜像 → GitHub Release → 上游直链依次回退 | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
-| Java 25（应用内下载 / Release 附件） | FCL 下载站同源构建 `jre25-arm64-20260223-release.tar.xz`（OpenJDK 25.0.3），回退顺序同上 | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
-| Java 8（应用内下载 / Release 附件） | [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2) 内置运行时 `runtimes/jre-8`（OpenJDK 8u442 的 Android/bionic 构建）：类库归档 `universal.tar.xz` + 平台二进制 `bin-arm64.tar.xz` / `bin-x86_64.tar.xz`，默认从 jsDelivr CDN（GitHub raw 兜底）拉取，项目自托管镜像可选 | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
+| Java 17 | [PojavLauncherTeam/android-openjdk-build-multiarch](https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/tag/jre17-ec28559) 发布标签 `jre17-ec28559`，架构为 arm64 和 x86_64 | OpenJDK：GPL-2.0 **with Classpath Exception**（SPDX 标识 `GPL-2.0-only with Classpath-exception-2.0`） |
+| Java 21 | [aaaapai/android-openjdk-build 20260223](https://github.com/aaaapai/android-openjdk-build/releases/tag/20260223) 的 Dragonwell Android 构建 `jre21-arm64-20260223-release.tar.xz` | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
+| Java 25 | 同一 20260223 发布的 Android 构建 `jre25-arm64-20260223-release.tar.xz`（OpenJDK 25.0.3） | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
+| Java 8 | [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2) 中 OpenJDK 8u442 的 Android/bionic 构建，包含共用类库和 arm64、x86_64 二进制 | 同上（OpenJDK GPL-2.0 with Classpath Exception） |
 
-- 构建产物本身只是 OpenJDK 的 Android/bionic 交叉编译结果；本应用不修改其字节码，仅按
-  `SHA-256` 校验后解压使用（校验值写死在 `LocalJreManager` 与 `fetch-jre-assets.ps1`）。
+- 运行时归档由 [Rolithax 仓库](https://github.com/WLudy1012/RolithaxLauncher/tree/main/runtimes/android) 分发，应用在安装前按 SHA-256 校验原始字节。
 - Java 8 的类库以 pack200 压缩格式（`lib/*.jar.pack`，Java 9 起已废弃）分发，安装时由随 APK
   分发的 `libunpack200.so`（OpenJDK 8 的 unpack200 工具，见下表）在设备上还原为 `.jar`。
 - 每台设备的运行时安装位置：`filesDir/rolithax/runtime/<运行时标识>`（应用私有目录）。
@@ -45,7 +44,7 @@
 | Gson（Google） | 2.10.1 | Apache-2.0 |
 | SignalR Java Client（Microsoft，`com.microsoft.signalr:signalr`） | 8.0.8 | Apache-2.0 |
 | Coil Compose（`io.coil-kt:coil-compose`） | 2.7.0 | Apache-2.0 |
-| XZ for Java（`org.tukaani:xz`，解压内嵌 `.tar.xz` 运行时） | 1.10 | 0BSD（1.9 及更早为 Public Domain） |
+| XZ for Java（`org.tukaani:xz`，解压 `.tar.xz` 运行时） | 1.10 | 0BSD（1.9 及更早为 Public Domain） |
 | Apache Commons Compress（tar 归档处理） | 1.27.1 | Apache-2.0 |
 | Shizuku 客户端 API / Provider（`dev.rikka.shizuku:api`、`:provider`） | 13.1.5 | Apache-2.0（按该许可第 6 条附加说明：**不得**复用 Shizuku 管理器自身的界面资源；本应用只调用 API） |
 | `libunpack200.so`（`jniLibs/{arm64-v8a,x86_64}`，Java 8 类库的 pack200 解包器） | 8u442（取自 ZalithLauncher 2 的 `runtimes/jre-8` 归档，bionic 构建） | OpenJDK：GPL-2.0 **with Classpath Exception** |

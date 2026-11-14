@@ -1,5 +1,5 @@
 name: 准备 Android 构建环境
-description: 配置 JDK 17、Android SDK、Gradle 缓存并校验内嵌 JRE
+description: 配置 JDK 17、Android SDK 和 Gradle 缓存
 
 inputs:
   gradle-cache-read-only:
@@ -14,13 +14,9 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: 校验内嵌 JRE
+    - name: 准备 Gradle Wrapper
       shell: bash
       run: |
-        set -euo pipefail
-        jre=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-        sha=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
-        printf '%s  %s\n' "$sha" "$jre" | sha256sum --check
         chmod +x gradlew
 
     - name: 配置 JDK 17

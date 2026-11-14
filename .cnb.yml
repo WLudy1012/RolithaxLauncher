@@ -42,13 +42,6 @@ main:
                 exit 1
               }
             fi
-        - name: 验证内嵌 JRE 运行时
-          script: |
-            set -eu
-            JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-            SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
-            [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
-            echo "$SHA  $JRE" | sha256sum -c -
         - name: 构建 Debug APK
           script: |
             set -eu
@@ -72,9 +65,7 @@ main:
 
 $:
   tag_push:
-    - imports:
-        - https://cnb.cool/WLudy/Rolithax-secrets/-/blob/main/keystore.yml
-      docker:
+    - docker:
         image: mobiledevops/android-sdk-image:34.0.1
         volumes:
           - /root/.gradle:cow
@@ -110,134 +101,45 @@ $:
                 exit 1
               }
             fi
-        - name: 校验并解析当前 Tag
-          script: |
-            set -eu
-            git fetch --tags --force --quiet 2>/dev/null || true
-            CUR_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]' | sort -V | tail -1 || true)
-            if [ -z "$CUR_TAG" ]; then
-              echo "ERROR: 当前 tag 不匹配 v[0-9]* 规则，终止发布流水线" >&2
-              exit 1
-            fi
-            echo "$CUR_TAG" > .cnb_release_tag
-            echo "当前 tag=$CUR_TAG"
-        - name: 恢复签名密钥
-          script: |
-            set -eu
-            if [ -z "${KEYSTORE_BASE64:-}" ]; then
-              echo "ERROR: KEYSTORE_BASE64 未注入（请检查密钥仓库 Rolithax-secrets 的 keystore.yml 及 allow_slugs）" >&2
-              exit 1
-            fi
-            if [ -z "${KEYSTORE_PASSWORD:-}" ] || [ -z "${KEY_PASSWORD:-}" ]; then
-              echo "ERROR: KEYSTORE_PASSWORD 或 KEY_PASSWORD 未注入" >&2
-              exit 1
-            fi
-            mkdir -p keystore
-            echo "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > keystore/release.jks || {
-              echo "ERROR: KEYSTORE_BASE64 解码失败" >&2
-              exit 1
-            }
-            keytool -list -keystore keystore/release.jks -storepass "$KEYSTORE_PASSWORD" -alias wludy > /dev/null 2>&1 || {
-              echo "ERROR: 签名密钥无效或缺少 wludy 别名" >&2
-              exit 1
-            }
-            cat > keystore.properties <<EOF
-            storeFile=keystore/release.jks
-            storePassword=${KEYSTORE_PASSWORD}
-            keyAlias=wludy
-            keyPassword=${KEY_PASSWORD}
-            EOF
-
-        - name: 验证内嵌 JRE 运行时
-          script: |
-            set -eu
-            JRE=app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
-            SHA=c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d
-            [ -f "$JRE" ] || { echo "ERROR: 缺少内嵌 JRE 归档 $JRE" >&2; exit 1; }
-            echo "$SHA  $JRE" | sha256sum -c -
-
-        - name: 构建签名 Release APK（完整版，内嵌 JRE）
+        - name: 构建并校验签名 APK 和 JRE 附件
+          imports:
+            - https://cnb.cool/WLudy/Rolithax-secrets/-/blob/main/keystore.yml
           script: |
             set -eu
             export ANDROID_HOME=/opt/android-sdk-linux
             export ANDROID_SDK_ROOT="$ANDROID_HOME"
+            export ANDROID_BUILD_TOOLS=35.0.0
             export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
             export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
-            [ -f keystore.properties ] || { echo "ERROR: 签名配置缺失，禁止发布未签名包" >&2; exit 1; }
+            export RELEASE_TAG="${CNB_BRANCH:?缺少当前 Tag}"
+            export RUNNER_TEMP="$PWD/.cnb-release"
+            mkdir -p "$RUNNER_TEMP"
             chmod +x gradlew
-            ./gradlew assembleRelease --no-daemon --stacktrace
-            cp app/build/outputs/apk/release/app-release.apk ./app-release.apk
-            unzip -l app-release.apk | grep -q 'assets/jre/' || { echo "ERROR: 完整版缺少内嵌 JRE" >&2; exit 1; }
-
-        - name: 构建签名 Release APK（精简版，不含 JRE）
-          script: |
-            set -eu
-            export ANDROID_HOME=/opt/android-sdk-linux
-            export ANDROID_SDK_ROOT="$ANDROID_HOME"
-            export MSLX_MAVEN_GOOGLE_MIRROR=https://maven.aliyun.com/repository/google
-            export MSLX_MAVEN_CENTRAL_MIRROR=https://maven.aliyun.com/repository/public
-            ./gradlew assembleRelease -PwithoutJre=true --no-daemon --stacktrace
-            SRC=app/build/outputs/apk/release/app-release.apk
-            if unzip -l "$SRC" | grep -q 'assets/jre/'; then
-              echo "ERROR: 精简版不应包含内嵌 JRE" >&2
-              exit 1
-            fi
-            cp "$SRC" ./app-release-lite.apk
-            ls -lh app-release.apk app-release-lite.apk
-
-        - name: 准备发布说明
-          script: |
-            set -eu
-            CUR_TAG=$(cat .cnb_release_tag)
-            REV="$CUR_TAG"
-            git rev-parse --verify --quiet "${CUR_TAG}^{commit}" > /dev/null || REV=HEAD
-            IS_BETA=$(echo "$CUR_TAG" | grep -qiE -- '-beta$' && echo 1 || echo 0)
-            if [ "$IS_BETA" = "1" ]; then
-              PREV_TAG=$(git tag --list 'v*' | grep -iE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1 || true)
-              if [ -z "$PREV_TAG" ]; then
-                PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1 || true)
-              fi
-            else
-              PREV_TAG=$(git tag --list 'v*' | grep -ivE -- '-beta$' | grep -v "^${CUR_TAG}$" | sort -V | tail -1 || true)
-            fi
-            echo "当前 tag=$CUR_TAG 上一版本=${PREV_TAG:-<无>} tag 总数=$(git tag --list 'v*' | wc -l)"
-            {
-              echo "# Rolithax Launcher $CUR_TAG"
-              echo ""
-              if [ -n "$PREV_TAG" ]; then
-                echo "自 \`$PREV_TAG\` 以来的提交："
-                echo ""
-                git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..${REV}"
-              else
-                echo "> 未能确定上一版本 tag（首个版本或 tag 未同步），仅列出最近 15 条提交。"
-                echo ""
-                git log -n 15 --no-merges --pretty=format:"- %s" "${REV}"
-              fi
-              echo ""
-              echo ""
-              echo "> 上一版本：\`${PREV_TAG:-无}\`"
-              echo "## 两个变体（按需选择）"
-              echo ""
-              echo "| 包 | 说明 | 大小 | SHA-256 |"
-              echo "| --- | --- | --- | --- |"
-              echo "| \`app-release.apk\` | **完整版**：内嵌 Android JRE 运行时，本机开服可离线使用 | $(du -m app-release.apk | awk '{print $1}') MB | \`$(sha256sum app-release.apk | awk '{print $1}')\` |"
-              echo "| \`app-release-lite.apk\` | **精简版**：不含运行时，体积小；本机开服首次使用需联网下载约 36MB 运行时 | $(du -m app-release-lite.apk | awk '{print $1}') MB | \`$(sha256sum app-release-lite.apk | awk '{print $1}')\` |"
-              echo ""
-              echo "附件里的 \`jre17-arm64-20210825-release.tar.xz\` 是内嵌运行时副本，供客户端按需使用。"
-              echo ""
-              echo "两个包版本号与签名一致，可互相覆盖安装（切换变体无需卸载）。"
-            } > CNB_RELEASE.md
+            bash .github/scripts/prepare-android-release.sh
+            (
+              cd "$RUNNER_TEMP/release-assets"
+              printf '\n## SHA-256\n\n| 文件 | SHA-256 |\n| --- | --- |\n'
+              while read -r digest name; do
+                printf '| `%s` | `%s` |\n' "${name#\*}" "$digest"
+              done < SHA256SUMS.txt
+            ) >> "$RUNNER_TEMP/release-assets/release-notes.md"
 
         - name: 创建 CNB Release
           type: git:release
           options:
-            descriptionFromFile: CNB_RELEASE.md
+            descriptionFromFile: .cnb-release/release-assets/release-notes.md
             latest: true
 
         - name: 上传 Release 附件
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - app-release.apk
-              - app-release-lite.apk
-              - app/src/jreRuntime/assets/jre/jre17-arm64-20210825-release.tar.xz
+              - .cnb-release/release-assets/RolithaxLauncher.apk
+              - .cnb-release/release-assets/jre8-universal.tar.xz
+              - .cnb-release/release-assets/jre8-arm64-bin.tar.xz
+              - .cnb-release/release-assets/jre8-x86_64-bin.tar.xz
+              - .cnb-release/release-assets/jre17-arm64-20210825-release.tar.xz
+              - .cnb-release/release-assets/jre17-x86_64-20210825-release.tar.xz
+              - .cnb-release/release-assets/jre21-arm64-20260223-release.tar.xz
+              - .cnb-release/release-assets/jre25-arm64-20260223-release.tar.xz
+              - .cnb-release/release-assets/SHA256SUMS.txt

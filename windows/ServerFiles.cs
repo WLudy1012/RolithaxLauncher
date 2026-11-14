@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
@@ -17,19 +19,20 @@ public sealed partial class MainWindow
             .OrderBy(item => item.Field("type").StringValue() != "folder")
             .ThenBy(item => item.Field("name").StringValue(), StringComparer.CurrentCultureIgnoreCase);
         var entries = new StackPanel { Spacing = 8 };
-        var search = new TextBox { Header = "筛选当前目录", PlaceholderText = "文件或文件夹名称" };
+        var search = new TextBox { PlaceholderText = "筛选当前目录", MinWidth = 160 };
+        AutomationProperties.SetName(search, "筛选当前目录");
         var parent = Button("上一级", () => RunAsync(() =>
         {
             var separator = path.LastIndexOf('/');
             return NavigateFilesAsync(node, server, separator < 0 ? "" : path[..separator]);
         }));
         parent.IsEnabled = path.Length > 0;
-        SetWorkspace(Heading("文件管理", path.Length == 0 ? "服务器根目录" : "/" + path),
-            Actions(parent,
-                Button("刷新", () => RunAsync(() => ShowFilesAsync(node, server))),
-                Button("新建文件夹", () => RunAsync(() => CreateFolderAsync(node, server, path))),
-                Button("上传文件", () => RunAsync(() => UploadFileAsync(node, server, path)))),
-            search, entries);
+        var tools = Actions(parent,
+            Button("刷新", () => RunAsync(() => ShowFilesAsync(node, server))),
+            Button("新建文件夹", () => RunAsync(() => CreateFolderAsync(node, server, path))),
+            Button("上传文件", () => RunAsync(() => UploadFileAsync(node, server, path)), accent: true));
+        SetWorkspace(Card(Section("文件管理", Secondary(path.Length == 0 ? "服务器根目录  /" : "/" + path),
+            AdaptivePair(search, tools, 550))), entries);
 
         void RenderEntries()
         {
@@ -41,7 +44,8 @@ public sealed partial class MainWindow
                     continue;
                 var folder = item.Field("type").StringValue() == "folder";
                 var itemPath = ChildPath(path, name);
-                var menu = new DropDownButton { Content = folder ? "文件夹操作" : "文件操作" };
+                var menu = new DropDownButton { Content = "操作", VerticalAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetName(menu, $"{name}的{(folder ? "文件夹" : "文件")}操作");
                 var actions = new MenuFlyout();
                 if (!folder)
                 {
@@ -55,16 +59,30 @@ public sealed partial class MainWindow
                 var modified = item.Field("lastModified").StringValue();
                 if (modified.Length > 0)
                     detail += "  ·  " + modified;
-                var fileTitle = folder
-                    ? (UIElement)Button(name, () => RunAsync(() => NavigateFilesAsync(node, server, itemPath)))
-                    : Text(name, "BodyStrongTextBlockStyle");
+                var fileTitle = Text(name, "BodyStrongTextBlockStyle");
+                UIElement title = fileTitle;
+                if (folder)
+                {
+                    var open = new HyperlinkButton { Content = fileTitle, Padding = new Thickness(0) };
+                    AutomationProperties.SetName(open, $"打开文件夹 {name}");
+                    open.Click += async (_, _) => await RunAsync(() => NavigateFilesAsync(node, server, itemPath));
+                    title = open;
+                }
                 var line = new Grid { ColumnSpacing = 10 };
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                line.Children.Add(Stack(fileTitle, Secondary(detail)));
-                Grid.SetColumn(menu, 1);
+                var icon = new SymbolIcon(folder ? Symbol.Folder : Symbol.Document) { VerticalAlignment = VerticalAlignment.Center };
+                AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+                line.Children.Add(icon);
+                var label = CompactStack(title, Secondary(detail));
+                Grid.SetColumn(label, 1);
+                line.Children.Add(label);
+                Grid.SetColumn(menu, 2);
                 line.Children.Add(menu);
-                entries.Children.Add(Card(line));
+                var row = Card(line);
+                row.Padding = new Thickness(16, 10, 12, 10);
+                entries.Children.Add(row);
             }
             if (entries.Children.Count == 0)
                 entries.Children.Add(Card(Secondary(search.Text.Length == 0 ? "目录为空。" : "没有匹配项。")));

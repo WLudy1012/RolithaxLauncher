@@ -11,16 +11,34 @@ version_in_gradle=$(sed -nE 's/^\s*versionName.*\?: *"([^"]+)".*$/\1/p' app/buil
   exit 1
 }
 
-out="$RUNNER_TEMP/release-assets"
-keystore="$RUNNER_TEMP/rolithax-release.jks"
-[[ ! -e keystore.properties && ! -e "$keystore" ]] || {
-  echo "::error::签名配置已经存在，请在干净的发布工作区运行"
+out="${RUNNER_TEMP:?}/release-assets"
+runtime_dir=runtimes/android
+mkdir -p "$RUNNER_TEMP"
+expected_paths=$(find "$runtime_dir" -maxdepth 1 -type f -name '*.tar.xz' -printf '%f\n' | sort)
+(
+  cd "$runtime_dir"
+  sha256sum --strict --check SHA256SUMS.txt
+)
+mapfile -t runtimes < <(awk 'NF == 2 { sub(/^\*/, "", $2); print $2 }' "$runtime_dir/SHA256SUMS.txt")
+(("${#runtimes[@]}" > 0))
+[[ "$(printf '%s\n' "${runtimes[@]}" | sort)" == "$expected_paths" ]] || {
+  echo "::error::JRE 归档与校验清单不一致"
   exit 1
 }
+
 umask 077
 mkdir -p "$out"
-trap 'rm -f -- "$keystore" keystore.properties' EXIT
-
+keystore=$(mktemp "$RUNNER_TEMP/rolithax-release.XXXXXX")
+created_properties=false
+cleanup() {
+  rm -f -- "$keystore"
+  if [[ "$created_properties" == true ]]; then rm -f -- keystore.properties; fi
+}
+trap cleanup EXIT
+if [[ -e keystore.properties ]]; then
+  echo "::error::请在没有本地签名配置的工作区运行发布构建"
+  exit 1
+fi
 if [[ -z "${KEYSTORE_BASE64:-}" || -z "${KEYSTORE_PASSWORD:-}" || -z "${KEY_PASSWORD:-}" ]]; then
   echo "::error::发布签名 Secrets 不完整"
   exit 1
@@ -32,6 +50,7 @@ keytool -list -keystore "$keystore" -storepass:env KEYSTORE_PASSWORD -alias wlud
   exit 1
 }
 
+created_properties=true
 RELEASE_KEYSTORE="$keystore" python3 - <<'PY'
 import os
 from pathlib import Path
@@ -53,65 +72,35 @@ Path("keystore.properties").write_text(
 PY
 unset KEYSTORE_PASSWORD KEY_PASSWORD
 
-gradle_flags=(--no-daemon --no-build-cache --no-configuration-cache --stacktrace)
-./gradlew :app:assembleRelease "${gradle_flags[@]}"
-cp app/build/outputs/apk/release/app-release.apk "$out/app-release.apk"
-./gradlew :app:assembleRelease -PwithoutJre=true "${gradle_flags[@]}"
-cp app/build/outputs/apk/release/app-release.apk "$out/app-release-lite.apk"
-rm -f -- "$keystore" keystore.properties
+./gradlew :app:assembleRelease --no-daemon --no-build-cache --no-configuration-cache --stacktrace
+apk=RolithaxLauncher.apk
+cp app/build/outputs/apk/release/app-release.apk "$out/$apk"
+cleanup
+trap - EXIT
 
 apksigner="$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/apksigner"
 test -x "$apksigner"
-signer_digest() {
-  "$apksigner" verify --print-certs "$1" | awk -F': ' '/certificate SHA-256 digest:/ { print $2 }'
-}
-
-full_signer=$(signer_digest "$out/app-release.apk")
-lite_signer=$(signer_digest "$out/app-release-lite.apk")
-[[ -n "$full_signer" && "$full_signer" == "$lite_signer" ]] || {
-  echo "::error::完整版和精简版的 APK 签名不一致"
-  exit 1
-}
-
-jre17=jre17-arm64-20210825-release.tar.xz
-unzip -Z1 "$out/app-release.apk" > "$RUNNER_TEMP/full-apk-entries"
-unzip -Z1 "$out/app-release-lite.apk" > "$RUNNER_TEMP/lite-apk-entries"
-grep -Fxq "assets/jre/$jre17" "$RUNNER_TEMP/full-apk-entries"
-if grep -q '^assets/jre/' "$RUNNER_TEMP/lite-apk-entries"; then
-  echo "::error::精简版包含了 JRE"
+if ! details=$("$apksigner" verify --verbose "$out/$apk" 2>/dev/null) ||
+  ! grep -Fxq 'Verified using v2 scheme (APK Signature Scheme v2): true' <<< "$details" ||
+  ! grep -Fxq 'Verified using v3 scheme (APK Signature Scheme v3): true' <<< "$details"; then
+  echo "::error::$apk 未通过 APK v2 和 v3 双签名验证"
   exit 1
 fi
-cp "app/src/jreRuntime/assets/jre/$jre17" "$out/$jre17"
-
-fetch_runtime() {
-  local asset=$1 digest=$2 url=$3
-  if curl -fsSL --retry 2 --retry-max-time 600 --connect-timeout 20 --max-time 300 \
-    -o "$out/$asset.part" "$url" &&
-    printf '%s  %s\n' "$digest" "$out/$asset.part" | sha256sum --check --status; then
-    mv "$out/$asset.part" "$out/$asset"
-  else
-    rm -f -- "$out/$asset.part"
-    echo "::warning::运行时 $asset 未通过下载或校验，本次发布不包含该附件"
-  fi
-}
-
-jre21=jre21-arm64-20260223-release.tar.xz
-jre25=jre25-arm64-20260223-release.tar.xz
-fetch_runtime "$jre21" d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc \
-  "https://pan.huang1111.cn/f/eWkQI1/$jre21" &
-runtime21=$!
-fetch_runtime "$jre25" 0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286 \
-  "https://pan.huang1111.cn/f/5NOltm/$jre25" &
-runtime25=$!
-wait "$runtime21"
-wait "$runtime25"
+unzip -Z1 "$out/$apk" > "$RUNNER_TEMP/rolithax-apk-entries"
+if grep -q '^assets/jre/' "$RUNNER_TEMP/rolithax-apk-entries"; then
+  echo "::error::$apk 包含 JRE"
+  exit 1
+fi
+for runtime in "${runtimes[@]}"; do
+  cp -- "$runtime_dir/$runtime" "$out/$runtime"
+done
 
 previous=
 if [[ "$RELEASE_TAG" == *-Beta ]]; then
-  previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*-Beta' "$RELEASE_TAG^" 2>/dev/null || true)
+  previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*-Beta' HEAD^ 2>/dev/null || true)
 fi
 if [[ -z "$previous" ]]; then
-  previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-Beta' "$RELEASE_TAG^" 2>/dev/null || true)
+  previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-Beta' HEAD^ 2>/dev/null || true)
 fi
 {
   printf '# Rolithax Launcher %s\n\n' "$RELEASE_TAG"
@@ -122,27 +111,16 @@ fi
     cat ".github/release-notes/$RELEASE_TAG.md"
   elif [[ -n "$previous" ]]; then
     printf '自 `%s` 以来的变更\n\n' "$previous"
-    git log --no-merges --format='- %s' "$previous..$RELEASE_TAG"
+    git log --no-merges --format='- %s' "$previous..HEAD"
   else
     printf '最近的 15 条变更\n\n'
-    git log --no-merges -n 15 --format='- %s' "$RELEASE_TAG"
+    git log --no-merges -n 15 --format='- %s' HEAD
   fi
   printf '\n## Android 安装包\n\n'
-  printf '%s\n' '- `app-release.apk` 内嵌 Java 17，可离线准备本机开服。'
-  printf '%s\n' '- `app-release-lite.apk` 体积较小，本机开服时按需下载运行时。'
-  printf '\n| 安装包 | SHA-256 |\n| --- | --- |\n'
-  for apk in app-release.apk app-release-lite.apk; do
-    digest=$(sha256sum "$out/$apk")
-    printf '| `%s` | `%s` |\n' "$apk" "${digest%% *}"
-  done
-  printf '\n全部附件的校验值见 `SHA256SUMS.txt`。\n'
+  printf '%s\n' 'Android 安装包已通过 v2 和 v3 签名验证。首次本机开服时，应用从本仓库按需下载 JRE。'
 } > "$out/release-notes.md"
 
 (
   cd "$out"
-  assets=(app-release.apk app-release-lite.apk "$jre17")
-  for runtime in "$jre21" "$jre25"; do
-    [[ ! -f "$runtime" ]] || assets+=("$runtime")
-  done
-  sha256sum "${assets[@]}" > SHA256SUMS.txt
+  sha256sum --binary -- "$apk" "${runtimes[@]}" > SHA256SUMS.txt
 )
