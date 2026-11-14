@@ -51,7 +51,7 @@ Daemon 可能使用自签证书。客户端对用户自己配置的 Daemon REST�
 
 共享控制台优先调用 `ResumeConsole`。支持游标的 Daemon 返回历史批次，实时日志带 `streamId` 与 `sequence`。客户端合并、排序和去重，发现缺口时向宿主发出 `ConsoleEvent.Gap`。服务端明确表示该方法不存在时才回退到旧的 `JoinGroup`。旧版单参数日志没有来源标记，断线后的历史与实时日志可能重叠。
 
-`CommandResult` 表示 Daemon 提交结果，现有载荷没有请求 ID。面板只从日志提取显示数据。宿主负责绑定目标实例、授权和确认，重放日志或重连不会重发命令。插件文件约定见 [控制台插件 SDK](../../console-sdk/README.md)。
+`CommandResult` 表示 Daemon 提交结果，现有载荷没有请求 ID。面板只从日志提取显示数据。宿主负责绑定目标实例、授权和确认，重放日志或重连不会重发命令。插件文件约定见 [控制台插件 SDK](https://github.com/WLudy1012/rolithax-console-sdk)。
 
 ## MSLAPI
 
