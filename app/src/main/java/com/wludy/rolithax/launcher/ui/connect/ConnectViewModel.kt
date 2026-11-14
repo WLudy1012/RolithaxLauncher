@@ -12,6 +12,8 @@ import com.wludy.rolithax.launcher.data.model.PairCodeRequest
 import com.wludy.rolithax.launcher.data.model.PairRedeemRequest
 import com.wludy.rolithax.launcher.data.remote.ApiClient
 import com.wludy.rolithax.launcher.data.remote.PairingPayloadCodec
+import com.wludy.rolithax.launcher.data.remote.pairingEndpoint
+import com.wludy.rolithax.launcher.data.remote.samePairingEndpoint
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +37,7 @@ data class ConnectUiState(
     val error: String? = null,
     /** 扫码配对兑换中。 */
     val pairing: Boolean = false,
+    val confirmHttpPairing: Boolean = false,
     /** 正在生成配对二维码。 */
     val generating: Boolean = false,
     /** 生成成功的配对码（非空时界面弹二维码窗）。 */
@@ -50,6 +53,8 @@ class ConnectViewModel(
     private val container = getApplication<RolithaxApplication>().container
     private val registry = container.daemonRegistry
     private val store = container.settingsStore
+    private data class PendingPairing(val contents: String, val url: String, val expiresAt: Long)
+    private var pendingPairing: PendingPairing? = null
 
     private val _state = MutableStateFlow(ConnectUiState())
     val state = _state.asStateFlow()
@@ -184,7 +189,8 @@ class ConnectViewModel(
      */
     fun onScanResult(contents: String?) {
         if (contents.isNullOrBlank()) return // 用户取消扫码，不提示
-        val payload = PairingPayloadCodec.decode(contents)
+        val text = contents.trim()
+        val payload = PairingPayloadCodec.decode(text)
         if (payload == null) {
             _state.update { it.copy(error = "无法识别的二维码：请扫描 Daemon 端「扫码配对」生成的配对二维码。") }
             return
@@ -194,66 +200,91 @@ class ConnectViewModel(
             _state.update { it.copy(error = "配对二维码内容不完整，请在服务端重新生成。") }
             return
         }
-        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+        val endpoint = pairingEndpoint(url)
+        if (endpoint == null) {
             _state.update { it.copy(error = "配对二维码中的 Daemon 地址无效，请在服务端重新生成。") }
             return
         }
-        if (payload.expiresAt > 0 && payload.expiresAt * 1000L < System.currentTimeMillis()) {
+        if (payload.expiresAt > 0 && payload.expiresAt < System.currentTimeMillis() / 1000L) {
             _state.update { it.copy(error = "配对二维码已过期，请在服务端重新生成。") }
             return
         }
-        if (_state.value.pairing || _state.value.loading) return
+        if (_state.value.pairing || _state.value.loading || _state.value.confirmHttpPairing) return
+        val pending = PendingPairing(text, endpoint.toString(), payload.expiresAt)
+        if (endpoint.scheme == "http") {
+            pendingPairing = pending
+            _state.update { it.copy(confirmHttpPairing = true, error = null) }
+            return
+        }
+        redeemPairing(pending)
+    }
+
+    fun confirmHttpPairing() {
+        val pending = pendingPairing ?: return
+        pendingPairing = null
+        _state.update { it.copy(confirmHttpPairing = false) }
+        redeemPairing(pending)
+    }
+
+    fun cancelHttpPairing() {
+        pendingPairing = null
+        _state.update { it.copy(confirmHttpPairing = false) }
+    }
+
+    private fun redeemPairing(pending: PendingPairing) {
+        if (pending.expiresAt > 0 && pending.expiresAt < System.currentTimeMillis() / 1000L) {
+            _state.update { it.copy(error = "配对二维码已过期，请在服务端重新生成。") }
+            return
+        }
         _state.update { it.copy(pairing = true, error = null) }
 
         viewModelScope.launch {
-            val app = getApplication<Application>()
-            val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android 设备" }
-            // ANDROID_ID 无需权限；同一 App 在同一设备上稳定，供服务端识别同机重复配对并替换旧凭据
-            val fingerprint = Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID)
-                ?.takeIf { it.isNotBlank() }
-                ?.let { "android-$it" }
-            // 兑换用未认证客户端：redeem 是插件唯一的匿名端点，内部做签名/时效/一次性/IP 限速校验
-            val api = ApiClient.build(url, "")
-            val previousApiKey = findPreviousApiKey(url)
-            runCatching { api.pairRedeem(PairRedeemRequest(contents, deviceName, fingerprint, previousApiKey)) }
-                .onSuccess { resp ->
-                    val data = resp.data
-                    if (resp.code != 200 || data?.apiKey.isNullOrBlank()) {
-                        _state.update {
-                            it.copy(pairing = false, error = "扫码配对失败：${resp.message ?: "服务端未返回有效凭据"}")
-                        }
-                        return@onSuccess
-                    }
-                    val daemonUrl = data.daemonUrl?.takeIf { it.isNotBlank() } ?: url
-                    val isHttp = daemonUrl.startsWith("http://", ignoreCase = true)
-                    _state.update {
-                        it.copy(
-                            name = it.name.trim().ifBlank { deviceName },
-                            baseUrl = daemonUrl,
-                            apiKey = data.apiKey,
-                            allowHttp = isHttp,
-                            pairing = false,
-                            error = null,
-                        )
-                    }
-                    com.wludy.rolithax.launcher.data.AppLogger.i("Connect", "扫码配对成功 role=${data.role} 凭据到期 ${data.expiresAt}")
-                    if (isHttp) {
-                        // 明文地址不静默自动连接：与手填流程一致，让用户知情后再点"连接"
-                        _state.update {
-                            it.copy(error = "配对成功，但该 Daemon 使用 HTTP 明文地址；已勾选「允许 HTTP 连接」，请确认风险后点击连接。")
-                        }
-                    } else {
-                        connect()
-                    }
+            var connection: ApiClient.DaemonConnection? = null
+            var previousKey: String? = null
+            try {
+                val app = getApplication<Application>()
+                val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "Android 设备" }
+                val fingerprint = Settings.Secure.getString(app.contentResolver, Settings.Secure.ANDROID_ID)
+                    ?.takeIf { it.isNotBlank() }?.let { "android-$it" }
+                connection = ApiClient.buildDaemonConnection(pending.url, "")
+                previousKey = findPreviousApiKey(pending.url)
+                val resp = connection.api.pairRedeem(PairRedeemRequest(pending.contents, deviceName, fingerprint, previousKey))
+                val data = resp.data
+                if (resp.code != 200 || data?.apiKey.isNullOrBlank()) {
+                    throw IllegalStateException(resp.message ?: "服务端未返回有效凭据")
                 }
-                .onFailure { e ->
-                    val detail = when ((e as? HttpException)?.code()) {
-                        404 -> "服务端未安装 Rolithax 插件，或插件版本过旧。"
-                        else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
-                    }
-                    com.wludy.rolithax.launcher.data.AppLogger.w("Connect", "扫码配对失败", e)
-                    _state.update { it.copy(pairing = false, error = "扫码配对失败：$detail") }
+                val daemonUrl = data.daemonUrl?.takeIf { it.isNotBlank() } ?: pending.url
+                if (!samePairingEndpoint(daemonUrl, pending.url)) {
+                    throw IllegalStateException("服务端返回的 Daemon 地址与配对地址不一致")
                 }
+                val isHttp = pairingEndpoint(daemonUrl)?.scheme == "http"
+                _state.update {
+                    it.copy(name = it.name.trim().ifBlank { deviceName }, baseUrl = daemonUrl,
+                        apiKey = data.apiKey, allowHttp = isHttp, pairing = false, error = null)
+                }
+                com.wludy.rolithax.launcher.data.AppLogger.i("Connect", "扫码配对成功 role=${data.role} 凭据到期 ${data.expiresAt}")
+                if (isHttp) {
+                    _state.update { it.copy(error = "配对成功，请点击连接。") }
+                } else {
+                    connect()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val detail = when ((e as? HttpException)?.code()) {
+                    404 -> "服务端未安装 Rolithax 插件，或插件版本过旧。"
+                    else -> ApiClient.errorMessageFrom(e) ?: e.message ?: "网络异常"
+                }
+                val safeDetail = previousKey?.takeIf { it.isNotEmpty() }?.let { detail.replace(it, "***") } ?: detail
+                com.wludy.rolithax.launcher.data.AppLogger.w("Connect", "扫码配对失败：$safeDetail")
+                _state.update { it.copy(pairing = false, error = "扫码配对失败：$safeDetail") }
+            } finally {
+                connection?.client?.let { client ->
+                    client.dispatcher.cancelAll()
+                    client.dispatcher.executorService.shutdown()
+                    client.connectionPool.evictAll()
+                }
+            }
         }
     }
 
@@ -293,10 +324,9 @@ class ConnectViewModel(
 
     /** 本机已保存的同一 Daemon 的 API Key（优先当前正在编辑的那台），用于向服务端证明是同一台设备。 */
     private suspend fun findPreviousApiKey(url: String): String? {
-        val settings = runCatching { store.settingsFlow.first() }.getOrNull() ?: return null
-        val target = normalizeBaseUrl(url, allowHttp = true)
+        val settings = try { store.settingsFlow.first() } catch (e: CancellationException) { throw e } catch (_: Exception) { return null }
         val matches = settings.daemons.filter {
-            it.apiKey.isNotBlank() && normalizeBaseUrl(it.baseUrl, allowHttp = true).equals(target, ignoreCase = true)
+            it.apiKey.isNotBlank() && samePairingEndpoint(it.baseUrl, url)
         }
         return (matches.firstOrNull { it.id == _state.value.editingId } ?: matches.firstOrNull())?.apiKey
     }

@@ -26,6 +26,8 @@ Daemon 接口使用统一响应包装：
 
 认证凭据由统一网络客户端注入并从安全存储读取；文档、日志、异常和截图中不得出现凭据值。
 
+MSLX Daemon v1.7.8 仍用 `x-api-key` 接收 API Key。连接探测读取 `GET /api/status`，成功响应的 `data` 是对象。实例列表由独立的 `GET /api/instance/list` 提供，列表失败时保留已验证的连接并允许重试。HTTP 401 表示请求未通过认证，HTTP 403 也可能来自访问策略、权限或 IP 限制，应保留可安全展示的拒绝原因。
+
 ## Windows C ABI
 
 `windows/rolithax_core.h` 声明 WinUI 3 使用的 C ABI。会话接收 UTF-8 JSON 配置并持有独立的 REST、SignalR 客户端和流任务。操作参数为 UTF-8 JSON，返回结果包含 `ok` 和 `data`，失败返回 `error`，可附 HTTP 状态与 Daemon 业务码。
@@ -49,7 +51,9 @@ Daemon 可能使用自签证书。客户端对用户自己配置的 Daemon REST�
 
 对象推送必须注册为对应的数据类接收。不要把对象载荷注册为 `String` 再自行解析，否则 GsonHubProtocol 可能静默丢弃参数。连接重试要带连接代际校验，旧连接关闭后不能继续写入当前状态。
 
-共享控制台优先调用 `ResumeConsole`。支持游标的 Daemon 返回历史批次，实时日志带 `streamId` 与 `sequence`。客户端合并、排序和去重，发现缺口时向宿主发出 `ConsoleEvent.Gap`。服务端明确表示该方法不存在时才回退到旧的 `JoinGroup`。旧版单参数日志没有来源标记，断线后的历史与实时日志可能重叠。
+共享控制台优先调用 `ResumeConsole`。支持游标的 Daemon 返回历史批次，实时日志带 `streamId` 与 `sequence`。客户端合并、排序和去重，发现缺口时向宿主发出 `ConsoleEvent.Gap`。服务端不支持该方法或回放超过上限时回退到 `JoinGroup`。回退时只缓存有限的历史尾部，丢弃日志时提示缺口。单条消息仍超过上限时结束连接并提示原因。旧版单参数日志没有来源标记，断线后的历史与实时日志可能重叠。
+
+SignalR 协商或 WebSocket 升级明确返回 401 或 403 时，共享客户端停止自动重试。控制台将状态码交给宿主显示鉴权或权限错误。
 
 `CommandResult` 表示 Daemon 提交结果，现有载荷没有请求 ID。面板只从日志提取显示数据。宿主负责绑定目标实例、授权和确认，重放日志或重连不会重发命令。插件文件约定见 [控制台插件 SDK](https://github.com/WLudy1012/rolithax-console-sdk)。
 

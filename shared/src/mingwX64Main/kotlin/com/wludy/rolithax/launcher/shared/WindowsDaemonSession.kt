@@ -182,8 +182,19 @@ internal class WindowsDaemonSession(
                 consoleLock.withLock eventLock@{
                     if (consoleOwner !== owner) return@eventLock
                     when (event) {
-                        ConsoleEvent.Connected -> consoleState.connected = true
+                        ConsoleEvent.Connected -> {
+                            consoleState.connected = true
+                            consoleState.error = null
+                        }
                         ConsoleEvent.Disconnected -> consoleState.connected = false
+                        is ConsoleEvent.AuthenticationFailed -> {
+                            consoleState.connected = false
+                            consoleState.error = if (event.httpStatus == 401) "控制台鉴权失败，请检查 API Key。" else "没有控制台访问权限。"
+                        }
+                        ConsoleEvent.OutputTooLarge -> {
+                            consoleState.connected = false
+                            consoleState.error = "控制台日志过大，无法继续接收。"
+                        }
                         ConsoleEvent.EulaRequired -> consoleState.eulaRequired = true
                         ConsoleEvent.Gap -> {
                             if (owner.workspace.markGap()) owner.panel = owner.workspace.snapshot()
@@ -322,6 +333,7 @@ private class ConsoleOwner(val id: Long, val epoch: Long) {
 
 private class ConsoleBuffer {
     var connected = false
+    var error: String? = null
     var eulaRequired = false
     private var sequence = 0L
     private val lines = ArrayDeque<Pair<Long, String>>()
@@ -332,13 +344,14 @@ private class ConsoleBuffer {
     }
 
     fun delta(after: Long, limit: Int, epoch: Long) = ConsoleDelta(
-        connected, eulaRequired, epoch, lines.firstOrNull()?.first ?: sequence + 1,
+        connected, error, eulaRequired, epoch, lines.firstOrNull()?.first ?: sequence + 1,
         lines.asSequence().filter { it.first > after }.take(limit).toList(),
     )
 }
 
 private data class ConsoleDelta(
     val connected: Boolean,
+    val error: String?,
     val eulaRequired: Boolean,
     val epoch: Long,
     val firstAvailableSequence: Long,
@@ -346,6 +359,7 @@ private data class ConsoleDelta(
 ) {
     fun payload(panel: ConsolePanelSnapshot?) = buildJsonObject {
         put("connected", connected)
+        error?.let { put("error", it) }
         put("eulaRequired", eulaRequired)
         put("streamEpoch", epoch)
         put("firstAvailableSequence", firstAvailableSequence)

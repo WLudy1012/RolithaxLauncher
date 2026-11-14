@@ -936,6 +936,9 @@ internal class DesktopController(private val scope: CoroutineScope) {
                     when (event) {
                         ConsoleEvent.Connected -> state = state.copy(consoleConnected = true)
                         ConsoleEvent.Disconnected -> state = state.copy(consoleConnected = false)
+                        is ConsoleEvent.AuthenticationFailed -> state = state.copy(consoleConnected = false, error =
+                            if (event.httpStatus == 401) "控制台鉴权失败，请检查 API Key。" else "没有控制台访问权限。")
+                        ConsoleEvent.OutputTooLarge -> state = state.copy(consoleConnected = false, error = "控制台日志过大，无法继续接收。")
                         ConsoleEvent.Gap -> addConsoleLine("控制台重连，部分日志可能缺失。")
                         is ConsoleEvent.Log -> addConsoleLine(event.line)
                         is ConsoleEvent.CommandResult -> addConsoleLine(event.message ?: if (event.success) "命令已发送" else "命令发送失败")

@@ -1,6 +1,7 @@
 package com.wludy.rolithax.launcher.data
 
 import com.google.gson.Gson
+import com.google.gson.JsonParseException
 import com.google.gson.reflect.TypeToken
 import com.wludy.rolithax.launcher.data.model.InstanceInfo
 import com.wludy.rolithax.launcher.data.model.InstanceSummary
@@ -44,11 +45,15 @@ import com.wludy.rolithax.launcher.shared.resourceTaskPayload
 import com.wludy.rolithax.launcher.shared.setPluginsModsWithMessage
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -56,6 +61,13 @@ import kotlinx.serialization.json.jsonObject
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
+
+internal class DaemonConnectionClosedException : IllegalStateException("Daemon 连接已关闭或切换")
 
 internal class SharedDaemonConnection(
     private val baseUrl: String,
@@ -75,27 +87,38 @@ internal class SharedDaemonConnection(
 
     private fun jsonObject(value: Any): JsonObject = Json.parseToJsonElement(gson.toJson(value)).jsonObject
 
-    suspend fun verify(): StatusData =
+    suspend fun verify(): StatusData = status()
+
+    suspend fun status(): StatusData =
         try {
-            request("Daemon 鉴权失败，请检查 API Key") {
-                val data = daemon.statusPayload()
-                    ?: throw IllegalStateException("Daemon 鉴权失败：未返回有效状态")
-                Gson().fromJson(data.toString(), StatusData::class.java)
-                    ?: throw IllegalStateException("Daemon 鉴权失败：未返回有效状态")
+            request("Daemon 返回了无效的状态响应") {
+                val data = daemon.statusPayload() ?: throw IllegalStateException("Daemon 未返回状态数据")
+                if (data !is JsonObject) throw IllegalStateException("Daemon 返回了无效的状态响应")
+                gson.fromJson(data.toString(), StatusData::class.java)
+                    ?: throw IllegalStateException("Daemon 返回了无效的状态响应")
             }
         } catch (e: IllegalStateException) {
-            val status = generateSequence<Throwable>(e) { it.cause }
-                .filterIsInstance<DaemonException>()
-                .firstOrNull()?.httpStatus
-            if (status == 401 || status == 403) {
-                throw IllegalStateException("Daemon 鉴权失败，请检查 API Key", e)
+            val response = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<DaemonException>().firstOrNull()
+                ?: throw e
+            val message = when (response.httpStatus ?: response.businessCode) {
+                401 -> "Daemon 鉴权失败，请检查 API Key"
+                403 -> response.serverMessage?.takeIf { it.isNotBlank() } ?: "Daemon 拒绝访问（403）"
+                else -> throw e
             }
-            throw e
+            throw IllegalStateException(message, e)
+        } catch (_: JsonParseException) {
+            throw IllegalStateException("Daemon 返回了无效的状态响应")
+        } catch (e: IOException) {
+            val cause = generateSequence<Throwable>(e) { it.cause }.toList()
+            val message = when {
+                cause.any { it is SSLException } -> "无法建立 Daemon 的 TLS 连接，请检查地址和 HTTPS 配置"
+                cause.any { it is SocketTimeoutException || it is HttpRequestTimeoutException } -> "Daemon 连接超时"
+                cause.any { it is UnknownHostException } -> "无法解析 Daemon 地址"
+                cause.any { it is ConnectException } -> "无法连接到 Daemon，请检查地址、端口和网络"
+                else -> "Daemon 网络连接失败"
+            }
+            throw IllegalStateException(message)
         }
-    suspend fun status(): StatusData = request("获取状态失败") {
-        val data = daemon.statusPayload() ?: throw IllegalStateException("返回数据为空")
-        Gson().fromJson(data.toString(), StatusData::class.java) ?: throw IllegalStateException("返回数据为空")
-    }
 
     suspend fun javaList(refresh: Boolean): List<LocalJava> = request("获取 Java 列表失败") {
         val data = daemon.javaListPayload(refresh) ?: return@request emptyList()
@@ -218,7 +241,7 @@ internal class SharedDaemonConnection(
         secrets.filterNotNull().filter { it.isNotEmpty() }.fold(message) { value, secret -> value.replace(secret, "***") }
 
     private suspend fun <T> request(fallback: String, secrets: List<String?> = emptyList(), block: suspend () -> T): T = coroutineScope {
-        val request = async {
+        val request = async(start = CoroutineStart.LAZY) {
             try {
                 block()
             } catch (e: DaemonException) {
@@ -232,7 +255,15 @@ internal class SharedDaemonConnection(
             }
         }
         val registration = lifetime.invokeOnCompletion { request.cancel() }
-        try { request.await() } finally { registration.dispose() }
+        try {
+            request.await()
+        } catch (e: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (lifetime.isCancelled) throw DaemonConnectionClosedException()
+            throw e
+        } finally {
+            registration.dispose()
+        }
     }
 
     suspend fun runConsole(

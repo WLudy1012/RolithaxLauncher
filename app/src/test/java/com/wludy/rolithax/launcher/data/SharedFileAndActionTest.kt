@@ -2,7 +2,7 @@ package com.wludy.rolithax.launcher.data
 
 import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -55,18 +55,17 @@ class SharedFileAndActionTest {
     }
 
     @Test
-    fun closingConnectionCancelsInFlightFileRead() = runBlocking {
+    fun closingConnectionReportsAnInterruptedFileRead() = runBlocking {
         val server = MockWebServer()
         server.start()
         server.enqueue(MockResponse().setBody("{}").setBodyDelay(4, TimeUnit.SECONDS))
         val original = OkHttpClient()
         val shared = SharedDaemonConnection(server.url("/").toString(), "", original)
         try {
-            val job = launch { shared.fileContent(42, "a") }
+            val request = async { runCatching { shared.fileContent(42, "a") } }
             assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
             shared.close()
-            withTimeout(5_000) { job.join() }
-            assertTrue(job.isCancelled)
+            assertTrue(withTimeout(5_000) { request.await().exceptionOrNull() } is DaemonConnectionClosedException)
         } finally {
             shared.close()
             original.dispatcher.executorService.shutdown()

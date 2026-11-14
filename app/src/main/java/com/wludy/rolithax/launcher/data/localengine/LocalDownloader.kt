@@ -38,6 +38,7 @@ object LocalDownloader {
         onProgress: (Float) -> Unit = {},
         allowedHosts: Set<String>? = null,
         maxBytes: Long? = null,
+        followRedirects: Boolean = true,
     ): File = withContext(Dispatchers.IO) {
         require(maxBytes == null || maxBytes > 0) { "下载大小限制无效" }
         val expected = expectedHash.trim().lowercase()
@@ -57,7 +58,11 @@ object LocalDownloader {
         try {
             repeat(3) { attempt ->
                 try {
-                    val response = if (allowedHosts == null) client.newCall(request).execute() else executeAllowed(requestUrl, allowedHosts)
+                    val response = when {
+                        !followRedirects -> redirectSafeClient.newCall(request).execute()
+                        allowedHosts != null -> executeAllowed(requestUrl, allowedHosts)
+                        else -> client.newCall(request).execute()
+                    }
                     response.use {
                         if (!response.isSuccessful) {
                             val retryable = response.code == 429 || response.code in 500..599

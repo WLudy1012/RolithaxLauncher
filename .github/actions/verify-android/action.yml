@@ -28,7 +28,6 @@ runs:
 
         required = {
             "AndroidManifest.xml",
-            "assets/jre/jre17-arm64-20210825-release.tar.xz",
             "assets/legal/THIRD_PARTY_NOTICES.md",
             "assets/legal/java-keyring-LICENSE.txt",
             "lib/arm64-v8a/librolithaxvm.so",
@@ -41,9 +40,12 @@ runs:
             (artifact,) = metadata["elements"]
             apk = output / artifact["outputFile"]
             with ZipFile(apk) as archive:
-                missing = required.difference(archive.namelist())
+                entries = archive.namelist()
+                missing = required.difference(entries)
                 if missing:
                     raise SystemExit(f"{apk} 缺少文件: {', '.join(sorted(missing))}")
+                if any(entry.startswith("assets/jre/") for entry in entries):
+                    raise SystemExit(f"{apk} 包含 JRE")
                 if damaged := archive.testzip():
                     raise SystemExit(f"{apk} 的文件损坏: {damaged}")
             print(f"{apk} 已通过内容校验")

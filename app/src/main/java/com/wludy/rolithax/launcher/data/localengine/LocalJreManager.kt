@@ -3,6 +3,7 @@ package com.wludy.rolithax.launcher.data.localengine
 import android.content.Context
 import android.os.Build
 import com.wludy.rolithax.launcher.data.AppLogger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
@@ -20,8 +21,7 @@ import java.util.zip.ZipInputStream
  * （bionic，arm64-v8a / x86_64），发行包为 `.tar.xz`，解包后根目录即 `bin/ lib/ conf/`
  * （Java 8 无 `conf/`、无 `lib/modules`，类库以 `.jar.pack` 形式分发）。
  *
- * 覆盖 Java 版本 8 / 17 / 21 / 25（见 [RUNTIMES]）。每个版本按 ABI 提供下载源，
- * 顺序为「项目自托管 CNB 镜像 → 外部镜像 / 上游 GitHub」；所有远端归档都必须配置 SHA-256。
+ * Java 8、17、21 和 25 按 ABI 从 Rolithax 仓库下载，安装前校验归档的 SHA-256。
  *
  * Java 8 特殊：归档为「universal（类库）+ bin-<abi>（二进制）」两个包，解开后还需把
  * `.jar.pack` 还原成 `.jar`（见 [AbiSpec.needsUnpack200]，由随 APK 安装的
@@ -33,40 +33,11 @@ import java.util.zip.ZipInputStream
  */
 object LocalJreManager {
 
-    /** 内嵌 assets 子目录（随 APK 打包的运行时归档）。 */
-    private const val ASSET_DIR = "jre"
-
-    /**
-     * CNB 镜像前缀（国内直连更快）：JRE 归档随 Release 一起挂载（见 .cnb.yml），
-     * 下载顺序 CNB 首选 → 其他镜像回退。**发新版本时必须同步这里的 tag**（否则旧 tag 上
-     * 只会有当时挂过的归档，新归档 404）。
-     */
-    private const val CNB_JRE_MIRROR_BASE =
-        "https://cnb.cool/WLudy/RolithaxLauncher/-/releases/download/v1.7.9-Beta"
-
-    /** 上游 PojavLauncher 多架构 OpenJDK 构建发布根（当前仅 jre17 为 Android 构建）。 */
-    private const val UPSTREAM_MULTIARCH =
-        "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download"
-
-    /** GitHub Release 附件前缀（由 .github/workflows/release.yml 与 tag 同名发布）。 */
-    private const val GITHUB_JRE_MIRROR_BASE =
-        "https://github.com/WLudy1012/RolithaxLauncher/releases/download/v1.7.9-Beta"
-
-    /**
-     * FCL 下载站镜像（作者自建的 Android/bionic JRE 归档，arm64）。
-     * 清单见 github 仓库 XiaoluoFoxington/FCL.downsite.NEW 的 `data/down/8/index.json`。
-     */
-    private const val FCL_JRE_MIRROR = "https://pan.huang1111.cn/f/eWkQI1"
-
-    /**
-     * ZalithLauncher 2 内置运行时归档根（Android/bionic，其仓库
-     * `ZalithLauncher/src/main/assets/runtimes/<jre-N>/`）：jsDelivr CDN 优先，GitHub raw 兜底。
-     * Java 8 归档来自这里（OpenJDK 8u442 的 bionic 构建，GPL 系列许可）。
-     */
-    private const val ZALITH_RUNTIME_CDN =
-        "https://cdn.jsdelivr.net/gh/ZalithLauncher/ZalithLauncher2@main/ZalithLauncher/src/main/assets/runtimes"
-    private const val ZALITH_RUNTIME_RAW =
-        "https://raw.githubusercontent.com/ZalithLauncher/ZalithLauncher2/main/ZalithLauncher/src/main/assets/runtimes"
+    private const val CNB_JRE_BASE =
+        "https://cnb.cool/WLudy/RolithaxLauncher/-/git/raw/main/runtimes/android"
+    private const val GITHUB_JRE_BASE =
+        "https://raw.githubusercontent.com/WLudy1012/RolithaxLauncher/main/runtimes/android"
+    private val jreHosts = setOf("cnb.cool", "raw.githubusercontent.com")
 
     /**
      * pack200 解包器（Java 8 类库还原用）。随 APK 的 jniLibs 分发（见 app/src/main/jniLibs），
@@ -75,12 +46,13 @@ object LocalJreManager {
      */
     private const val UNPACK200_LIB = "libunpack200.so"
 
-    /** 一个运行时归档：内嵌名 / 下载源（按序尝试）/ 必填 SHA-256。 */
     data class AbiArchive(
         val assetName: String,
-        val sources: List<String>,
-        val sha256: String = "",
-    )
+        val sha256: String,
+    ) {
+        internal val sources: List<String>
+            get() = listOf("$CNB_JRE_BASE/$assetName", "$GITHUB_JRE_BASE/$assetName")
+    }
 
     /**
      * 某个 ABI 的运行时规格：一个或多个归档 + 可选后处理。
@@ -94,14 +66,13 @@ object LocalJreManager {
      */
     data class AbiSpec(
         val assetName: String,
-        val sources: List<String>,
-        val sha256: String = "",
+        val sha256: String,
         val extraArchives: List<AbiArchive> = emptyList(),
         val needsUnpack200: Boolean = false,
     ) {
         /** 全部归档（主归档在前）。 */
         val allArchives: List<AbiArchive>
-            get() = listOf(AbiArchive(assetName, sources, sha256)) + extraArchives
+            get() = listOf(AbiArchive(assetName, sha256)) + extraArchives
     }
 
     /**
@@ -139,8 +110,7 @@ object LocalJreManager {
      * 归档取自 ZalithLauncher 2 内置运行时（OpenJDK 8u442 的 Android/bionic 构建，
      * GPL 系列许可；来源与构建见 ZalithLauncher2 仓库 runtimes/jre-8）：
      * `universal.tar.xz`（架构无关类库）+ `bin-<abi>.tar.xz`（平台二进制）。
-     * 解包后类库是 `.jar.pack`，由 [unpackPacks] 用内置 `libunpack200.so` 还原；
-     * 项目自托管 CNB / GitHub 镜像可挂同名归档（选传，404 自动跳到 Zalith 源）。
+     * 解包后类库是 `.jar.pack`，由 [unpackPacks] 用内置 `libunpack200.so` 还原。
      */
     val JRE8 = JavaRuntime(
         id = "jre8",
@@ -150,22 +120,10 @@ object LocalJreManager {
         specs = mapOf(
             "arm64-v8a" to AbiSpec(
                 assetName = "jre8-universal.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
-                    "$GITHUB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
-                    "$ZALITH_RUNTIME_CDN/jre-8/universal.tar.xz",
-                    "$ZALITH_RUNTIME_RAW/jre-8/universal.tar.xz",
-                ),
                 sha256 = "150072cfa1d9e037c31e4bf9770aa5470ae46d0bfefd366b7ce5b2f940ede3f3",
                 extraArchives = listOf(
                     AbiArchive(
                         assetName = "jre8-arm64-bin.tar.xz",
-                        sources = listOf(
-                            "$CNB_JRE_MIRROR_BASE/jre8-arm64-bin.tar.xz",
-                            "$GITHUB_JRE_MIRROR_BASE/jre8-arm64-bin.tar.xz",
-                            "$ZALITH_RUNTIME_CDN/jre-8/bin-arm64.tar.xz",
-                            "$ZALITH_RUNTIME_RAW/jre-8/bin-arm64.tar.xz",
-                        ),
                         sha256 = "deed9083a1047af1afaf2d7f1a2de4ae39fadf62c52881f075793e80274956cf",
                     ),
                 ),
@@ -173,22 +131,10 @@ object LocalJreManager {
             ),
             "x86_64" to AbiSpec(
                 assetName = "jre8-universal.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
-                    "$GITHUB_JRE_MIRROR_BASE/jre8-universal.tar.xz",
-                    "$ZALITH_RUNTIME_CDN/jre-8/universal.tar.xz",
-                    "$ZALITH_RUNTIME_RAW/jre-8/universal.tar.xz",
-                ),
                 sha256 = "150072cfa1d9e037c31e4bf9770aa5470ae46d0bfefd366b7ce5b2f940ede3f3",
                 extraArchives = listOf(
                     AbiArchive(
                         assetName = "jre8-x86_64-bin.tar.xz",
-                        sources = listOf(
-                            "$CNB_JRE_MIRROR_BASE/jre8-x86_64-bin.tar.xz",
-                            "$GITHUB_JRE_MIRROR_BASE/jre8-x86_64-bin.tar.xz",
-                            "$ZALITH_RUNTIME_CDN/jre-8/bin-x86_64.tar.xz",
-                            "$ZALITH_RUNTIME_RAW/jre-8/bin-x86_64.tar.xz",
-                        ),
                         sha256 = "37c3f7214ce3086575d7210baa25aee130d8db28c57739f598d24dfbfff32612",
                     ),
                 ),
@@ -206,18 +152,10 @@ object LocalJreManager {
         specs = mapOf(
             "arm64-v8a" to AbiSpec(
                 assetName = "jre17-arm64-20210825-release.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre17-arm64-20210825-release.tar.xz",
-                    "$UPSTREAM_MULTIARCH/jre17-ec28559/jre17-arm64-20210825-release.tar.xz",
-                ),
                 sha256 = "c64583ac2e0ec8857e43456fa9adcf482c6a8e454a7133173bf15692d2478b8d",
             ),
             "x86_64" to AbiSpec(
                 assetName = "jre17-x86_64-20210825-release.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre17-x86_64-20210825-release.tar.xz",
-                    "$UPSTREAM_MULTIARCH/jre17-ec28559/jre17-x86_64-20210825-release.tar.xz",
-                ),
                 sha256 = "ebbdf75ab864a83671a108032c30e67174f79cc19596cfc1d7bfb71be26b6e71",
             ),
         ),
@@ -226,10 +164,7 @@ object LocalJreManager {
     /**
      * Java 21（Paper 1.20.5+ / 1.21 需要，arm64）。
      *
-     * 归档取自 FCL 下载站（bionic Android 构建，已核对 ELF：e_machine=183 AArch64、
-     * 解释器 `/system/bin/linker64`），本地 `Get-FileHash` 得到 SHA-256 后固定；
-     * 下载顺序：项目自托管 CNB 镜像 → GitHub Release（两条流水线都会挂同名附件）
-     * → FCL 直链。该上游不提供 x86_64 构建，故只注册 arm64-v8a。
+     * FCL 的 Android/bionic 构建只有 arm64-v8a。
      */
     val JRE21 = JavaRuntime(
         id = "jre21",
@@ -239,11 +174,6 @@ object LocalJreManager {
         specs = mapOf(
             "arm64-v8a" to AbiSpec(
                 assetName = "jre21-arm64-20260223-release.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre21-arm64-20260223-release.tar.xz",
-                    "$GITHUB_JRE_MIRROR_BASE/jre21-arm64-20260223-release.tar.xz",
-                    "$FCL_JRE_MIRROR/jre21-arm64-20260223-release.tar.xz",
-                ),
                 sha256 = "d055fc953771e6cfd2206ef770ca675d69b5e4cfd9f3f1e6820ba5820c3cc1dc",
             ),
         ),
@@ -252,10 +182,7 @@ object LocalJreManager {
     /**
      * Java 25（Minecraft 26.x 及以后，arm64）。
      *
-     * 归档取自 FCL 下载站（bionic Android 构建，已核对 ELF：e_machine=183 AArch64、
-     * 解释器 `/system/bin/linker64`、`lib/modules` 存在），本地 `Get-FileHash` 得到
-     * SHA-256 后固定；下载顺序：项目自托管 CNB 镜像 → GitHub Release → FCL 直链。
-     * 该上游不提供 x86_64 构建，故只注册 arm64-v8a。
+     * FCL 的 Android/bionic 构建只有 arm64-v8a。
      */
     val JRE25 = JavaRuntime(
         id = "jre25",
@@ -265,11 +192,6 @@ object LocalJreManager {
         specs = mapOf(
             "arm64-v8a" to AbiSpec(
                 assetName = "jre25-arm64-20260223-release.tar.xz",
-                sources = listOf(
-                    "$CNB_JRE_MIRROR_BASE/jre25-arm64-20260223-release.tar.xz",
-                    "$GITHUB_JRE_MIRROR_BASE/jre25-arm64-20260223-release.tar.xz",
-                    "$FCL_JRE_MIRROR/jre25-arm64-20260223-release.tar.xz",
-                ),
                 sha256 = "0fdf6d19fe66ea61c12caa24bd655227ddb0d7d9c16c0f13281a7c2878635286",
             ),
         ),
@@ -278,7 +200,7 @@ object LocalJreManager {
     /** 全部受支持运行时（按版本升序）。 */
     val RUNTIMES: List<JavaRuntime> = listOf(JRE8, JRE17, JRE21, JRE25)
 
-    /** 默认运行时（离线内嵌、最稳）。 */
+    /** 默认运行时。 */
     val DEFAULT_RUNTIME: JavaRuntime = JRE17
 
     // —— 向后兼容常量（旧代码引用；等价于 DEFAULT_RUNTIME）——
@@ -359,12 +281,6 @@ object LocalJreManager {
     /** 某 ABI 是否有可用运行时（用于判断本机开服是否被设备支持）。 */
     fun isAbiSupported(abi: String = currentAbi()): Boolean = availableRuntimes(abi).isNotEmpty()
 
-    /** 该运行时/ABI 的归档是否随 APK 内嵌（UI 显示"内嵌 / 需下载"）。 */
-    fun hasEmbeddedAsset(context: Context, runtime: JavaRuntime, abi: String = currentAbi()): Boolean {
-        val spec = runtime.spec(abi) ?: return false
-        return context.assets.list(ASSET_DIR).orEmpty().any { it == spec.assetName }
-    }
-
     /** JRE 安装根目录（= java.home 的候选根）：`<数据目录>/runtime/<id>`。 */
     fun jreHome(context: Context, runtime: JavaRuntime): File = LocalStorage.jreHome(context, runtime.id)
 
@@ -435,8 +351,7 @@ object LocalJreManager {
     }
 
     /**
-     * 安装（或修复）指定运行时：优先 assets 内嵌归档，其次按预设源下载；
-     * 必须配置 SHA-256；校验通过后再进行结构检查。
+     * 从项目仓库下载并安装运行时，检查 SHA-256 和运行时目录结构。
      * 失败会清理半成品目录，绝不留下"看起来装好了"的残缺运行时。
      */
     suspend fun install(
@@ -471,7 +386,7 @@ object LocalJreManager {
                 }
                 markerFile(context, runtime).writeText(
                     "${runtime.id}/${abi}\n" +
-                        spec.allArchives.joinToString(";") { it.sha256.ifBlank { "unverified" } } + "\n",
+                        spec.allArchives.joinToString(";") { it.sha256 } + "\n",
                 )
             } catch (e: Exception) {
                 home.deleteRecursively()
@@ -482,16 +397,6 @@ object LocalJreManager {
         jreHome(context, runtime)
     }
 
-    /** 内嵌归档：存在则返回 (流工厂, 长度)，否则 null。 */
-    private fun embeddedArchive(context: Context, assetName: String): Pair<() -> InputStream, Long>? {
-        val assets = context.assets.list(ASSET_DIR).orEmpty()
-        if (assets.none { it == assetName }) return null
-        val path = "$ASSET_DIR/$assetName"
-        val length = runCatching { context.assets.openFd(path).length }.getOrDefault(-1L)
-        return { context.assets.open(path) } to length
-    }
-
-    /** 安装单个归档：内嵌 assets 优先，其次按源下载；[onProgress] 覆盖该归档的 0→1。 */
     private suspend fun installArchive(
         context: Context,
         runtime: JavaRuntime,
@@ -499,26 +404,30 @@ object LocalJreManager {
         home: File,
         onProgress: (Float) -> Unit,
     ) {
-        val embedded = embeddedArchive(context, archive.assetName)
-        if (embedded != null) {
-            AppLogger.i("LocalJre", "从内嵌 assets 安装 ${runtime.label}：${archive.assetName}")
-            extractAndVerify(embedded.first, embedded.second, archive, home, runtime, onProgress)
-            return
-        }
-        if (archive.sha256.isBlank()) throw IllegalStateException("${runtime.label} 未配置 SHA-256，拒绝下载")
         val tmp = File(context.cacheDir, archive.assetName)
         var lastError: Throwable? = null
         var done = false
         for (url in archive.sources) {
             try {
                 AppLogger.i("LocalJre", "下载 ${runtime.label} 运行时：$url")
-                LocalDownloader.download(url, tmp, archive.sha256) { onProgress(it * 0.5f) }
+                LocalDownloader.downloadVerified(
+                    url,
+                    tmp,
+                    archive.sha256,
+                    "SHA-256",
+                    onProgress = { onProgress(it * 0.5f) },
+                    allowedHosts = jreHosts,
+                    followRedirects = false,
+                )
                 onProgress(0.5f)
                 extractAndVerify({ FileInputStream(tmp) }, tmp.length(), archive, home, runtime) { p ->
                     onProgress(0.5f + p * 0.5f)
                 }
                 done = true
                 break
+            } catch (e: CancellationException) {
+                tmp.delete()
+                throw e
             } catch (e: Exception) {
                 lastError = e
                 AppLogger.w("LocalJre", "运行时下载源失败，尝试下一个：$url", e)
@@ -528,8 +437,7 @@ object LocalJreManager {
         tmp.delete()
         if (!done) {
             throw IllegalStateException(
-                "所有下载源均失败（已尝试 ${archive.sources.size} 个源，最后：${lastError?.message ?: "未知错误"}）。" +
-                    "若为 404，说明该运行时归档尚未上传到镜像，请按 fetch-jre-assets.ps1 流程补齐并重填 SHA-256。",
+                "无法从 Rolithax 仓库下载 ${runtime.label}（${lastError?.message ?: "未知错误"}）。请检查网络后重试。",
                 lastError,
             )
         }

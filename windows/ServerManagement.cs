@@ -147,8 +147,10 @@ public sealed partial class MainWindow
 
     private void ShowUserShell(StackPanel body)
     {
-        body.Children.Add(Heading("用户管理", "在当前 Daemon 上管理账户和实例访问权限。"));
-        if (active is not { } node)
+        var node = active;
+        body.Children.Add(PageHeading("用户管理", "在当前 Daemon 上管理账户和实例访问权限。",
+            node is null ? null : Button("添加用户", () => RunAsync(() => EditUserAsync(node, null)), accent: true)));
+        if (node is null)
         {
             body.Children.Add(Card(Stack(Secondary("连接 Daemon 后可管理账户。"),
                 Button("管理连接", () => Navigate("connections"), accent: true))));
@@ -160,11 +162,9 @@ public sealed partial class MainWindow
             if (active is { } selected && selected != node)
                 _ = RunAsync(() => ShowUsersAsync(selected));
         };
-        body.Children.Add(picker);
-        body.Children.Add(Actions(Button("添加用户", () => RunAsync(() => EditUserAsync(node, null)), accent: true),
-            Button("刷新", () => RunAsync(() => ShowUsersAsync(node)))));
-        userResults = new StackPanel { Spacing = 10 };
-        body.Children.Add(userResults);
+        body.Children.Add(Card(AdaptivePair(picker, Button("刷新", () => RunAsync(() => ShowUsersAsync(node))), 480)));
+        userResults = Section("Daemon 用户", Secondary("正在读取用户…"));
+        body.Children.Add(Card(userResults));
     }
 
     private async Task ShowUsersAsync(Node node)
@@ -174,17 +174,18 @@ public sealed partial class MainWindow
         if (closed || active != node || page != "users" || target is null || userResults != target)
             return;
         target.Children.Clear();
+        var rows = Section($"Daemon 用户 · {users.Length}");
+        target.Children.Add(rows);
         if (users.Length == 0)
-            target.Children.Add(Card(Secondary("Daemon 没有返回用户。")));
+            rows.Children.Add(Secondary("Daemon 没有返回用户。"));
         foreach (var user in users)
         {
             var username = user.Field("username").StringValue();
             var name = user.Field("name").StringValue(username);
             var role = user.Field("role").StringValue();
-            target.Children.Add(Card(Stack(Text(name, "BodyStrongTextBlockStyle"),
-                Secondary($"{username}  ·  {(role == "admin" ? "管理员" : "普通用户")}"),
+            rows.Children.Add(Entry(name, $"{username}  ·  {(role == "admin" ? "管理员" : "普通用户")}",
                 Actions(Button("编辑", () => RunAsync(() => EditUserAsync(node, user))),
-                    Button("删除", () => RunAsync(() => DeleteUserAsync(node, user)))))));
+                    Button("删除", () => RunAsync(() => DeleteUserAsync(node, user))))));
         }
     }
 
@@ -199,7 +200,8 @@ public sealed partial class MainWindow
         var reset = new CheckBox { Content = "重置 API Key", Visibility = previous.HasValue ? Visibility.Visible : Visibility.Collapsed };
         var currentResources = existing.Field("resources").Items().Select(item => item.StringValue()).ToHashSet(StringComparer.Ordinal);
         var knownResources = new List<(string Name, CheckBox Control)>();
-        var resourceFields = Stack(Secondary("允许访问的服务器"));
+        var resourceFields = Stack(Secondary(node.ServerListWarning is null
+            ? "允许访问的服务器" : "服务器列表不可用，已保留现有服务器权限。"));
         foreach (var server in node.Servers)
         {
             var key = "server:" + server.Id.ToString(CultureInfo.InvariantCulture);

@@ -9,6 +9,7 @@ Daemon 连接凭据使用 Android Keystore 支持的 AES-GCM 加密后写入 Dat
 ## 网络安全
 
 - Daemon 地址默认使用 HTTPS；明文 HTTP 只有在用户明确确认并且属于可信内网时才可用。
+- Android 扫描 HTTP 配对码时，先确认风险，再向二维码中的 Daemon 地址发起兑换。旧配对凭据只用于协议、主机、端口和路径一致的地址，Daemon 客户端禁用自动重定向。
 - Daemon 自签证书信任只作用于用户配置的 Daemon，不扩展到 MSLAPI、GitHub 或其他公共 API。
 - HTTP 日志只记录方法、协议、主机、端口、状态码和耗时，不记录查询参数、完整请求头或响应正文。
 - API 错误需要脱敏后再展示和记录；地址、路径、Token、Bearer、Cookie、授权头和 API Key 统一脱敏。

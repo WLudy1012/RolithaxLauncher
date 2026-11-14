@@ -31,19 +31,7 @@ public sealed partial class MainWindow
         type.Header = "类型";
         var version = new TextBox { Header = "Minecraft 版本", PlaceholderText = "例如 1.21.8", Text = criteria?.GameVersion ?? "" };
         var loader = new TextBox { Header = "服务端或加载器", PlaceholderText = "例如 paper、fabric", Text = criteria?.Loader ?? "" };
-        var form = new Grid { ColumnSpacing = 12, RowSpacing = 8 };
-        form.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        form.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        form.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        form.Children.Add(search);
-        Grid.SetColumn(type, 1);
-        form.Children.Add(type);
-        Grid.SetRow(version, 1);
-        form.Children.Add(version);
-        Grid.SetRow(loader, 1);
-        Grid.SetColumn(loader, 1);
-        form.Children.Add(loader);
+        var form = AdaptivePair(Stack(search, version), Stack(type, loader), 480, equalColumns: true);
 
         var results = new StackPanel { Spacing = 8 };
         var taskPanel = new StackPanel { Spacing = 8 };
@@ -57,18 +45,18 @@ public sealed partial class MainWindow
             state.Search = request;
             ShowResources(node, server);
         }), accent: true);
-        SetWorkspace(Heading("资源", $"搜索 Modrinth，将兼容插件或模组安装到 {server.Name}。"),
-            Card(Stack(form, searchButton)), taskPanel, results);
+        SetWorkspace(Card(Section("资源", Secondary($"从 Modrinth 安装到 {server.Name}"), form, searchButton)), taskPanel, results);
         if (criteria is not null && state.Projects.Length == 0)
             results.Children.Add(Card(Secondary("没有找到兼容资源。请核对 Minecraft 版本和加载器。")));
         foreach (var item in state.Projects)
         {
             var title = item.Field("title").StringValue();
             var author = item.Field("author").StringValue();
-            results.Children.Add(Card(Stack(Text(title, "BodyStrongTextBlockStyle"),
+            var info = CompactStack(Text(title, "BodyStrongTextBlockStyle"),
                 Secondary(author.Length == 0 ? item.Field("description").StringValue()
-                    : $"{author}  ·  {item.Field("description").StringValue()}"),
-                Button("查看兼容版本", () => RunAsync(() => SelectResourceVersionAsync(node, server, state, item))))));
+                    : $"{author}  ·  {item.Field("description").StringValue()}"));
+            var versions = Button("查看兼容版本", () => RunAsync(() => SelectResourceVersionAsync(node, server, state, item)));
+            results.Children.Add(Card(AdaptivePair(info, versions, 480)));
         }
         resourceTaskView = task =>
         {

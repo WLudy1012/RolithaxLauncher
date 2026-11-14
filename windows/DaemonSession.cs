@@ -4,7 +4,10 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Rolithax.Windows;
 
-internal sealed class DaemonException(string message) : Exception(message);
+internal sealed class DaemonException(string message, int status = 0) : Exception(message)
+{
+    public int Status { get; } = status;
+}
 
 internal sealed class DaemonSession : IDisposable
 {
@@ -54,7 +57,10 @@ internal sealed class DaemonSession : IDisposable
                     : root.Field("error").StringValue("Daemon 请求失败。");
                 if (!string.IsNullOrEmpty(secret))
                     message = message.Replace(secret, "[已隐藏]", StringComparison.Ordinal);
-                throw new DaemonException(message.Length > 400 ? "Daemon 请求失败。" : message);
+                var status = (int)root.Field("httpStatus").LongValue();
+                if (status == 0)
+                    status = (int)root.Field("businessCode").LongValue();
+                throw new DaemonException(message.Length > 400 ? "Daemon 请求失败。" : message, status);
             }
             return root.Field("data").Clone();
         }

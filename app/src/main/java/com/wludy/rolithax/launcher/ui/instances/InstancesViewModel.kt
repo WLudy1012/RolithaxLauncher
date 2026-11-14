@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.data.AppLogger
+import com.wludy.rolithax.launcher.data.DaemonConnectionClosedException
 import com.wludy.rolithax.launcher.data.DaemonOption
 import com.wludy.rolithax.launcher.data.InstanceIcons
 import com.wludy.rolithax.launcher.data.InstancePinStore
@@ -81,48 +82,44 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
         if (_state.value.deleting) return
         _state.update { it.copy(deleting = true, deleteError = null) }
         viewModelScope.launch {
-            if (server.isLocal) {
-                val dir = server.localDirName
-                if (dir.isNullOrBlank()) {
-                    _state.update { it.copy(deleting = false, deleteError = "无法确定实例目录") }
-                    return@launch
+            try {
+                val result = if (server.isLocal) {
+                    val dir = server.localDirName
+                    if (dir.isNullOrBlank()) {
+                        _state.update { it.copy(deleteError = "无法确定实例目录") }
+                        return@launch
+                    }
+                    if (LocalServerRuntime.isRunningOrStarting(dir)) {
+                        _state.update { it.copy(deleteError = "本地实例正在启动或运行，请停止后再删除") }
+                        return@launch
+                    }
+                    LocalInstanceStore.delete(getApplication(), dir)
+                } else {
+                    val ref = server.ref
+                    val id = server.remoteId
+                    if (ref == null || id == null) {
+                        _state.update { it.copy(deleteError = "无法确定实例归属的服务端") }
+                        return@launch
+                    }
+                    val repository = container.ensureRepository(ref.daemonId)
+                    if (repository == null) {
+                        _state.update { it.copy(deleteError = "该实例所属服务端已不存在，请先检查连接配置") }
+                        return@launch
+                    }
+                    repository.deleteInstance(id, deleteFiles)
                 }
-                if (LocalServerRuntime.isRunningOrStarting(dir)) {
-                    _state.update { it.copy(deleting = false, deleteError = "本地实例正在启动或运行，请停止后再删除") }
-                    return@launch
-                }
-                LocalInstanceStore.delete(getApplication(), dir).fold(
+                result.fold(
                     onSuccess = {
-                        _state.update { it.copy(deleting = false, deleteError = null) }
+                        _state.update { it.copy(deleteError = null) }
                         onDone()
                         refresh()
                     },
                     onFailure = { e ->
-                        _state.update { it.copy(deleting = false, deleteError = e.message ?: "删除失败") }
+                        _state.update { it.copy(deleteError = operationFailure(e, "删除失败")) }
                     },
                 )
-            } else {
-                val ref = server.ref
-                val id = server.remoteId
-                if (ref == null || id == null) {
-                    _state.update { it.copy(deleting = false, deleteError = "无法确定实例归属的服务端") }
-                    return@launch
-                }
-                val repository = container.ensureRepository(ref.daemonId)
-                if (repository == null) {
-                    _state.update { it.copy(deleting = false, deleteError = "该实例所属服务端已不存在，请先检查连接配置") }
-                    return@launch
-                }
-                repository.deleteInstance(id, deleteFiles).fold(
-                    onSuccess = {
-                        _state.update { it.copy(deleting = false, deleteError = null) }
-                        onDone()
-                        refresh()
-                    },
-                    onFailure = { e ->
-                        _state.update { it.copy(deleting = false, deleteError = e.message ?: "删除失败") }
-                    },
-                )
+            } finally {
+                _state.update { it.copy(deleting = false) }
             }
         }
     }
@@ -139,18 +136,21 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
         if (server.key in _state.value.busyKeys) return
         _state.update { it.copy(busyKeys = it.busyKeys + server.key, actionMessage = null) }
         viewModelScope.launch {
-            val result = runCatchingWithBusy(server, start)
-            _state.update { it.copy(busyKeys = it.busyKeys - server.key) }
-            result.fold(
-                onSuccess = { message ->
-                    _state.update { it.copy(actionMessage = message) }
-                    refresh()
-                },
-                onFailure = { e ->
-                    AppLogger.w("Instances", "实例操作失败：${server.name}", e)
-                    _state.update { it.copy(actionMessage = e.message ?: "操作失败") }
-                },
-            )
+            try {
+                val result = runCatchingWithBusy(server, start)
+                result.fold(
+                    onSuccess = { message ->
+                        _state.update { it.copy(actionMessage = message) }
+                        refresh()
+                    },
+                    onFailure = { e ->
+                        AppLogger.w("Instances", "实例操作失败：${server.name}", e)
+                        _state.update { it.copy(actionMessage = operationFailure(e, "操作失败")) }
+                    },
+                )
+            } finally {
+                _state.update { it.copy(busyKeys = it.busyKeys - server.key) }
+            }
         }
     }
 
@@ -172,10 +172,18 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
         _state.update { it.copy(stoppingAll = true, busyKeys = it.busyKeys + keys, actionMessage = null) }
         viewModelScope.launch {
             val failed = mutableListOf<String>()
+            val unknown = mutableListOf<String>()
+            var skipped = 0
             try {
-                targets.forEach { server ->
-                    runCatchingWithBusy(server, start = false)
-                        .onFailure { failed += "${server.name}（${server.sourceLabel}）" }
+                for ((index, server) in targets.withIndex()) {
+                    val error = runCatchingWithBusy(server, start = false).exceptionOrNull() ?: continue
+                    val target = "${server.name}（${server.sourceLabel}）"
+                    if (error is DaemonConnectionClosedException) {
+                        unknown += target
+                        skipped = targets.size - index - 1
+                        break
+                    }
+                    failed += target
                 }
             } finally {
                 _state.update { it.copy(stoppingAll = false, busyKeys = it.busyKeys - keys) }
@@ -183,6 +191,9 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
             _state.update {
                 it.copy(
                     actionMessage = when {
+                        unknown.isNotEmpty() -> "部分操作结果未知，请刷新确认：${unknown.joinToString("、")}" +
+                            (if (failed.isEmpty()) "" else "；失败：${failed.joinToString("、")}") +
+                            (if (skipped == 0) "" else "；$skipped 个实例未发送停止命令")
                         failed.isEmpty() -> "已向 ${targets.size} 个实例发送停止命令"
                         failed.size == targets.size -> "全部停止失败：${failed.joinToString("、")}"
                         else -> "已发送 ${targets.size - failed.size} 个停止命令，失败：${failed.joinToString("、")}"
@@ -192,6 +203,10 @@ class InstancesViewModel(application: Application) : AndroidViewModel(applicatio
             refresh()
         }
     }
+
+    private fun operationFailure(error: Throwable, fallback: String): String =
+        if (error is DaemonConnectionClosedException) "Daemon 连接已切换，操作结果未知，请刷新确认"
+        else error.message ?: fallback
 
     /** 下发一次启停，返回可直接展示的结果文案；失败以异常抛出。 */
     private suspend fun runCatchingWithBusy(server: ManagedServer, start: Boolean): Result<String> {

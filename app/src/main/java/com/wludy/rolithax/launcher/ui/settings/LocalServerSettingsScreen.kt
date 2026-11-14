@@ -127,8 +127,7 @@ fun LocalServerSettingsScreen(
                                 Text(
                                     when {
                                         !rt.supported -> rt.unavailableReason.ifBlank { "暂无 Android 构建" }
-                                        rt.installed -> "已安装${if (rt.embedded) " · 内嵌" else ""}"
-                                        rt.embedded -> "未安装 · 可离线安装（内嵌）"
+                                        rt.installed -> "已安装"
                                         else -> "未安装 · 需下载"
                                     },
                                     style = MaterialTheme.typography.bodySmall,

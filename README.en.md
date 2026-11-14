@@ -25,27 +25,28 @@ This app integrates the MSLAPI download service: **本服务由MSL开服器提�
 
 ## Download
 
-Android releases are available from [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) or the [CNB mirror](https://cnb.cool/WLudy/RolithaxLauncher/-/releases) (faster in mainland China). Every Android release ships two packages:
+Choose your platform in [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases). Android APKs are also available from the [CNB mirror](https://cnb.cool/WLudy/RolithaxLauncher/-/releases).
 
 | Package | Description |
 | --- | --- |
-| `app-release.apk` (full) | Bundles a Java 17 runtime, so local hosting works offline |
-| `app-release-lite.apk` (lite) | Smaller; the first local server needs a ~36 MB runtime download |
+| `RolithaxLauncher.apk` | Android installer. Local hosting downloads a JRE on first use |
+| `RolithaxLauncher-Windows-x64-Setup.exe` | Offline Windows x64 installer with bundled runtimes |
+| `RolithaxLauncher-Linux.tar.gz` | Linux x64 archive. Extract it and run `RolithaxLauncher/bin/RolithaxLauncher` |
 
-Both are signed with the same key and can be installed over each other. The app can also check for and install updates itself, see [Updates and versioning](#updates-and-versioning).
+The Android APK is signed with v2 and v3. The app can install its own updates. See [Updates and versioning](#updates-and-versioning).
 
 ## Platforms and migration scope
 
 | Platform | Current scope | Validation boundary |
 | --- | --- | --- |
 | Android | Remote management, local hosting and Resource Center | Existing capabilities remain; some remote calls now use the shared layer |
-| [Windows](windows/README.md) | Multiple Daemons, instance control, console, files, settings, plugins and users | x64 development build with a C ABI to the Kotlin/Native client |
-| [Linux](desktop/README.md) | Multiple Daemons, instance control, console, files, settings, resources and users | Compose Desktop development build |
+| [Windows](windows/README.md) | Multiple Daemons, instance control, console, files, settings, plugins and users | x64 with a C ABI to the Kotlin/Native client |
+| [Linux](desktop/README.md) | Multiple Daemons, instance control, console, files, settings, resources and users | x64 with Compose Desktop |
 | [HarmonyOS NEXT](harmony/README.md) | Saved Daemons, instance search and control, console and files | Native ARM64 project. HAP packaging and device testing are pending |
 
 The Windows workspace takes layout cues from MSLX and uses an independent WinUI 3 implementation. The feature list below primarily describes Android.
 
-Desktop development packages are available as artifacts of successful [desktop CI runs](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml). These are CI artifacts rather than formal Releases. See [desktop/README.md](desktop/README.md) for usage and build instructions.
+Desktop development packages are available from successful [desktop CI runs](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml).
 
 ## Features
 
@@ -105,11 +106,11 @@ You can install several Java runtimes in Settings and choose one per instance. A
 | Game version | Suggested runtime |
 | --- | --- |
 | 1.16 and below | Java 8 |
-| 1.17 – 1.20.4 | Java 17 (bundled in the full build) |
+| 1.17 – 1.20.4 | Java 17 |
 | 1.20.5+ | Java 21 |
 | 26.x+ | Java 25 |
 
-Every runtime is SHA-256 verified. Downloads fall back from the CNB mirror to GitHub Releases to the upstream source, and fail closed when no trusted digest is available. A foreground service with a persistent notification keeps the server alive, and you can stop it from the notification.
+Android runtimes are stored in [`runtimes/android`](runtimes/android). The app downloads from the CNB mirror first, falls back to GitHub, and verifies SHA-256 before installation. A foreground service keeps the server running, and you can stop it from the notification.
 
 ## Security
 
@@ -135,11 +136,10 @@ Requirements: JDK 17+, Android SDK Platform 35, NDK 28.2.13676358.
 ./gradlew :app:testDebugUnitTest      # unit tests
 ./gradlew assembleDebug               # debug APK
 ./gradlew assembleRelease             # signed release, needs keystore.properties
-./gradlew assembleRelease -PwithoutJre=true   # lite build without the bundled JRE
 ```
 
 The first sync needs network access. In mainland China, set `MSLX_MAVEN_GOOGLE_MIRROR` and `MSLX_MAVEN_CENTRAL_MIRROR` to use mirror repositories.
-Fetch the bundled JRE with `fetch-jre-assets.ps1` and rebuild the `LD_PRELOAD` shim with `build-shim.ps1`.
+On Windows, `pack-release.ps1` builds and verifies `build/dist/RolithaxLauncher.apk`. See the [signing configuration](develop/agent/delivery.md#签名配置). Rebuild the `LD_PRELOAD` shim with `build-shim.ps1`.
 
 Use JDK 21 for Linux desktop packaging. Linux UI tests require a display session or Xvfb. The native Windows build uses .NET 10 and Kotlin/Native. See the [Windows build instructions](windows/README.md).
 

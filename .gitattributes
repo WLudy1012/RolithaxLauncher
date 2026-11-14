@@ -1,6 +1,6 @@
 # 二进制产物：禁止任何换行符转换。
 # 维护者机器上 core.autocrlf=true，若 git 把这些文件误判为文本，checkout 时会改写字节 ——
-# 内嵌 JRE 归档会直接解不开、LD_PRELOAD 垫片会加载失败（且只在克隆端复现，最难查）。
+# JRE 归档和 LD_PRELOAD 垫片需要保留原始字节。
 *.so binary
 *.aar binary
 *.jar binary
@@ -20,3 +20,4 @@
 *.sh text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+runtimes/android/SHA256SUMS.txt text eol=lf

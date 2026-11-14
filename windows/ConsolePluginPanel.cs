@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Windows.Storage.Pickers;
 
 namespace Rolithax.Windows;
@@ -24,9 +25,12 @@ public sealed partial class MainWindow
         public StackPanel Body { get; } = new() { Spacing = 12 };
         public List<Action<ConsolePanelSnapshot>> Bindings { get; } = [];
         public long? PackageRevision { get; set; }
+        public TextBlock? Status { get; set; }
 
         public void Refresh()
         {
+            if (Status is { } status)
+                status.Text = ConsoleConnectionStatus(run);
             if (run.Panel is not { } snapshot)
                 return;
             foreach (var apply in Bindings)
@@ -43,13 +47,14 @@ public sealed partial class MainWindow
         var view = new ConsolePluginView(run);
         consolePluginView = view;
         BuildConsolePluginView(run, view);
-        return new ScrollViewer { Content = view.Body };
+        return new ScrollViewer { Content = view.Body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
     }
 
     private void BuildConsolePluginView(ConsoleRun run, ConsolePluginView view)
     {
         view.Body.Children.Clear();
         view.Bindings.Clear();
+        view.Status = null;
         view.PackageRevision = run.Panel?.PackageRevision;
         if (run.Epoch == 0)
         {
@@ -57,23 +62,21 @@ public sealed partial class MainWindow
             return;
         }
 
-        var status = Secondary(ConsoleConnectionStatus(run));
+        var status = view.Status = Secondary(ConsoleConnectionStatus(run));
         var import = Button("导入面板插件", () => RunAsync(() => ImportConsolePanelAsync(run)));
         var restore = Button("恢复内置面板", () => RunAsync(() => RestoreConsolePanelAsync(run)));
         restore.IsEnabled = run.ImportedPanel;
-        var description = (run.ImportedPanel, run.AllowedPanelCommands.Count) switch
+        var source = (run.ImportedPanel, run.AllowedPanelCommands.Count) switch
         {
-            (false, _) => "内置 Paper 面板从控制台日志提取信息。",
-            (true, 0) => "此实例已加载只读插件。面板数据来自控制台日志。",
-            _ => "此实例已加载本地插件。面板数据来自控制台日志。",
+            (false, _) => "内置面板",
+            (true, 0) => "本地插件 · 只读",
+            _ => "本地插件 · 已授予命令权限",
         };
-        view.Body.Children.Add(Stack(
-            Heading(run.Panel?.Title ?? "控制台面板", description),
-            status, Actions(import, restore)));
-        view.Bindings.Add(_ => status.Text = ConsoleConnectionStatus(run));
+        view.Body.Children.Add(Card(AdaptivePair(Section(run.Panel?.Title ?? "控制台面板", Secondary(source), status),
+            Actions(import, restore), 560)));
         if (run.Panel is not { } snapshot)
         {
-            view.Body.Children.Add(Card(Secondary("正在读取面板…")));
+            view.Body.Children.Add(Card(CompactStack(Secondary("正在读取面板…"), new ProgressBar { IsIndeterminate = true })));
             return;
         }
 
@@ -118,7 +121,8 @@ public sealed partial class MainWindow
             {
                 var evidence = Secondary(line);
                 evidence.IsTextSelectionEnabled = true;
-                content.Children.Add(Stack(Text(labels.GetValueOrDefault(field, field), "BodyStrongTextBlockStyle"), evidence));
+                evidence.FontFamily = new FontFamily("Cascadia Mono, Consolas");
+                content.Children.Add(CompactStack(Text(labels.GetValueOrDefault(field, field), "BodyStrongTextBlockStyle"), evidence));
             }
         });
         return new Expander
@@ -135,7 +139,7 @@ public sealed partial class MainWindow
         switch (node.Kind)
         {
             case "section":
-                var section = Stack(Text(node.Label, "SubtitleTextBlockStyle"));
+                var section = Section(node.Label);
                 foreach (var child in node.Children ?? [])
                     section.Children.Add(BuildPanelNode(run, view, child, revision));
                 return Card(section);
@@ -147,7 +151,7 @@ public sealed partial class MainWindow
                 {
                     value.Text = node.Field is { } field && snapshot.Values.TryGetValue(field, out var text) && text.Length > 0 ? text : "—";
                 });
-                return node.Field is null ? Text(node.Label) : Stack(Text(node.Label, "BodyStrongTextBlockStyle"), value);
+                return node.Field is null ? Text(node.Label) : CompactStack(Text(node.Label, "BodyStrongTextBlockStyle"), value);
 
             case "list":
                 var list = new ListView

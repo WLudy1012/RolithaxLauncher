@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -18,6 +17,7 @@ public sealed partial class MainWindow
         public long Epoch { get; } = epoch;
         public bool Polling { get; set; }
         public bool Connected { get; set; }
+        public string ConnectionError { get; set; } = "";
         public long LastSequence { get; set; }
         public List<string> Lines { get; } = [];
         public List<string> CommandHistory { get; } = [];
@@ -133,63 +133,123 @@ public sealed partial class MainWindow
 
     private Grid ServerWorkspace(Node node, Server server)
     {
-        var root = new Grid { Margin = new Thickness(28, 22, 28, 24), RowSpacing = 12 };
+        var root = new Grid { Margin = new Thickness(24, 20, 24, 24), RowSpacing = 12 };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var primary = Button(server.Status == 0 ? "启动" : "停止",
-            () => RunAsync(() => ServerActionAsync(node, server, server.Status == 0 ? "start" : "stop")), accent: server.Status == 0);
-        primary.IsEnabled = server.Status is 0 or 2;
-        var restart = Button("重启", () => RunAsync(() => ServerActionAsync(node, server, "restart")));
-        restart.IsEnabled = server.Status == 2;
-        var backup = Button("备份", () => RunAsync(() => ServerActionAsync(node, server, "backup")));
-        backup.IsEnabled = server.Status == 2;
-        var more = new DropDownButton { Content = "更多" };
-        var flyout = new MenuFlyout();
-        var force = new MenuFlyoutItem { Text = "强制停止", IsEnabled = server.Status != 0 };
-        force.Click += async (_, _) => await RunAsync(() => ServerActionAsync(node, server, "forceExit"));
-        var remove = new MenuFlyoutItem { Text = "删除服务器", IsEnabled = server.Status == 0 };
-        remove.Click += async (_, _) => await RunAsync(() => DeleteServerAsync(node, server));
-        flyout.Items.Add(force);
-        flyout.Items.Add(remove);
-        more.Flyout = flyout;
-        root.Children.Add(Stack(
-            Button("‹  返回服务器列表", () => { LeaveServer(); Render(); }),
-            Heading(server.Name, $"{node.Connection.Name}  ·  {server.StatusText}  ·  #{server.Id}"),
-            Actions(primary, restart, backup, more, Button("刷新状态", () => RunAsync(async () =>
-            {
-                await RefreshAsync(node);
-                if (selectedServer is { } refreshed)
-                    await ChangeTabAsync(node, refreshed, tab);
-                else
-                    Render();
-            })))));
-        var selector = new SelectorBar();
+        var back = new HyperlinkButton { Content = "‹  服务器", Padding = new Thickness(0, 4, 2, 4) };
+        AutomationProperties.SetName(back, "返回服务器列表");
+        back.Click += (_, _) => { LeaveServer(); Render(); };
+        var nodeName = Secondary($"/  {node.Connection.Name}");
+        nodeName.VerticalAlignment = VerticalAlignment.Center;
+        nodeName.TextWrapping = TextWrapping.NoWrap;
+        nodeName.TextTrimming = TextTrimming.CharacterEllipsis;
+        var breadcrumb = new Grid { ColumnSpacing = 6 };
+        breadcrumb.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        breadcrumb.ColumnDefinitions.Add(new ColumnDefinition());
+        breadcrumb.Children.Add(back);
+        Grid.SetColumn(nodeName, 1);
+        breadcrumb.Children.Add(nodeName);
+        var title = Heading(server.Name, ServerDetail(server));
+        var titleText = (TextBlock)title.Children[0];
+        root.Children.Add(CompactStack(breadcrumb, title));
+        var commands = ServerCommands(node, server);
+        Grid.SetRow(commands, 1);
+        root.Children.Add(commands);
+        var tabs = WorkspaceTabs(node, server);
+        Grid.SetRow(tabs, 2);
+        root.Children.Add(tabs);
+        workspaceBody = new Grid();
+        Grid.SetRow(workspaceBody, 3);
+        root.Children.Add(workspaceBody);
+        if (tab is "console" or "console-panel")
+            workspaceBody.Children.Add(ConsoleFor(node, server) is { } run
+                ? tab == "console" ? ConsolePanel(run, server) : ConsolePluginPanel(run)
+                : Card(Section("控制台尚未打开", Button("连接控制台",
+                    () => RunAsync(() => ChangeTabAsync(node, server, tab)), accent: true))));
+        root.SizeChanged += (_, args) =>
+        {
+            var availableWidth = args.NewSize.Width + root.Margin.Left + root.Margin.Right;
+            var availableHeight = args.NewSize.Height + root.Margin.Top + root.Margin.Bottom;
+            var condensed = availableWidth < 570 || availableHeight < 535;
+            root.Margin = condensed ? new Thickness(14, 10, 14, 12) : new Thickness(24, 20, 24, 24);
+            root.RowSpacing = condensed ? 6 : 12;
+            titleText.FontSize = condensed ? 23 : 30;
+        };
+        return root;
+    }
+
+    private CommandBar ServerCommands(Node node, Server server)
+    {
+        var stopped = server.Status == 0;
+        var running = server.Status == 2;
+        var commands = new CommandBar
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            DefaultLabelPosition = CommandBarDefaultLabelPosition.Right,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0, 0, 6, 0),
+            Content = ServerState(server),
+        };
+        AppBarButton Command(string label, Symbol icon, Func<Task> action, bool enabled = true)
+        {
+            var button = new AppBarButton { Label = label, Icon = new SymbolIcon(icon), IsEnabled = enabled };
+            button.Click += async (_, _) => await RunAsync(action);
+            return button;
+        }
+        commands.PrimaryCommands.Add(Command(stopped ? "启动" : "停止", stopped ? Symbol.Play : Symbol.Stop,
+            () => ServerActionAsync(node, server, stopped ? "start" : "stop"), stopped || running));
+        commands.PrimaryCommands.Add(Command("重启", Symbol.Sync, () => ServerActionAsync(node, server, "restart"), running));
+        commands.PrimaryCommands.Add(Command("备份", Symbol.Save, () => ServerActionAsync(node, server, "backup"), running));
+        commands.PrimaryCommands.Add(Command("刷新状态", Symbol.Refresh, async () =>
+        {
+            await RefreshAsync(node);
+            if (selectedServer is { } refreshed)
+                await ChangeTabAsync(node, refreshed, tab);
+            else
+                Render();
+        }));
+        commands.SecondaryCommands.Add(Command("强制停止", Symbol.Stop, () => ServerActionAsync(node, server, "forceExit"), !stopped));
+        commands.SecondaryCommands.Add(Command("删除服务器", Symbol.Delete, () => DeleteServerAsync(node, server), stopped));
+        return commands;
+    }
+
+    private Grid WorkspaceTabs(Node node, Server server)
+    {
+        var selector = new SelectorBar { Padding = new Thickness(0), Visibility = Visibility.Collapsed };
+        AutomationProperties.SetName(selector, "服务器工作区");
+        var compact = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
+        AutomationProperties.SetName(compact, "工作区选项");
         foreach (var (key, label) in new (string, string)[]
             { ("console-panel", "面板"), ("console", "原始控制台"), ("files", "文件"), ("configuration", "配置"),
                 ("addons", "插件 / 模组"), ("resources", "资源") })
         {
             var item = new SelectorBarItem { Text = label, Tag = key };
+            var option = new ComboBoxItem { Content = label, Tag = key };
             selector.Items.Add(item);
+            compact.Items.Add(option);
             if (key == tab)
+            {
                 selector.SelectedItem = item;
+                compact.SelectedItem = option;
+            }
         }
-        selector.SelectionChanged += async (_, _) =>
+        Task SelectAsync(string? destination) => destination is null || destination == tab
+            ? Task.CompletedTask : RunAsync(() => ChangeTabAsync(node, server, destination));
+        selector.SelectionChanged += async (_, _) => await SelectAsync(selector.SelectedItem?.Tag as string);
+        compact.SelectionChanged += async (_, _) => await SelectAsync((compact.SelectedItem as ComboBoxItem)?.Tag as string);
+        var tabs = new Grid();
+        tabs.Children.Add(selector);
+        tabs.Children.Add(compact);
+        tabs.SizeChanged += (_, args) =>
         {
-            if (selector.SelectedItem?.Tag is string destination && destination != tab)
-                await RunAsync(() => ChangeTabAsync(node, server, destination));
+            var narrow = args.NewSize.Width < 480;
+            selector.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
+            compact.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
         };
-        Grid.SetRow(selector, 1);
-        root.Children.Add(selector);
-        workspaceBody = new Grid();
-        Grid.SetRow(workspaceBody, 2);
-        root.Children.Add(workspaceBody);
-        if (tab is "console" or "console-panel")
-            workspaceBody.Children.Add(ConsoleFor(node, server) is { } run
-                ? tab == "console" ? ConsolePanel(run, server) : ConsolePluginPanel(run)
-                : Card(Stack(Secondary("控制台尚未打开。"), Button("连接控制台",
-                    () => RunAsync(() => ChangeTabAsync(node, server, tab)), accent: true))));
-        return root;
+        return tabs;
     }
 
     private async Task ServerActionAsync(Node node, Server server, string action)
@@ -238,15 +298,22 @@ public sealed partial class MainWindow
         Notice(reply.StringValue("已删除服务器。"));
     }
 
-    private Grid ConsolePanel(ConsoleRun run, Server server)
+    private Border ConsolePanel(ConsoleRun run, Server server)
     {
-        var panel = new Grid { RowSpacing = 8 };
+        var panel = new Grid { RowSpacing = 10 };
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        var search = new TextBox { PlaceholderText = "筛选日志", Text = run.Filter, MinWidth = 142 };
+        var search = new TextBox { PlaceholderText = "筛选输出", Text = run.Filter, Width = 146 };
         AutomationProperties.SetName(search, "筛选控制台日志");
-        var follow = new CheckBox { Content = "跟随输出", IsChecked = run.Follow };
+        var findLogs = new KeyboardAccelerator { Key = VirtualKey.F, Modifiers = VirtualKeyModifiers.Control, ScopeOwner = panel };
+        findLogs.Invoked += (_, args) => args.Handled = search.Focus(FocusState.Programmatic);
+        panel.KeyboardAccelerators.Add(findLogs);
+        var follow = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton
+        {
+            Content = "跟随输出",
+            IsChecked = run.Follow,
+        };
         var copy = Button("复制日志", () =>
         {
             if (!IsCurrentConsole(run) || consoleOutput is null || consoleOutput.Text.Length == 0)
@@ -255,6 +322,21 @@ public sealed partial class MainWindow
             package.SetText(consoleOutput.Text);
             global::Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
             Notice("已复制当前日志。");
+        });
+        var clear = Button("清空", () =>
+        {
+            if (!IsCurrentConsole(run))
+                return;
+            run.Lines.Clear();
+            run.SelectionStart = run.SelectionLength = 0;
+            UpdateLog(run);
+        });
+        ToolTipService.SetToolTip(clear, "清除当前显示的日志");
+        clear.KeyboardAccelerators.Add(new KeyboardAccelerator
+        {
+            Key = VirtualKey.L,
+            Modifiers = VirtualKeyModifiers.Control,
+            ScopeOwner = panel,
         });
         consoleEula = Button("查看 EULA", () => RunAsync(async () =>
         {
@@ -273,13 +355,15 @@ public sealed partial class MainWindow
         }));
         consoleEula.Visibility = run.EulaRequired && !run.EulaAcknowledged ? Visibility.Visible : Visibility.Collapsed;
         consoleStatus = Secondary(ConsoleConnectionStatus(run));
-        panel.Children.Add(Stack(Actions(search, follow, copy, consoleEula), consoleStatus));
+        var heading = Section("实时输出", consoleStatus);
+        heading.Spacing = 2;
+        var outputTitle = heading.Children[0];
+        panel.Children.Add(AdaptivePair(heading, Actions(search, follow, copy, clear, consoleEula), 690));
         consoleOutput = new TextBox
         {
+            Style = Resource<Style>("RolithaxTerminalOutputStyle"),
             IsReadOnly = true,
             AcceptsReturn = true,
-            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
-            FontSize = 14,
             TextWrapping = TextWrapping.Wrap,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
@@ -300,7 +384,13 @@ public sealed partial class MainWindow
         search.TextChanged += (_, _) => { run.Filter = search.Text; UpdateLog(run); };
         follow.Checked += (_, _) => { run.Follow = true; UpdateLog(run); };
         follow.Unchecked += (_, _) => run.Follow = false;
-        var input = new TextBox { PlaceholderText = "输入控制台指令", MaxLength = 8192, Text = run.Draft };
+        var input = new TextBox
+        {
+            PlaceholderText = "›  输入控制台指令",
+            MaxLength = 8192,
+            Text = run.Draft,
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+        };
         AutomationProperties.SetName(input, "服务器控制台指令");
         input.TextChanged += (_, _) => run.Draft = input.Text;
         async Task Send()
@@ -349,12 +439,22 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         row.Children.Add(input);
+        consoleSend.Margin = new Thickness(0);
+        consoleSend.VerticalAlignment = VerticalAlignment.Stretch;
         Grid.SetColumn(consoleSend, 1);
         row.Children.Add(consoleSend);
         Grid.SetRow(row, 2);
         panel.Children.Add(row);
         UpdateLog(run);
-        return panel;
+        var card = Card(panel);
+        card.SizeChanged += (_, args) =>
+        {
+            var condensed = args.NewSize.Height < 360;
+            card.Padding = new Thickness(condensed ? 10 : 16);
+            panel.RowSpacing = condensed ? 6 : 10;
+            outputTitle.Visibility = condensed ? Visibility.Collapsed : Visibility.Visible;
+        };
+        return card;
     }
 
     private void UpdateLog(ConsoleRun run)
@@ -363,8 +463,11 @@ public sealed partial class MainWindow
             return;
         var offset = run.SelectionStart;
         var length = run.SelectionLength;
-        consoleOutput.Text = string.Join(Environment.NewLine, run.Lines.Where(line =>
+        consoleOutput.PlaceholderText = run.Filter.Length == 0 ? "等待日志输出…" : "没有匹配的日志";
+        var text = string.Join(Environment.NewLine, run.Lines.Where(line =>
             run.Filter.Length == 0 || line.Contains(run.Filter, StringComparison.OrdinalIgnoreCase)));
+        if (consoleOutput.Text != text)
+            consoleOutput.Text = text;
         if (run.Follow)
             consoleOutput.Select(consoleOutput.Text.Length, 0);
         else
@@ -375,7 +478,8 @@ public sealed partial class MainWindow
     }
 
     private static string ConsoleConnectionStatus(ConsoleRun run) =>
-        run.Connected ? "控制台已连接" : "等待控制台连接…";
+        run.Connected ? "控制台已连接" :
+        run.ConnectionError.Length > 0 ? run.ConnectionError : "等待控制台连接…";
 
     private async Task PollConsoleAsync()
     {
@@ -391,6 +495,7 @@ public sealed partial class MainWindow
             if (!IsCurrentConsole(run))
                 return;
             run.Connected = result.Flag("connected");
+            run.ConnectionError = result.Field("error").StringValue();
             run.EulaRequired = result.Flag("eulaRequired");
             var lines = result.Field("lines").Items();
             if (result.Field("firstAvailableSequence").LongValue() > run.LastSequence + 1)
@@ -415,9 +520,8 @@ public sealed partial class MainWindow
             if (!IsCurrentConsole(run))
                 return;
             run.Connected = false;
+            run.ConnectionError = "控制台连接暂不可用，正在重试。";
             RefreshConsoleStatus(run);
-            if (consoleStatus is { } status)
-                status.Text = "控制台连接暂不可用，正在重试。";
         }
         finally
         {
@@ -452,29 +556,21 @@ public sealed partial class MainWindow
                 }
                 var result = await CallAsync(node, "monitorPoll");
                 if (!closed && active == node && monitorText == monitor)
-                {
-                    var cpu = result.Field("cpu").NumberValue();
-                    var memory = result.Field("memUsage").NumberValue();
-                    monitor.Text = !result.Flag("connected") ? "等待宿主机监控连接…"
-                        : $"CPU {Percent(cpu)}  ·  内存 {Percent(memory)}";
-                }
+                    UpdateNodeMonitor(result);
             }
             await PollCreationAsync(node);
             await PollResourcesAsync(node);
         }
         catch (Exception)
         {
-            if (!closed && active == node && monitorText is { } monitor)
-                monitor.Text = "宿主机监控暂不可用。";
+            if (!closed && active == node && monitorText is not null)
+                ResetNodeMonitor("宿主机监控暂不可用。");
         }
         finally
         {
             polling = false;
         }
     }
-
-    private static string Percent(double? value) =>
-        value is { } finite && double.IsFinite(finite) ? finite.ToString("0.0", CultureInfo.CurrentCulture) + "%" : "—";
 
     private void SetWorkspace(params UIElement[] elements)
     {

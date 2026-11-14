@@ -75,6 +75,9 @@ class DaemonCreationProgress(
                         throw e
                     } catch (e: ProgressCallbackFailed) {
                         throw e.cause ?: e
+                    } catch (_: SignalRAuthenticationException) {
+                        emit(onEvent, CreationProgressEvent.Disconnected)
+                        return
                     } catch (_: Exception) {
                     }
                     emit(onEvent, CreationProgressEvent.Disconnected)

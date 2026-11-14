@@ -8,7 +8,7 @@ import com.wludy.rolithax.launcher.data.model.CreateServerRequest
 import com.wludy.rolithax.launcher.data.model.ServerCoreMirror
 import com.wludy.rolithax.launcher.data.model.ServerSettings
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -69,18 +69,18 @@ class SharedInstanceManagementTest {
     }
 
     @Test
-    fun closingConnectionCancelsInFlightSettingsUpdate() = runBlocking {
+    fun closingConnectionReportsInterruptedSettingsUpdateWithoutReplayingIt() = runBlocking {
         val server = MockWebServer()
         server.start()
         server.enqueue(MockResponse().setBody("{}").setBodyDelay(4, TimeUnit.SECONDS))
         val original = OkHttpClient()
         val shared = SharedDaemonConnection(server.url("/").toString(), "", original)
         try {
-            val job = launch { shared.updateSettings(42, ServerSettings()) }
+            val request = async { runCatching { shared.updateSettings(42, ServerSettings()) } }
             assertNotNull(withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) })
             shared.close()
-            withTimeout(5_000) { job.join() }
-            assertTrue(job.isCancelled)
+            assertTrue(withTimeout(5_000) { request.await().exceptionOrNull() } is DaemonConnectionClosedException)
+            assertEquals(1, server.requestCount)
         } finally {
             shared.close()
             original.dispatcher.executorService.shutdown()

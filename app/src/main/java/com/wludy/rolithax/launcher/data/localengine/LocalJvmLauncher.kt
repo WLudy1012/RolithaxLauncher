@@ -200,7 +200,7 @@ class LocalJvmLauncher(
             add("-Dterminal.jline=false")
             add("-Dterminal.ansi=true")
             add("-Dlog4j2.formatMsgNoLookups=true")
-            // 内嵌 JRE 的 java.version 形如 `17-internal`（含 `-`），Paper 会当成非 GA 预发布版
+            // 部分 JRE 构建的 java.version 形如 `17-internal`，Paper 会当成非 GA 预发布版。
             // 直接退出；这是其官方跳过开关（进程内 JVM 同样需要）。
             add("-DPaper.IgnoreJavaVersion=true")
             addAll(extraArgs)

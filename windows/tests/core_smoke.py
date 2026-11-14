@@ -167,8 +167,8 @@ def verify(library):
         worker.start()
         address = f"http://127.0.0.1:{server.server_port}"
 
-        def open_session(path=""):
-            cfg = dict(baseUrl=address + path, apiKey=KEY, allowHttp=True)
+        def open_session(path="", api_key=KEY):
+            cfg = dict(baseUrl=address + path, apiKey=api_key, allowHttp=True)
             pointer = lib.rolithax_session_open(encoded(cfg), ctypes.byref(error))
             assert pointer, read(error)
             return pointer
@@ -249,6 +249,19 @@ def verify(library):
                 assert not reply["ok"] and not REDIRECTED.is_set(), reply
             finally:
                 lib.rolithax_session_close(redirected)
+            denied = open_session(api_key="wrong-fixture-key")
+            try:
+                started = read(lib.rolithax_session_call(denied, b"consoleStart", b'{"id":7}'))
+                assert started["ok"], started
+                for _ in range(50):
+                    rejected = read(lib.rolithax_session_call(denied, b"consolePoll", b"{}"))
+                    assert rejected["ok"], rejected
+                    if rejected["data"].get("error"):
+                        break
+                    time.sleep(0.1)
+                assert not rejected["data"]["connected"] and "API Key" in rejected["data"]["error"], rejected
+            finally:
+                lib.rolithax_session_close(denied)
         finally:
             lib.rolithax_session_close(session)
             server.shutdown()

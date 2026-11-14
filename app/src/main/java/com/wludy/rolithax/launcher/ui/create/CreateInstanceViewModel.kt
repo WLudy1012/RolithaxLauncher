@@ -61,7 +61,6 @@ data class LocalRuntimeChoice(
     val label: String,
     val javaMajor: Int,
     val installed: Boolean,
-    val embedded: Boolean,
 )
 
 fun wizardSteps(mode: Int): List<WizardStep> = when (mode) {
@@ -399,7 +398,6 @@ class CreateInstanceViewModel(
                     label = rt.label,
                     javaMajor = rt.javaMajor,
                     installed = LocalJreManager.isInstalled(context, rt),
-                    embedded = LocalJreManager.hasEmbeddedAsset(context, rt, abi),
                 )
             }
             _state.update { s ->

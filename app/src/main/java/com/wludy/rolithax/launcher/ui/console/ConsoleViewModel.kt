@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.wludy.rolithax.launcher.RolithaxApplication
 import com.wludy.rolithax.launcher.data.InstanceRepository
+import com.wludy.rolithax.launcher.data.DaemonConnectionClosedException
 import com.wludy.rolithax.launcher.data.ServerRef
 import com.wludy.rolithax.launcher.data.SharedDaemonConnection
 import com.wludy.rolithax.launcher.data.ensureRepository
@@ -153,8 +154,14 @@ class ConsoleViewModel(
                 }
                 connection = source
                 _state.update { it.copy(connecting = true, connected = false, connectionError = null) }
+                var terminalFailure = false
                 try {
-                    source.runConsole(id, resumeCursor, onSession = { session = it }, onEvent = ::onConsoleEvent)
+                    source.runConsole(id, resumeCursor, onSession = { session = it }, onEvent = { event ->
+                        if (event is DaemonConsoleEvent.AuthenticationFailed || event == DaemonConsoleEvent.OutputTooLarge) {
+                            terminalFailure = true
+                        }
+                        onConsoleEvent(event)
+                    })
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -166,6 +173,7 @@ class ConsoleViewModel(
                     session = null
                     _state.update { it.copy(connecting = false, connected = false) }
                 }
+                if (terminalFailure) break
                 delay(250)
             }
         }
@@ -178,6 +186,23 @@ class ConsoleViewModel(
             }
             DaemonConsoleEvent.Disconnected -> {
                 _state.update { it.copy(connecting = false, connected = false, connectionError = null) }
+                ansiParser.reset()
+            }
+            is DaemonConsoleEvent.AuthenticationFailed -> {
+                val message = if (event.httpStatus == 403) {
+                    "没有控制台访问权限，请检查实例授权"
+                } else {
+                    "鉴权失败，请检查 API Key"
+                }
+                _state.update {
+                    it.copy(connecting = false, connected = false, connectionError = message)
+                }
+                ansiParser.reset()
+            }
+            DaemonConsoleEvent.OutputTooLarge -> {
+                _state.update {
+                    it.copy(connecting = false, connected = false, connectionError = "单条控制台输出过大，无法加载")
+                }
                 ansiParser.reset()
             }
             DaemonConsoleEvent.Gap -> {
@@ -277,7 +302,13 @@ class ConsoleViewModel(
                     _events.tryEmit(ConsoleEvent.Toast(result.getOrNull() ?: "已提交操作"))
                     loadInfo(repository, id)
                 } else {
-                    _events.tryEmit(ConsoleEvent.Toast(result.exceptionOrNull()?.message ?: "操作失败"))
+                    val error = result.exceptionOrNull()
+                    val message = if (error is DaemonConnectionClosedException) {
+                        "Daemon 连接已切换，操作结果未知，请刷新确认"
+                    } else {
+                        error?.message ?: "操作失败"
+                    }
+                    _events.tryEmit(ConsoleEvent.Toast(message))
                 }
             } finally {
                 _state.update { it.copy(busy = false) }
@@ -301,9 +332,25 @@ class ConsoleViewModel(
         viewModelScope.launch {
             try {
                 val repository = container.ensureRepository(ref.daemonId) ?: return@launch
-                repository.sendAction(id, "agreeEula?true")
+                val agreement = repository.sendAction(id, "agreeEula?true")
+                if (agreement.isFailure) {
+                    val error = agreement.exceptionOrNull()
+                    val message = if (error is DaemonConnectionClosedException) {
+                        "Daemon 连接已切换，EULA 操作结果未知，请刷新确认"
+                    } else {
+                        error?.message ?: "提交 EULA 失败"
+                    }
+                    _events.tryEmit(ConsoleEvent.Toast(message))
+                    return@launch
+                }
                 val result = repository.sendAction(id, "start")
-                _events.tryEmit(ConsoleEvent.Toast(result.getOrNull() ?: result.exceptionOrNull()?.message ?: "启动请求已提交"))
+                val error = result.exceptionOrNull()
+                val message = if (error is DaemonConnectionClosedException) {
+                    "Daemon 连接已切换，操作结果未知，请刷新确认"
+                } else {
+                    result.getOrNull() ?: error?.message ?: "启动请求已提交"
+                }
+                _events.tryEmit(ConsoleEvent.Toast(message))
                 loadInfo(repository, id)
             } finally {
                 _state.update { it.copy(busy = false) }

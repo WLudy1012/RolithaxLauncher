@@ -6,6 +6,22 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+    inputs:
+      sha:
+        description: 构建指定的提交
+        type: string
+        default: ''
+      app-version:
+        description: Windows 安装包显示的版本
+        type: string
+        default: ''
+    outputs:
+      linux-artifact-id:
+        description: Linux 应用归档
+        value: ${{ jobs.linux.outputs.artifact-id }}
+      windows-installer-artifact-id:
+        description: Windows x64 安装程序
+        value: ${{ jobs.windows.outputs.installer-artifact-id }}
   workflow_dispatch:
 
 permissions:
@@ -20,10 +36,13 @@ jobs:
     name: Linux 桌面验证
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       - name: 配置 JetBrains Runtime 21
@@ -51,15 +70,18 @@ jobs:
 
       - name: 归档 Linux 应用
         run: |
+          set -euo pipefail
           app=desktop/build/compose/binaries/main/app
           test -x "$app/RolithaxLauncher/bin/RolithaxLauncher"
+          test -s "$app/RolithaxLauncher/lib/runtime/lib/server/libjvm.so"
           mkdir -p desktop/build/outputs
           tar -C "$app" -czf desktop/build/outputs/RolithaxLauncher-Linux.tar.gz RolithaxLauncher
 
       - name: 上传 Linux 应用
+        id: upload
         uses: actions/upload-artifact@v7
         with:
-          name: RolithaxLauncher-Linux
+          name: RolithaxLauncher-Linux-${{ github.run_attempt }}
           path: desktop/build/outputs/RolithaxLauncher-Linux.tar.gz
           if-no-files-found: error
           compression-level: 0
@@ -68,7 +90,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-results-Linux
+          name: desktop-results-Linux-${{ github.run_attempt }}
           path: |
             desktop/build/reports/tests/test/
             desktop/build/test-results/test/
@@ -80,13 +102,16 @@ jobs:
   windows:
     name: Windows 桌面验证
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 40
+    outputs:
+      installer-artifact-id: ${{ steps.upload-installer.outputs.artifact-id }}
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/windows/build/nuget-packages
     steps:
       - name: 检出代码
         uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       - name: 配置 JDK 21
@@ -147,7 +172,7 @@ jobs:
           $core = (Resolve-Path '../shared/build/bin/mingwX64/releaseShared/rolithax_core.dll').Path
           dotnet publish Rolithax.Windows.csproj -c Release -r win-x64 --self-contained true -o build/RolithaxLauncher "-p:RolithaxCorePath=$core"
 
-      - name: 验证并归档 Windows 应用
+      - name: 验证 Windows 应用
         run: |
           $app = 'windows/build/RolithaxLauncher'
           $expected = @(
@@ -164,12 +189,40 @@ jobs:
           if ((Get-FileHash "$app/rolithax_core.dll").Hash -ne $original) {
             throw 'WinUI 包内的 DLL 与通过 C ABI 测试的 DLL 不一致'
           }
-          Compress-Archive -LiteralPath $app -DestinationPath windows/build/RolithaxLauncher-Windows.zip
 
-      - name: 上传 Windows 应用
+      - name: 构建 Windows 安装程序
+        env:
+          APP_VERSION: ${{ inputs.app-version }}
+        run: |
+          $version = $env:APP_VERSION
+          if ([string]::IsNullOrEmpty($version)) {
+            $entry = Select-String -Path app/build.gradle.kts -Pattern '^\s*versionName\s*=.*\?:\s*"(?<version>[^"]+)"'
+            if (!$entry) { throw '无法读取应用版本' }
+            $version = $entry.Matches[0].Groups['version'].Value
+          }
+          ./windows/installer/build.ps1 -AppVersion $version -PublishDir windows/build/RolithaxLauncher -OutputDir windows/build/installer
+
+      - name: 验证离线安装和卸载
+        run: ./windows/installer/smoke.ps1 -Setup windows/build/installer/RolithaxLauncher-Windows-x64-Setup.exe
+
+      - name: 上传 Windows 安装程序
+        id: upload-installer
         uses: actions/upload-artifact@v7
         with:
-          name: RolithaxLauncher-Windows
+          name: RolithaxLauncher-Windows-Setup-${{ github.run_attempt }}
+          path: windows/build/installer/RolithaxLauncher-Windows-x64-Setup.exe
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: 归档 Windows 便携版
+        if: inputs.sha == ''
+        run: Compress-Archive -LiteralPath windows/build/RolithaxLauncher -DestinationPath windows/build/RolithaxLauncher-Windows.zip
+
+      - name: 上传 Windows 便携版
+        if: inputs.sha == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: RolithaxLauncher-Windows-${{ github.run_attempt }}
           path: windows/build/RolithaxLauncher-Windows.zip
           if-no-files-found: error
           compression-level: 0

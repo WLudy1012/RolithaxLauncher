@@ -9,30 +9,37 @@ public sealed partial class MainWindow
 {
     private void ShowConnections(StackPanel body)
     {
-        body.Children.Add(Heading("连接管理", "添加 Daemon，或在多个已连接节点之间切换。"));
-        body.Children.Add(Actions(
+        body.Children.Add(PageHeading("连接管理", "管理已保存的 Daemon 和当前连接。", Actions(
             Button("添加连接", () => RunAsync(() => EditConnectionAsync(null)), accent: true),
-            Button("粘贴配对码", () => RunAsync(PairAsync))));
+            Button("粘贴配对码", () => RunAsync(PairAsync)))));
         if (ConnectionStore.HasLegacyConnections && savedAvailable)
             body.Children.Add(Card(Entry("已有桌面版配置", "可以导入旧版保存的兼容连接。",
                 Button("导入连接", () => RunAsync(ImportLegacyAsync)))));
 
-        body.Children.Add(Text("已连接", "SubtitleTextBlockStyle"));
+        var connected = Section($"已连接 · {nodes.Count}");
+        body.Children.Add(Card(connected));
         if (nodes.Count == 0)
-            body.Children.Add(Card(Secondary("尚未连接任何 Daemon。")));
+            connected.Children.Add(Secondary("尚未连接任何 Daemon。"));
         foreach (var node in nodes)
         {
-            var open = Button(active == node ? "当前节点" : "设为当前", () => { SelectNode(node); Render(); });
-            open.IsEnabled = active != node;
-            body.Children.Add(Card(Stack(
-                Text(node.Connection.Name, "BodyStrongTextBlockStyle"),
-                Secondary($"{node.Connection.Address}  ·  {node.Servers.Length} 台服务器"),
-                Actions(open, Button("断开", () => RunAsync(() => DisconnectAsync(node)))))));
+            var tools = Actions(Button("服务器", () =>
+            {
+                SelectNode(node);
+                Navigate("instances");
+            }), Button("断开", () => RunAsync(() => DisconnectAsync(node))));
+            if (active != node)
+                tools.Children.Insert(0, Button("设为当前", () => { SelectNode(node); Render(); }));
+            var serverSummary = node.ServerListWarning is null ? $"{node.Servers.Length} 台服务器" : "服务器列表不可用";
+            var detail = $"{node.Connection.Address}  ·  {serverSummary}";
+            if (active == node)
+                detail += "  ·  当前节点";
+            connected.Children.Add(Entry(node.Connection.Name, detail, tools));
         }
 
-        body.Children.Add(Text("已保存", "SubtitleTextBlockStyle"));
+        var stored = Section($"已保存 · {saved.Count}");
+        body.Children.Add(Card(stored));
         if (saved.Count == 0)
-            body.Children.Add(Card(Secondary(savedAvailable ? "保存后，下次可以直接连接。" : "无法读取连接配置。")));
+            stored.Children.Add(Secondary(savedAvailable ? "保存后，下次可以直接连接。" : "无法读取连接配置。"));
         foreach (var connection in saved)
         {
             var connect = Button("连接", () => RunAsync(async () =>
@@ -41,12 +48,10 @@ public sealed partial class MainWindow
                 Render();
             }));
             connect.IsEnabled = nodes.All(item => item.Connection.Id != connection.Id);
-            body.Children.Add(Card(Stack(
-                Text(connection.Name, "BodyStrongTextBlockStyle"),
-                Secondary(connection.Address),
+            stored.Children.Add(Entry(connection.Name, connection.Address,
                 Actions(connect,
                     Button("编辑", () => RunAsync(() => EditConnectionAsync(connection))),
-                    Button("移除", () => RunAsync(() => RemoveConnectionAsync(connection)))))));
+                    Button("移除", () => RunAsync(() => RemoveConnectionAsync(connection))))));
         }
     }
 
@@ -212,20 +217,41 @@ public sealed partial class MainWindow
         Notice("已连接到 " + connection.Name);
     }
 
-    private static async Task<Node> OpenNodeAsync(DaemonConnection connection)
+    private async Task<Node> OpenNodeAsync(DaemonConnection connection)
     {
         var session = await DaemonSession.OpenAsync(connection);
         try
         {
-            var list = await session.CallAsync("instances", secret: connection.ApiKey);
-            if (list.ValueKind != JsonValueKind.Array)
-                throw new DaemonException("Daemon 未返回服务器列表。");
-            return new Node(connection, session, list.Items().Select(Server.From).ToArray());
+            await CheckNodeStatusAsync(connection, session);
+            var node = new Node(connection, session);
+            if (!closed)
+                await RefreshAsync(node, allowUnavailable: true);
+            return node;
         }
         catch
         {
             await Task.Run(session.Dispose);
             throw;
+        }
+    }
+
+    private static async Task CheckNodeStatusAsync(DaemonConnection connection, DaemonSession session)
+    {
+        try
+        {
+            var status = await session.CallAsync("status", secret: connection.ApiKey);
+            if (status.ValueKind != JsonValueKind.Object)
+                throw new DaemonException("Daemon 未返回有效的状态数据。");
+        }
+        catch (DaemonException error)
+        {
+            var detail = error.Status switch
+            {
+                401 => "Daemon 拒绝了连接认证。",
+                403 => "Daemon 拒绝了状态查询。",
+                _ => "无法读取 Daemon 状态。",
+            };
+            throw new DaemonException($"{detail} {error.Message}", error.Status);
         }
     }
 
@@ -235,6 +261,8 @@ public sealed partial class MainWindow
         {
             LeaveServer();
             active = nodes.FirstOrDefault(item => item != node);
+            filter = "";
+            statusFilter = "全部状态";
         }
         nodes.Remove(node);
         await Task.Run(node.Session.Dispose);

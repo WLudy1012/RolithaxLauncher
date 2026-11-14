@@ -25,27 +25,28 @@ Rolithax Launcher 是 [MSLX Daemon](https://github.com/MSLTeam/MSLX) 的独立�
 
 ## 下载
 
-Android 正式版本可在 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 或 [CNB 镜像](https://cnb.cool/WLudy/RolithaxLauncher/-/releases)（大陆网络更快）下载，每个版本提供两个包：
+请在 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 选择平台对应的附件。Android APK 也可从 [CNB 镜像](https://cnb.cool/WLudy/RolithaxLauncher/-/releases) 下载。
 
 | 包 | 说明 |
 | --- | --- |
-| `app-release.apk` 完整版 | 内嵌 Java 17 运行时，本机开服可离线使用 |
-| `app-release-lite.apk` 精简版 | 体积更小，首次本机开服需联网下载约 36 MB 运行时 |
+| `RolithaxLauncher.apk` | Android 安装包。首次本机开服时按需下载 JRE |
+| `RolithaxLauncher-Windows-x64-Setup.exe` | Windows x64 离线安装程序，包含配套运行时 |
+| `RolithaxLauncher-Linux.tar.gz` | Linux x64 应用归档，解压后运行 `RolithaxLauncher/bin/RolithaxLauncher` |
 
-两个包签名一致，可互相覆盖安装。应用内也可直接检查并安装更新，见[更新与版本](#更新与版本)。
+Android APK 支持 v2 和 v3 签名。应用内可以检查并安装更新，见[更新与版本](#更新与版本)。
 
 ## 平台与迁移范围
 
 | 平台 | 当前范围 | 验证边界 |
 | --- | --- | --- |
 | Android | 远端管理、本机开服与资源中心 | 保留现有能力，部分远端调用已接入共享层 |
-| [Windows](windows/README.md) | 多 Daemon、实例启停、控制台、文件、配置、插件与用户管理 | x64 开发构建，通过 C ABI 复用 Kotlin/Native 客户端 |
-| [Linux](desktop/README.md) | 多 Daemon、实例控制、控制台、文件、配置、资源与用户管理 | Compose Desktop 开发构建 |
+| [Windows](windows/README.md) | 多 Daemon、实例启停、控制台、文件、配置、插件与用户管理 | x64，通过 C ABI 复用 Kotlin/Native 客户端 |
+| [Linux](desktop/README.md) | 多 Daemon、实例控制、控制台、文件、配置、资源与用户管理 | x64，Compose Desktop |
 | [HarmonyOS NEXT](harmony/README.md) | 保存多个 Daemon、查找和控制实例、控制台及文件管理 | 原生 ARM64 工程，HAP 与真机验收待验证 |
 
 Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。下方功能说明主要描述 Android 端。
 
-桌面开发包可在成功的 [桌面持续集成](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml) 运行中下载；它们是 CI 产物，不等同于正式 Release。桌面使用与构建说明见 [desktop/README.md](desktop/README.md)。
+桌面开发包可在 [桌面持续集成](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml) 的成功运行中下载。
 
 ## 功能
 
@@ -106,11 +107,11 @@ Java 运行时可在设置里安装多个并按实例选择，启动前会做版
 | 游戏版本 | 建议运行时 |
 | --- | --- |
 | 1.16 及以下 | Java 8 |
-| 1.17 – 1.20.4 | Java 17（完整版内嵌） |
+| 1.17 – 1.20.4 | Java 17 |
 | 1.20.5+ | Java 21 |
 | 26.x+ | Java 25 |
 
-所有运行时均校验 SHA-256，下载源按「CNB 镜像 → GitHub Release → 上游」依次回退，缺少可信摘要时失败关闭。运行中由前台服务与常驻通知保活，通知栏可直接停止。
+Android 运行时来自本仓库的 [`runtimes/android`](runtimes/android)。应用优先使用 CNB 镜像，失败后改用 GitHub 源码下载，安装前校验 SHA-256。运行中由前台服务与常驻通知保活，通知栏可直接停止。
 
 ## 安全
 
@@ -136,11 +137,10 @@ Java 运行时可在设置里安装多个并按实例选择，启动前会做版
 ./gradlew :app:testDebugUnitTest      # 单元测试
 ./gradlew assembleDebug               # Debug APK
 ./gradlew assembleRelease             # 签名 Release，需要 keystore.properties
-./gradlew assembleRelease -PwithoutJre=true   # 精简版，不内嵌 JRE
 ```
 
 首次同步需要联网。国内网络可设置 `MSLX_MAVEN_GOOGLE_MIRROR` 与 `MSLX_MAVEN_CENTRAL_MIRROR` 使用镜像仓库。
-内嵌 JRE 用 `fetch-jre-assets.ps1` 获取，`LD_PRELOAD` 垫片用 `build-shim.ps1` 重编。
+在 Windows 上，`pack-release.ps1` 可构建并验证发布 APK，产物位于 `build/dist/RolithaxLauncher.apk`。签名配置见 [交付文档](develop/agent/delivery.md#签名配置)。`LD_PRELOAD` 垫片用 `build-shim.ps1` 重编。
 
 Linux 桌面打包使用 JDK 21，无显示会话时通过 Xvfb 运行 UI 测试。Windows 原生构建需要 .NET 10 与 Kotlin/Native，见 [Windows 构建说明](windows/README.md)。
 
@@ -183,7 +183,7 @@ app/src/main/cpp/            进程内 JVM 的 Native 桥接
 ## 开源协议
 
 基于 [GNU AGPL-3.0](LICENSE) 开源，与上游 [MSLX](https://github.com/MSLTeam/MSLX) 一致。Copyright (C) 2026 WLudy1012。
-第三方组件与内嵌运行时的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，应用内「设置 → 关于 → 合规与许可」可离线查看。
+第三方组件与运行时的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，应用内「设置 → 关于 → 合规与许可」可离线查看。
 
 ## 免责声明
 

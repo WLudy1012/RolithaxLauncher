@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
+import io.ktor.client.plugins.ResponseException
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.preparePost
@@ -13,6 +14,7 @@ import io.ktor.http.encodedPath
 import io.ktor.http.isSuccess
 import io.ktor.http.takeFrom
 import io.ktor.websocket.Frame
+import io.ktor.websocket.FrameTooBigException
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
@@ -51,6 +53,8 @@ sealed interface ConsoleEvent {
     data object Connected : ConsoleEvent
     data object Disconnected : ConsoleEvent
     data object Gap : ConsoleEvent
+    data class AuthenticationFailed(val httpStatus: Int) : ConsoleEvent
+    data object OutputTooLarge : ConsoleEvent
     /** replayed 为 null 表示无法区分该日志来自历史回放还是实时推送。 */
     data class Log(val line: String, val replayed: Boolean? = null, val cursor: ConsoleCursor? = null) : ConsoleEvent
     data class CommandResult(val success: Boolean, val message: String?) : ConsoleEvent
@@ -101,6 +105,8 @@ class DaemonConsole(
         var retryIndex = 0
         var legacy = false
         var connectedBefore = initialCursor != null
+        var fallbackGap = false
+        var connectedAt: TimeMark? = null
         while (true) {
             try {
                 withSignalRConnection(client, endpoint, apiKey, "/api/hubs/instanceControlHub", CONSOLE_MESSAGE_LIMIT) { session, messages ->
@@ -122,10 +128,14 @@ class DaemonConsole(
                             activeSession = session
                             activeInstanceId = instanceId
                         }
-                        retryIndex = 0
+                        connectedAt = TimeSource.Monotonic.markNow()
                         notify(onEvent, ConsoleEvent.Connected)
-                        if (replay != null) stream.replay(replay)
-                        else if (connectedBefore) notify(onEvent, ConsoleEvent.Gap)
+                        if (replay != null) {
+                            if (subscription.dropped) notify(onEvent, ConsoleEvent.Gap)
+                            stream.replay(replay)
+                        }
+                        else if (connectedBefore || fallbackGap || subscription.dropped) notify(onEvent, ConsoleEvent.Gap)
+                        fallbackGap = false
                         connectedBefore = true
                         for (event in subscription.events) stream.receive(event, legacy)
                         receiveConsoleMessages(session, messages, stream, legacy)
@@ -142,10 +152,22 @@ class DaemonConsole(
                 throw e
             } catch (e: CallbackFailed) {
                 throw e.cause ?: e
-            } catch (_: Exception) {
-                // Transport errors may contain credentials and are never emitted to callers.
+            } catch (e: SignalRAuthenticationException) {
+                notify(onEvent, ConsoleEvent.AuthenticationFailed(e.status))
+                return
+            } catch (e: Exception) {
+                if (e.isSignalRMessageTooLarge()) {
+                    if (legacy) {
+                        notify(onEvent, ConsoleEvent.OutputTooLarge)
+                        return
+                    }
+                    legacy = true
+                    fallbackGap = true
+                }
             }
             stream.clearPending()
+            if (connectedAt?.elapsedNow()?.inWholeSeconds?.let { it >= 30 } == true) retryIndex = 0
+            connectedAt = null
             notify(onEvent, ConsoleEvent.Disconnected)
             delay(retryDelays[retryIndex])
             retryIndex = (retryIndex + 1).coerceAtMost(retryDelays.lastIndex)
@@ -188,7 +210,7 @@ private suspend fun receiveConsoleMessages(
     }
 }
 
-private data class Subscription(val completion: JsonObject, val events: List<ConsoleEvent>)
+private data class Subscription(val completion: JsonObject, val events: List<ConsoleEvent>, val dropped: Boolean)
 
 private suspend fun subscribe(
     session: DefaultClientWebSocketSession,
@@ -198,28 +220,34 @@ private suspend fun subscribe(
     arguments: List<JsonElement>,
 ): Subscription = deadline(10_000) {
     session.send(Frame.Text(signalRInvocation(method, arguments, invocationId)))
-    val events = mutableListOf<ConsoleEvent>()
+    val events = ArrayDeque<ConsoleEvent>()
     var chars = 0
+    var dropped = false
+    fun eventSize(event: ConsoleEvent): Int = when (event) {
+        is ConsoleEvent.Log -> event.line.length
+        is ConsoleEvent.CommandResult -> event.message?.length ?: 0
+        else -> 0
+    }
     var completion: JsonObject? = null
     while (completion == null) {
         val message = messages.next()
         when (message["type"]?.jsonPrimitive?.intOrNull) {
             1 -> parseConsoleEvent(message)?.let { event ->
-                chars += when (event) {
-                    is ConsoleEvent.Log -> event.line.length
-                    is ConsoleEvent.CommandResult -> event.message?.length ?: 0
-                    else -> 0
+                val size = eventSize(event)
+                while (events.isNotEmpty() && (events.size >= MAX_BUFFERED_LOGS || chars + size > CONSOLE_MESSAGE_LIMIT)) {
+                    chars -= eventSize(events.removeFirst())
+                    dropped = true
                 }
-                if (events.size >= MAX_BUFFERED_LOGS || chars > CONSOLE_MESSAGE_LIMIT) {
-                    throw DaemonException("控制台订阅缓冲区已满")
+                if (size > CONSOLE_MESSAGE_LIMIT) dropped = true else {
+                    events.addLast(event)
+                    chars += size
                 }
-                events += event
             }
             3 -> if (message["invocationId"]?.jsonPrimitive?.contentOrNull == invocationId) completion = message
             7 -> throw ServerClosed()
         }
     }
-    Subscription(checkNotNull(completion), events)
+    Subscription(checkNotNull(completion), events.toList(), dropped)
 }
 
 private fun JsonObject.isResumeUnsupported(): Boolean = when (this["error"]?.jsonPrimitive?.contentOrNull) {
@@ -238,7 +266,7 @@ private fun JsonObject.parseConsoleReplay(previous: ConsoleCursor?): ConsoleRepl
     val cursor = snapshot.parseConsoleCursor() ?: invalidReplay()
     val serverGap = (snapshot["gap"] as? JsonPrimitive)?.booleanOrNull ?: invalidReplay()
     val frames = snapshot["frames"] as? JsonArray ?: invalidReplay()
-    if (frames.size > MAX_BUFFERED_LOGS) invalidReplay()
+    if (frames.size > MAX_BUFFERED_LOGS) throw SignalRMessageTooLarge()
     val logs = frames.map { value ->
         val frame = value as? JsonObject ?: invalidReplay()
         val sequence = frame["sequence"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 } ?: invalidReplay()
@@ -350,6 +378,7 @@ internal suspend fun withSignalRConnection(
                 if (apiKey.isNotBlank()) header("x-api-key", apiKey)
                 parameter("negotiateVersion", "1")
             }.execute { response ->
+                if (response.status.value == 401 || response.status.value == 403) throw SignalRAuthenticationException(response.status.value)
                 if (!response.status.isSuccess()) throw DaemonException("SignalR 协商失败")
                 response.readLimitedText(1024 * 1024)
             }
@@ -365,16 +394,24 @@ internal suspend fun withSignalRConnection(
                 (transport["transferFormats"] as? JsonArray)?.any { it.jsonPrimitive.contentOrNull == "Text" } == true
         }
         if (!supportsWebSocket) throw DaemonException("Daemon 不支持 SignalR WebSocket 文本传输")
-        val session = deadline(10_000) {
-            client.webSocketSession {
-                url {
-                    takeFrom(endpoint)
-                    protocol = if (protocol == URLProtocol.HTTPS) URLProtocol.WSS else URLProtocol.WS
-                    encodedPath = encodedPath.trimEnd('/') + hubPath
-                    parameters.append("id", token)
+        val session = try {
+            deadline(10_000) {
+                client.webSocketSession {
+                    url {
+                        takeFrom(endpoint)
+                        protocol = if (protocol == URLProtocol.HTTPS) URLProtocol.WSS else URLProtocol.WS
+                        encodedPath = encodedPath.trimEnd('/') + hubPath
+                        parameters.append("id", token)
+                    }
+                    if (apiKey.isNotBlank()) header("x-api-key", apiKey)
                 }
-                if (apiKey.isNotBlank()) header("x-api-key", apiKey)
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val status = e.signalRUpgradeAuthStatus()
+            if (status != null) throw SignalRAuthenticationException(status)
+            throw e
         }
         try {
             val messages = SignalRMessages(session, maxMessageSize)
@@ -393,6 +430,21 @@ private suspend fun notify(callback: suspend (ConsoleEvent) -> Unit, event: Cons
 
 private class CallbackFailed(cause: Throwable) : Exception(cause)
 internal class ServerClosed : Exception()
+internal class SignalRAuthenticationException(val status: Int) : Exception()
+
+private fun Throwable.isSignalRMessageTooLarge(): Boolean =
+    generateSequence(this) { it.cause }.take(8).any { it is SignalRMessageTooLarge || it is FrameTooBigException }
+
+private fun Throwable.signalRUpgradeAuthStatus(): Int? {
+    for (error in generateSequence(this) { it.cause }.take(8)) {
+        val status = (error as? ResponseException)?.response?.status?.value
+        if (status == 401 || status == 403) return status
+        val text = error.message.orEmpty()
+        val match = Regex("(?:Handshake exception, expected status code 101 but was |Expected HTTP 101 response but was ')[ ]?(401|403)(?:\\b|')").find(text)
+        if (match != null) return match.groupValues[1].toInt()
+    }
+    return null
+}
 
 internal suspend fun <T : Any> deadline(timeMillis: Long, block: suspend () -> T): T =
     withTimeoutOrNull(timeMillis) { block() } ?: throw DaemonException("SignalR 连接超时")

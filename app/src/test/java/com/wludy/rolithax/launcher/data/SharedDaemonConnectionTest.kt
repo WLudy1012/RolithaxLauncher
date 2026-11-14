@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.wludy.rolithax.launcher.data.model.ApiResponse
 import com.wludy.rolithax.launcher.data.model.InstanceInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -125,19 +126,20 @@ class SharedDaemonConnectionTest {
     }
 
     @Test
-    fun closingConnectionCancelsItsRequestsWithoutClosingOriginalClient() = runBlocking {
+    fun closingConnectionFailsItsRequestsWithoutCancellingTheCallerOrOriginalClient() = runBlocking {
         val server = MockWebServer()
         server.start()
         server.enqueue(MockResponse().setBody("{} ").setBodyDelay(4, TimeUnit.SECONDS))
         val original = OkHttpClient()
         val shared = SharedDaemonConnection(server.url("/").toString(), "", original)
         try {
-            val job = launch { shared.instanceInfo(42) }
+            val requestResult = async { runCatching { shared.instanceInfo(42) } }
             val request = withContext(Dispatchers.IO) { server.takeRequest(5, TimeUnit.SECONDS) }
             assertNotNull(request)
             shared.close()
-            withTimeout(5_000) { job.join() }
-            assertTrue(job.isCancelled)
+            val error = withTimeout(5_000) { requestResult.await().exceptionOrNull() }
+            assertTrue(error is DaemonConnectionClosedException)
+            assertTrue(!requestResult.isCancelled)
             assertTrue(!original.dispatcher.executorService.isShutdown)
         } finally {
             shared.close()

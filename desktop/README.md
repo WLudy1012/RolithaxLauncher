@@ -1,6 +1,6 @@
 # Linux 远端客户端
 
-Linux 客户端使用 Compose Desktop 管理远端 MSLX Daemon。Windows 的开发包由 [WinUI 3 客户端](../windows/README.md) 提供。
+Linux 客户端使用 Compose Desktop 管理远端 MSLX Daemon。Windows 使用 [WinUI 3 客户端](../windows/README.md)。
 
 ## 当前功能
 
@@ -14,7 +14,7 @@ Linux 客户端使用 Compose Desktop 管理远端 MSLX Daemon。Windows 的开�
 
 ## 运行与连接
 
-在成功的 [桌面 CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml) 中下载 Linux 工件，解压后运行应用目录下的 `bin/RolithaxLauncher`。保留完整目录，开发包包含配套运行时和依赖。
+从 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 下载 `RolithaxLauncher-Linux.tar.gz`，解压后运行 `RolithaxLauncher/bin/RolithaxLauncher`。归档内含配套 Java 运行时，请保留完整目录。开发版本可从 [桌面 CI](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml) 下载。
 
 使用 Daemon 地址和 API Key 连接，默认使用 HTTPS。自签证书需要提供通过可信渠道取得的 SHA-256 指纹。只有明确开启明文连接时才允许 HTTP，适用于可信网络。
 

@@ -26,11 +26,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wludy.rolithax.launcher.data.AppUpdateInfo
-import com.wludy.rolithax.launcher.data.localengine.LocalJreManager
 
 /**
  * 全局更新弹窗宿主：挂载在导航根节点外层。
@@ -59,15 +56,9 @@ fun UpdateHost(
 
     val update = state.update
     if (update != null) {
-        val context = LocalContext.current
-        // 当前安装包是否自带内嵌 JRE（决定推荐完整版还是精简版）
-        val currentHasEmbeddedJre = remember(context) {
-            LocalJreManager.hasEmbeddedAsset(context, LocalJreManager.DEFAULT_RUNTIME)
-        }
         UpdateDialog(
             currentVersion = state.currentVersion,
             update = update,
-            currentHasEmbeddedJre = currentHasEmbeddedJre,
             downloading = state.downloading,
             downloadProgress = state.downloadProgress,
             onInstall = { viewModel.downloadAndInstall() },
@@ -82,7 +73,6 @@ fun UpdateHost(
 private fun UpdateDialog(
     currentVersion: String,
     update: AppUpdateInfo,
-    currentHasEmbeddedJre: Boolean,
     downloading: Boolean,
     downloadProgress: Float,
     onInstall: () -> Unit,
@@ -151,29 +141,21 @@ private fun UpdateDialog(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    // 带 / 不带内嵌 JRE 的版本提示（同一 Release 同时提供两个包）
                     Spacer(Modifier.height(6.dp))
                     if (update.embeddedJre) {
                         Text(
-                            text = "✓ 完整版内嵌 JRE 运行时：本机开服可直接离线开服，无需下载运行时。",
+                            text = "该安装包内置 JRE，可以离线开服。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
                     } else {
                         Text(
-                            text = "⚠ 该包未内嵌 JRE 运行时：本机开服首次使用需联网下载约 36MB 运行时。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (!currentHasEmbeddedJre && update.hasLiteVariant) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "当前安装的是精简版：如需离线开服请选择完整版（体积约 ${formatSize(update.apkSize)}）；只用守护进程功能可选精简版（约 ${formatSize(update.liteSize)}）。",
+                            text = "本机开服时可按需下载 JRE。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else if (update.hasLiteVariant) {
+                    }
+                    if (update.hasLiteVariant) {
                         Spacer(Modifier.height(6.dp))
                         Text(
                             text = "同一版本提供两种包：完整版 ${formatSize(update.apkSize)}（含 JRE）/ 精简版 ${formatSize(update.liteSize)}（不含 JRE，本机开服需联网下载运行时）。",
