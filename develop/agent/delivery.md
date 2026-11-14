@@ -19,7 +19,6 @@
 ./gradlew :app:assembleRelease
 ./gradlew :shared:desktopTest :desktop:test
 ./gradlew :desktop:createDistributable
-./gradlew :shared:desktopTest :console-sdk:installDist :console-sdk:distZip
 git diff --check
 ```
 
@@ -76,7 +75,7 @@ git diff --check
 
 - `android.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中调用 `.github/actions/verify-android`，上传 Debug APK 和测试报告。Android 环境由 `.github/actions/setup-android` 准备，SDK 组件按需安装。
 - `desktop.yml` 在 `dev` 推送和面向 `main` 的 Pull Request 中构建桌面开发包，也提供手动与可复用入口。Linux 在 Xvfb 中运行共享层和 Compose 测试并打包。Windows 缓存 Kotlin/Native 与 NuGet 依赖，验证 C ABI 后打包，并检查 WinUI 运行时、XAML 资源和 DLL 摘要。
-- 同一桌面工作流构建控制台插件 SDK，用生成的模板执行校验、日志回放和打包，并上传 SDK 和样例包。
+- [控制台 SDK](https://github.com/WLudy1012/rolithax-console-sdk) 独立构建和分发。[Paper 面板模板](https://github.com/WLudy1012/rolithax-console-plugin-template) 的 CI 使用独立 SDK 校验配置、回放日志并打包。
 - 桌面应用由 Actions 工件提供开发构建，当前发布工作流仍只发布 Android 资产。不要把 Windows/Linux CI 包或鸿蒙领域库链接成功描述为正式发布、HAP 构建成功或真实 Daemon 验收通过。
 - `harmony-native.yml` 合入默认分支后可手动运行。它用校验过的公开 OpenHarmony API 18 SDK 编译 ARM64 原生桥接。完整 HAP 构建需要华为工具链，见 [鸿蒙构建说明](../../harmony/README.md)。
 - `cnb-sync.yml` 由 `main` 推送和 Android 发布共用，串行同步 CNB `main` 与可选 tag。遇到合并冲突会失败并保留 CNB 历史。

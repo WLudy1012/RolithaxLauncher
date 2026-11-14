@@ -47,25 +47,7 @@ jobs:
           chmod +x gradlew
 
       - name: 测试并构建 Linux 应用
-        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test :desktop:createDistributable :console-sdk:installDist :console-sdk:distZip --no-daemon --stacktrace
-
-      - name: 验证控制台 SDK 和模板
-        run: |
-          sdk=console-sdk/build/install/rolithax-console-sdk/bin/rolithax-console-sdk
-          template="$RUNNER_TEMP/rolithax-console-template"
-          "$sdk" init "$template"
-          "$sdk" validate "$template"
-          "$sdk" replay "$template" "$template/fixtures/logs.txt" "$template/fixtures/expected.json"
-          "$sdk" pack "$template" "$RUNNER_TEMP/paper-console-plugin.zip"
-
-      - name: 上传控制台 SDK 和样例插件
-        uses: actions/upload-artifact@v7
-        with:
-          name: Rolithax-Console-SDK
-          path: |
-            console-sdk/build/distributions/*.zip
-            ${{ runner.temp }}/paper-console-plugin.zip
-          if-no-files-found: error
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test :desktop:createDistributable --no-daemon --stacktrace
 
       - name: 归档 Linux 应用
         run: |

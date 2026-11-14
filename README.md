@@ -57,7 +57,7 @@ Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。
 **控制台**
 - SignalR 实时日志，增量解析 ANSI 颜色与样式；发送命令、自动滚动、一键回到最新。
 - 远程与本机实例共用同一套控制台界面。
-- Android 和 Windows 提供结构化控制台。内置 Paper 面板从日志提取运行状态与玩家动态，也可以用 [控制台插件 SDK](console-sdk/README.md) 编写和热替换面板。
+- Android 和 Windows 提供结构化控制台。内置 Paper 面板从日志提取运行状态与玩家动态。编写面板可使用 [控制台插件 SDK](https://github.com/WLudy1012/rolithax-console-sdk) 和 [Paper 面板模板](https://github.com/WLudy1012/rolithax-console-plugin-template)。
 
 **创建与资源中心**
 - 创建向导覆盖基本信息、服务端核心、Java 环境、资源配置与确认，支持在线核心库、远程下载、本地上传和整合包。
