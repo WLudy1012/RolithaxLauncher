@@ -48,6 +48,7 @@ import com.wludy.rolithax.launcher.ui.console.LocalConsoleViewModel
 import com.wludy.rolithax.launcher.ui.create.CreateInstanceScreen
 import com.wludy.rolithax.launcher.ui.home.HomeScreen
 import com.wludy.rolithax.launcher.ui.instances.InstancesScreen
+import com.wludy.rolithax.launcher.ui.panels.PanelScreen
 import com.wludy.rolithax.launcher.ui.settings.InstanceSettingsScreen
 import com.wludy.rolithax.launcher.ui.settings.FileManagerScreen
 import com.wludy.rolithax.launcher.ui.settings.LocalInstancePendingScreen
@@ -74,6 +75,7 @@ object Routes {
     const val HOME = "home"
     const val INSTANCES = "instances?source={source}"
     const val CONNECTIONS = "connections"
+    const val PANELS = "panels"
     const val SETTINGS = "settings"
     const val RESOURCES = "resources"
     const val NEW_INSTANCE = "newInstance?source={source}"
@@ -362,7 +364,12 @@ fun AppNavHost(
                         navController.navigate(Routes.LOCAL_SERVER_SETTINGS) { launchSingleTop = true }
                     },
                     onOpenUserCenter = { navController.navigate(Routes.USER_CENTER) { launchSingleTop = true } },
+                    onOpenPanels = { navController.navigate(Routes.PANELS) { launchSingleTop = true } },
                 )
+            }
+
+            composable(Routes.PANELS) {
+                PanelScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.LOCAL_SERVER_SETTINGS) {

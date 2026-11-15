@@ -19,6 +19,7 @@ Daemon / MSLAPI / 本地 JVM / Android 系统
 ## 多平台迁移边界
 
 - `shared` 的通用源码包含远端 Daemon 协议、SignalR、资源规则和公共模型；Android 与桌面宿主分别注入网络和系统能力。Android 的迁移按接口逐步进行，未迁移的调用仍使用现有 Retrofit 仓库。
+- `shared` 的 `panels` 包包含 MCSL Future、MCSManager 10 与 Pterodactyl 的可复用协议适配。当前由 Android 注入 HTTP 与 WebSocket 客户端，并在连接页管理配置。 [第三方面板支持范围](remote-panels.md)
 - Windows 和 Linux 客户端面向远端 Daemon。Windows 使用 DPAPI，Linux 使用系统密钥库。本机 JVM、Shizuku 和 Android 前台服务由 `app` 管理。
 - Windows 工作区使用 .NET 10、WinUI 3、系统主题和 Per-Monitor V2 DPI。页面层级参考 MSLX Desktop 与 WebPanel，界面由本项目独立实现。宿主通过 C ABI 调用 `shared` 的 Kotlin/Native DLL，按 Daemon 打开独立会话。
 - Linux 使用 Compose Desktop，Windows CI 的应用产物使用 WinUI 3。
@@ -56,13 +57,17 @@ ViewModel 通过 `AndroidViewModel` 获取 Application，再从容器取得仓�
 
 新增或编辑 Daemon 时，连接页按主地址、备用地址的顺序验证，验证通过才保存配置。注册表将通过验证的地址作为当前连接，并保留配置中原有的主地址。
 
+### 第三方面板
+
+`PanelRepository` 管理面板客户端和连接生命周期，`PanelStore` 使用独立的加密 DataStore。Android 的 `PanelViewModel` 按连接、节点和实例寻址，界面离开前台时停止获取日志。面板会话通过「连接 → 其他面板」进入。 [第三方面板设置](remote-panels.md)
+
 ### 本机资源
 
 `LocalStorage` 负责本机运行时、实例目录和下载缓存；`LocalInstanceStore` 负责扫描、加载、分配目录名和删除；`ServerFiles` 负责幂等补全 EULA、配置、元数据和核心目录。所有路径操作都需要保持在允许的实例根目录内，并拒绝路径穿越。
 
 ### 资源中心
 
-`ResourceProvider` 抽象资源来源，`ModrinthResourceProvider` 实现 Modrinth v3，MSLAPI 服务端核心由独立接口提供。`ResourceRepository` 负责 Provider 调用、Room 缓存、Paging/RemoteMediator、ETag 增量刷新、版本缓存、依赖关系和安装前校验。
+`ResourceProvider` 抽象资源来源，分别接入 Modrinth v3 和 CurseForge 官方 API。MSLAPI 服务端核心由独立接口提供。`ResourceRepository` 负责 Provider 调用、Room 缓存、Paging/RemoteMediator、ETag 增量刷新、版本缓存、依赖关系和安装前校验。 [资源中心](resource-center.md)
 
 ## UI 与导航
 

@@ -2,6 +2,7 @@ package com.wludy.rolithax.launcher.shared
 
 import com.wludy.rolithax.launcher.shared.console.ConsolePanelSnapshot
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginCompiler
+import com.wludy.rolithax.launcher.shared.console.ConsolePluginException
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginWorkspace
 import io.ktor.client.HttpClient
@@ -60,6 +61,10 @@ internal class WindowsDaemonSession(
 
     suspend fun close() {
         scopeJob.cancelAndJoin()
+        consoleLock.withLock {
+            consoleOwner?.workspace?.close()
+            consoleOwner = null
+        }
         client.close()
         http.close()
         if (modrinth.isInitialized()) modrinth.value.close()
@@ -172,6 +177,7 @@ internal class WindowsDaemonSession(
     private suspend fun startConsole(id: Long) = streams.withLock {
         consoleJob?.cancelAndJoin()
         val owner = consoleLock.withLock {
+            consoleOwner?.workspace?.close()
             ConsoleOwner(id, ++consoleEpoch).also {
                 consoleOwner = it
                 consoleState = ConsoleBuffer()
@@ -202,7 +208,13 @@ internal class WindowsDaemonSession(
                         }
                         is ConsoleEvent.Log -> {
                             val line = redact(event.line)
-                            if (owner.workspace.updateLog(line)) owner.panel = owner.workspace.snapshot()
+                            try {
+                                if (owner.workspace.updateLog(line)) owner.panel = owner.workspace.snapshot()
+                            } catch (error: ConsolePluginException) {
+                                owner.workspace.markGap()
+                                owner.panel = owner.workspace.snapshot()
+                                consoleState.error = "Rolithax Schema: ${error.message}"
+                            }
                             consoleState.append(line)
                         }
                         is ConsoleEvent.CommandResult -> event.message?.let { consoleState.append(redact(it)) }
@@ -217,6 +229,7 @@ internal class WindowsDaemonSession(
         consoleJob?.cancelAndJoin()
         consoleJob = null
         consoleLock.withLock {
+            consoleOwner?.workspace?.close()
             consoleOwner = null
             consoleState = ConsoleBuffer()
         }
@@ -250,6 +263,7 @@ internal class WindowsDaemonSession(
             val snapshot = if (restore) owner.workspace.restoreBuiltIn()
             else owner.workspace.reload(args.pluginSource(), args.strings("allowedCommands").toSet())
             owner.panel = snapshot
+            if (consoleState.error?.startsWith("Rolithax Schema:") == true) consoleState.error = null
             Json.encodeToJsonElement(snapshot)
         }
     }

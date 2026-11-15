@@ -26,9 +26,11 @@
     <Content Include="$(PkgMicrosoft_WindowsAppSDK)\license.txt" Condition="'$(PkgMicrosoft_WindowsAppSDK)' != ''" Link="legal\WindowsAppSDK-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="$(PkgMicrosoft_WindowsAppSDK)\NOTICE.txt" Condition="'$(PkgMicrosoft_WindowsAppSDK)' != ''" Link="legal\WindowsAppSDK-NOTICE.txt" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="$(RolithaxCorePath)" Condition="'$(RolithaxCorePath)' != ''" Link="rolithax_core.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+    <Content Include="$(RolithaxSchemaPath)" Condition="'$(RolithaxSchemaPath)' != ''" Link="rolithax_schema.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
   <Target Name="CheckRolithaxCore" BeforeTargets="Publish">
     <Error Condition="!Exists('$(RolithaxCorePath)')" Text="Pass -p:RolithaxCorePath=&lt;absolute path to rolithax_core.dll&gt; when publishing." />
+    <Error Condition="!Exists('$(RolithaxSchemaPath)')" Text="Pass -p:RolithaxSchemaPath=&lt;absolute path to rolithax_schema.dll&gt; when publishing." />
   </Target>
   <!-- Unpackaged WinUI publishing omits app resources (WindowsAppSDK #6720). -->
   <Target Name="PublishWinUIResources" AfterTargets="Publish">

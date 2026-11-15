@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,6 +50,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +75,7 @@ import com.wludy.rolithax.launcher.data.resources.ResourceProject
 import com.wludy.rolithax.launcher.data.resources.ResourceVersion
 import com.wludy.rolithax.launcher.data.resources.hasCompleteCompatibilityMetadata
 import com.wludy.rolithax.launcher.data.resources.isCompatibleWith
+import com.wludy.rolithax.launcher.data.resources.resourceSearchLoaders
 import com.wludy.rolithax.launcher.ui.RolithaxCard
 import com.wludy.rolithax.launcher.ui.RolithaxEmptyState
 import com.wludy.rolithax.launcher.ui.RolithaxSectionHeader
@@ -104,10 +109,12 @@ fun ResourceCenterScreen(
     viewModel: ResourceCenterViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val curseForgeKeyConfigured by viewModel.curseForgeApiKeyConfigured.collectAsStateWithLifecycle(initialValue = false)
     val projects = viewModel.projects.collectAsLazyPagingItems()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var showBrowseFilters by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); viewModel.clearMessage() }
@@ -143,6 +150,15 @@ fun ResourceCenterScreen(
                         onClick = viewModel::showTargetPicker,
                     )
                 }
+                item("provider") {
+                    ResourceProviderSelector(
+                        providerId = state.providerId,
+                        curseForgeKeyConfigured = curseForgeKeyConfigured,
+                        onProviderChange = viewModel::setProvider,
+                        onSaveCurseForgeKey = viewModel::saveCurseForgeApiKey,
+                        onCredentialsChanged = projects::refresh,
+                    )
+                }
                 item("filters") {
                     FilterBar(
                         query = state.query,
@@ -151,6 +167,10 @@ fun ResourceCenterScreen(
                         onServerOnlyChange = viewModel::setServerOnly,
                         category = state.category,
                         onCategoryChange = viewModel::setCategory,
+                        providerId = state.providerId,
+                        gameVersion = state.browseGameVersion,
+                        loader = state.browseLoader,
+                        onBrowseFilters = { showBrowseFilters = true },
                     )
                 }
                 if (state.cores.isNotEmpty()) {
@@ -164,10 +184,6 @@ fun ResourceCenterScreen(
                             "datapack" -> "数据包"
                             else -> "模组"
                         },
-                        subtitle = listOfNotNull(
-                            state.gameVersion.takeIf(String::isNotBlank)?.let { "Minecraft $it" },
-                            state.loader.takeIf(String::isNotBlank)?.replaceFirstChar(Char::uppercase),
-                        ).joinToString(" · ").ifBlank { "选择实例后可按版本和加载器筛选" },
                     )
                 }
 
@@ -215,6 +231,21 @@ fun ResourceCenterScreen(
                 }
             }
         }
+    }
+
+    if (showBrowseFilters) {
+        BrowseFiltersDialog(
+            gameVersion = state.browseGameVersion,
+            loader = state.browseLoader,
+            category = state.category,
+            requiresGameVersionForLoader = state.providerId == "curseforge",
+            hasOverrides = state.browseFilters != null,
+            onApply = {
+                viewModel.setBrowseFilters(it)
+                showBrowseFilters = false
+            },
+            onDismiss = { showBrowseFilters = false },
+        )
     }
 
     if (state.showTargetPicker) {
@@ -272,8 +303,8 @@ fun ResourceCenterScreen(
                         onAction = viewModel::retryVersions,
                     )
                     state.versions.isEmpty() -> EmptyState(
-                        title = "没有可安装的版本",
-                        description = "当前实例的游戏版本或加载器可能不受支持。",
+                        title = "没有匹配的版本",
+                        description = "可以调整游戏版本、加载器或服务端兼容性筛选。",
                     )
                     else -> LazyColumn {
                         versionsError?.let { error ->
@@ -282,7 +313,7 @@ fun ResourceCenterScreen(
                             }
                         }
                         items(state.versions, key = ResourceVersion::id) { version ->
-                            VersionRow(version, state.gameVersion, state.loader) { viewModel.addVersion(version) }
+                            VersionRow(version, state.gameVersion, state.loader, project) { viewModel.addVersion(version) }
                         }
                     }
                 }
@@ -534,6 +565,10 @@ private fun FilterBar(
     onServerOnlyChange: (Boolean) -> Unit,
     category: String,
     onCategoryChange: (String) -> Unit,
+    providerId: String,
+    gameVersion: String,
+    loader: String,
+    onBrowseFilters: () -> Unit,
 ) {
     GlassSurface(modifier = Modifier.fillMaxWidth(), shape = FilterBarShape) {
         Column(
@@ -554,19 +589,21 @@ private fun FilterBar(
                     placeholder = { Text("搜索模组、插件或整合包", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     shape = RoundedCornerShape(12.dp),
                 )
-                FilterChip(
-                    selected = serverOnly,
-                    onClick = { onServerOnlyChange(!serverOnly) },
-                    label = { Text("适配服务端") },
-                    shape = TagShape,
-                    leadingIcon = if (serverOnly) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(16.dp)) }) else null,
-                )
+                if (providerId != "curseforge") {
+                    FilterChip(
+                        selected = serverOnly,
+                        onClick = { onServerOnlyChange(!serverOnly) },
+                        label = { Text("适配服务端") },
+                        shape = TagShape,
+                        leadingIcon = if (serverOnly) ({ Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(16.dp)) }) else null,
+                    )
+                }
             }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                resourceCategories.forEach { item ->
+                resourceCategories.filter { providerId != "curseforge" || it.id == "mod" }.forEach { item ->
                     FilterChip(
                         selected = category == item.id,
                         onClick = { onCategoryChange(item.id) },
@@ -578,8 +615,78 @@ private fun FilterBar(
                     )
                 }
             }
+            val filterLabels = listOfNotNull(
+                gameVersion.takeIf(String::isNotBlank)?.let { "Minecraft $it" },
+                loader.takeIf(String::isNotBlank),
+            )
+            OutlinedButton(onClick = onBrowseFilters, modifier = Modifier.fillMaxWidth()) {
+                Text(filterLabels.joinToString(" · ").ifBlank { "筛选游戏版本与加载器" })
+            }
         }
     }
+}
+
+@Composable
+private fun BrowseFiltersDialog(
+    gameVersion: String,
+    loader: String,
+    category: String,
+    requiresGameVersionForLoader: Boolean,
+    hasOverrides: Boolean,
+    onApply: (ResourceBrowseFilters?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var versionInput by rememberSaveable { mutableStateOf(gameVersion) }
+    var loaderInput by rememberSaveable { mutableStateOf(loader) }
+    val normalizedLoader = loaderInput.trim().lowercase()
+    val supportsLoaders = category != "datapack"
+    val loaderError = when {
+        !supportsLoaders || normalizedLoader.isEmpty() -> null
+        resourceSearchLoaders(category, normalizedLoader).isEmpty() -> "该分类不支持此加载器"
+        requiresGameVersionForLoader && versionInput.isBlank() -> "CurseForge 按加载器筛选需要指定游戏版本"
+        else -> null
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("游戏版本与加载器") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("只筛选浏览结果。留空不限，安装仍检查目标实例。")
+                OutlinedTextField(
+                    value = versionInput,
+                    onValueChange = { versionInput = it.take(40) },
+                    label = { Text("Minecraft 版本") },
+                    placeholder = { Text("例如 1.21.1") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (supportsLoaders) {
+                    OutlinedTextField(
+                        value = loaderInput,
+                        onValueChange = { loaderInput = it.take(30) },
+                        label = { Text("加载器") },
+                        placeholder = { Text(if (category == "plugin") "例如 paper" else "例如 fabric") },
+                        supportingText = if (loaderError != null) ({ Text(loaderError) }) else null,
+                        isError = loaderError != null,
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (hasOverrides) {
+                    TextButton(onClick = { onApply(null) }, modifier = Modifier.align(Alignment.Start)) {
+                        Text("跟随目标实例")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onApply(ResourceBrowseFilters(versionInput.trim(), normalizedLoader)) },
+                enabled = loaderError == null,
+            ) { Text("应用筛选") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 /** 安装目标：整块玻璃卡可点，保留按钮高度的触控区。 */
@@ -650,9 +757,9 @@ private fun TargetRow(server: ManagedServer, selected: Boolean, onClick: () -> U
 }
 
 @Composable
-private fun VersionRow(version: ResourceVersion, gameVersion: String, loader: String, onAdd: () -> Unit) {
-    val matching = version.isCompatibleWith(gameVersion, loader)
-    val metadataComplete = version.hasCompleteCompatibilityMetadata(gameVersion, loader)
+private fun VersionRow(version: ResourceVersion, gameVersion: String, loader: String, project: ResourceProject, onAdd: () -> Unit) {
+    val matching = project.serverCompatible && version.isCompatibleWith(gameVersion, loader, project.type)
+    val metadataComplete = version.hasCompleteCompatibilityMetadata(gameVersion, loader, project.type)
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

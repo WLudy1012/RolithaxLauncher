@@ -32,6 +32,8 @@ runs:
             "assets/legal/java-keyring-LICENSE.txt",
             "lib/arm64-v8a/librolithaxvm.so",
             "lib/x86_64/librolithaxvm.so",
+            "lib/arm64-v8a/librolithax_schema.so",
+            "lib/x86_64/librolithax_schema.so",
         }
 
         for variant in ("debug", "release"):

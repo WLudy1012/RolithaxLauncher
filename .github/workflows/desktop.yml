@@ -62,11 +62,11 @@ jobs:
       - name: 准备 Linux 显示环境与中文字体
         run: |
           sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends xvfb xauth fonts-noto-cjk
+          sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends xvfb xauth fonts-noto-cjk cmake g++
           chmod +x gradlew
 
       - name: 测试并构建 Linux 应用
-        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:desktopTest :desktop:test :desktop:createDistributable --no-daemon --stacktrace
+        run: xvfb-run -a -s '-screen 0 1920x1080x24' ./gradlew :shared:testSchemaNative :shared:desktopTest :desktop:test :desktop:createDistributable --no-daemon --stacktrace
 
       - name: 归档 Linux 应用
         run: |
@@ -74,6 +74,7 @@ jobs:
           app=desktop/build/compose/binaries/main/app
           test -x "$app/RolithaxLauncher/bin/RolithaxLauncher"
           test -s "$app/RolithaxLauncher/lib/runtime/lib/server/libjvm.so"
+          test -n "$(find "$app/RolithaxLauncher" -name librolithax_schema.so -type f -size +0c -print -quit)"
           mkdir -p desktop/build/outputs
           tar -C "$app" -czf desktop/build/outputs/RolithaxLauncher-Linux.tar.gz RolithaxLauncher
 
@@ -154,10 +155,12 @@ jobs:
           key: desktop-nuget-${{ runner.os }}-${{ runner.arch }}-${{ steps.dotnet.outputs.dotnet-version }}-${{ hashFiles('windows/Rolithax.Windows.csproj', '**/NuGet.Config', '**/Directory.Build.*', '**/Directory.Packages.props') }}
 
       - name: 构建 Kotlin/Native 核心
-        run: .\gradlew.bat '-Prolithax.windowsNative=true' '-Pkotlin.native.distribution.downloadFromMaven=true' :shared:linkReleaseSharedMingwX64 --no-daemon --stacktrace
+        run: .\gradlew.bat '-Prolithax.windowsNative=true' '-Pkotlin.native.distribution.downloadFromMaven=true' :shared:testSchemaNative :shared:linkReleaseSharedMingwX64 --no-daemon --stacktrace
 
       - name: 验证 C ABI
-        run: python windows/tests/core_smoke.py shared/build/bin/mingwX64/releaseShared/rolithax_core.dll
+        run: |
+          Copy-Item shared/build/schema-native/bin/rolithax_schema.dll shared/build/bin/mingwX64/releaseShared/
+          python windows/tests/core_smoke.py shared/build/bin/mingwX64/releaseShared/rolithax_core.dll
 
       - name: 发布 WinUI 3 自包含应用
         working-directory: windows
@@ -170,14 +173,15 @@ jobs:
           @{ sdk = @{ version = $env:DOTNET_SDK_VERSION; rollForward = 'disable' } } |
             ConvertTo-Json -Depth 3 | Set-Content global.json -Encoding utf8
           $core = (Resolve-Path '../shared/build/bin/mingwX64/releaseShared/rolithax_core.dll').Path
-          dotnet publish Rolithax.Windows.csproj -c Release -r win-x64 --self-contained true -o build/RolithaxLauncher "-p:RolithaxCorePath=$core"
+          $schema = (Resolve-Path '../shared/build/schema-native/bin/rolithax_schema.dll').Path
+          dotnet publish Rolithax.Windows.csproj -c Release -r win-x64 --self-contained true -o build/RolithaxLauncher "-p:RolithaxCorePath=$core" "-p:RolithaxSchemaPath=$schema"
 
       - name: 验证 Windows 应用
         run: |
           $app = 'windows/build/RolithaxLauncher'
           $expected = @(
             'RolithaxLauncher.exe', 'RolithaxLauncher.pri', 'App.xbf', 'MainWindow.xbf',
-            'coreclr.dll', 'Microsoft.UI.Xaml.dll', 'rolithax_core.dll',
+            'coreclr.dll', 'Microsoft.UI.Xaml.dll', 'rolithax_core.dll', 'rolithax_schema.dll',
             'legal/WindowsAppSDK-LICENSE.txt', 'legal/WindowsAppSDK-NOTICE.txt'
           )
           foreach ($name in $expected) {

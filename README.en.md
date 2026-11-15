@@ -52,17 +52,19 @@ Desktop development packages are available from successful [desktop CI runs](htt
 
 **Connect and manage**
 - Save multiple Daemons at once. Everything is addressed by **instance**, and local instances are merged with each Daemon's instances in a single list.
-- Pair by scanning the QR code shown on the Daemon's web page. Pairing relies on this project's [Daemon plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin); you can also enter the address and API Key manually.
+- With the [Rolithax Daemon plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin) installed, Android can pair by scanning a QR code or pasting the pairing text copied from the plugin page. You can also enter the address and API key manually.
+- On Android, **Connections → Other panels** connects to MCSL Future `/api/v2`, MCSManager 10 and the Pterodactyl Client API. View instances and logs, send console commands and control server power. [Setup and supported operations](develop/agent/remote-panels.md)
 - Start, stop, restart, force-kill and back up; the EULA prompt guides you when it is not accepted yet. Instances can be pinned, and deletion needs a second confirmation.
 
 **Console**
 - Live logs over SignalR with incremental ANSI color and style parsing; send commands, auto-scroll, jump to latest.
 - Remote and local instances share the same console UI.
+- Android and Windows include **Rolithax Schema**: a C++ runtime turns live logs into native task panels with XML layouts, YAML rules, restricted Lua and hot reload. Add Git plugin sources or use the [official source](https://github.com/WLudy1012/rolithax-schema-plugins) for Paper, LuckPerms and Chunky. The separate [SDK](https://github.com/WLudy1012/rolithax-console-sdk) and [template](https://github.com/WLudy1012/rolithax-console-plugin-template) include replay tools and an agent skill. [Format, grants and compatibility](develop/agent/rolithax-schema.md)
 
 **Create and Resource Center**
 - The creation wizard covers basics, server core, Java environment, resources and confirmation, with an online core catalog, remote download, local upload and modpacks.
-- Resource Center: browse Modrinth mods, plugins, modpacks and data packs, filtered by the target instance's core and game version; dependencies and conflicts are checked together before a single install.
-- For a remote Daemon, the machine running the Daemon downloads and installs directly; your phone does not relay the files.
+- Resource Center lists Modrinth mods, plugins, modpacks and data packs. Filters can follow the target instance or use a game version and loader you choose. Dependencies and conflicts are checked before installation.
+- Under **Resource Center → Resource source → CurseForge**, enter your own official API key to browse mods and install them on local instances. Remote Daemons can install Modrinth resources directly through the Rolithax plugin. [Resource Center notes](develop/agent/resource-center.md)
 
 **Local hosting**
 - Run a Minecraft Java server on the phone without a Daemon, Termux or proot. See [Local hosting](#local-hosting).
@@ -77,8 +79,7 @@ Desktop development packages are available from successful [desktop CI runs](htt
 **Connect to a remote Daemon**
 
 1. Start MSLX Daemon on your computer and have its address and API Key ready.
-2. In the app, open "Connect Daemon", enter the address (for example `https://192.168.1.100:1027`) and the API Key, then connect.
-   If the Rolithax plugin is installed, you can scan the QR code on its page instead.
+2. Open **Connections → Add Daemon**. Choose **Manual connection** if you have the address and API key. With the Rolithax plugin installed, open **Plugin pairing** to scan its QR code or paste the complete pairing text and submit it.
 3. Open the instance list, tap an instance to view logs, send commands, start or stop it.
 
 **Host a server on your phone**

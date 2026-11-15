@@ -24,3 +24,7 @@ ACTIONS_GUIDE.md
 /MSLX-dev/
 /_icons/
 AGENTS.local.md
+/gradlew-android-local.bat
+/.impeccable/build/
+/.impeccable/mocks/
+/.impeccable/questions/

@@ -30,7 +30,8 @@
 - Rolithax 插件中心移至 WebPanel 一级菜单；插件支持按功能开关扩展 API，实例图标支持 Media Scoped Token，最低 Daemon 版本为 1.7.3。
 - 代码、资源和 Native 库已完成 Rolithax 命名（`RolithaxUi`、`DaemonApi`、`librolithaxvm.so` 等）。保留的 `mslx`/`MSLX` 标识均为外部契约或兼容读取：插件路由、`mslxp1:` 配对前缀、`MSLX://` 协议 URI、Keystore 别名、CI 变量 `MSLX_MAVEN_*`，以及导入时仍接受的旧备份魔数 `MSLX-BACKUP`（新备份使用 `RLTX-BACKUP` 和 `.rlxb`）。
 - 当前本机引擎包含进程内 JVM 和 Shizuku 增强模式，运行时、实例和资源安装均以当前源码为准。
-- 当前资源中心以 Modrinth Provider、MSLAPI 核心接口和 Room/Paging 缓存为首期能力，Provider 扩展点保留给后续站点。
+- Android 资源中心支持 Modrinth、CurseForge 模组和 MSLAPI 核心接口。Modrinth v3 版本查询按游戏版本和加载器过滤，整合包按实际加载器分类。浏览筛选可跟随目标实例或手动覆盖，两种模式使用相同的在线和缓存版本判断。已核验 Modrinth v3 的公共筛选端点。
+- Android 新增「其他面板」，接入 MCSL Future、MCSManager 10 和 Pterodactyl 的实例列表、电源与控制台。协议适配在共享层，配置存储和界面在 Android 宿主。 [设置与验证范围](remote-panels.md)
 - Windows 工作区使用 WinUI 3 的 Fluent 控件、系统主题和 DPI 缩放。控制台、文件、设置和插件从同一个实例工作区进入，远端操作保留节点和实例身份。
 - Android 与 WinUI 3 增加了结构化控制台。内置 Paper 面板从日志提取状态，第三方声明式包可在实例会话内导入和替换。共享测试覆盖 YAML 回放、坏包回退、权限和新旧 Daemon 日志协议。Lua 进程隔离、真实服务端行为与真机性能仍需验收。
 - 桌面实例设置提供结构化表单与 JSON 编辑；远端文件管理提供创建目录、重命名和删除操作，其中目录删除会递归执行。
@@ -39,7 +40,7 @@
 
 ## 仍需外部验收的边界
 
-- Android 真机上的扫码、状态栏、公共存储、前台服务、唤醒锁、热点和防火墙权限。
+- Android 真机上的扫码与粘贴配对、状态栏、公共存储、前台服务、唤醒锁、热点和防火墙权限。
 - 平板和横屏设备上的导航轨切换、短窗口布局与真实触控行为。
 - 毛玻璃实时模糊在不同 GPU 上的帧率与发热，以及 API 31 及以下设备的降级外观。
 - 不同设备上的进程内 JVM、Java 运行时、Shizuku、多实例和服务端核心兼容性。
@@ -47,6 +48,7 @@
 - 更新元数据 CNB 回退的真实网络路径：GitHub 不可达时的回退触发、弱网下标签页解析、CNB 页面结构变化时的失败关闭行为（本地测试只覆盖解析与回退逻辑）。
 - 跨设备加密备份恢复、旧版本迁移、异常中断后的临时文件清理。
 - MSLAPI、Modrinth 和插件服务端返回数据的真实兼容性；本地编译不能替代接口实测。
+- 三种第三方面板的真实部署连接、实例管理与控制台，及使用官方 Key 的 CurseForge 搜索和本机安装。 [第三方面板](remote-panels.md) [资源中心](resource-center.md)
 - Windows 和 Linux 桌面与真实 Daemon 的连接、实例控制、文件与属性编辑、资源安装、系统密钥库存取及窗口交互仍需在对应平台和服务端环境进行端到端验收。
 - HarmonyOS NEXT 已验证 ARM64 领域库与 N-API 桥交叉链接，HAP 打包、设备安装和真实 Daemon 交互仍需华为 SDK 与设备环境。
 

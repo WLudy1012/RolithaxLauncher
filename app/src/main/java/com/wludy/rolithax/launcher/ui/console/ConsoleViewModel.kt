@@ -364,6 +364,11 @@ class ConsoleViewModel(
         _logs.value = emptyList()
     }
 
+    override fun onCleared() {
+        panelState.close()
+        super.onCleared()
+    }
+
     private fun append(line: LogLine) {
         renderBuffer.addLast(line)
         bufferChars += line.text.length

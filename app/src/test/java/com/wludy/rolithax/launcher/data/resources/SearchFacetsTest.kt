@@ -13,12 +13,16 @@ class SearchFacetsTest {
     @Test
     fun gameVersionAndMatchingLoaderAreAnded() {
         assertEquals(
-            """[["project_types:mod"],["game_versions:1.21.4"],["categories:fabric"]]""",
+            """[["project_types:mod"],["game_versions:1.21.4"],["loaders:fabric"]]""",
             searchFacets(ResourceFilter(type = "mod", gameVersion = "1.21.4", loader = "Fabric")),
         )
         assertEquals(
-            """[["project_types:plugin"],["categories:paper"]]""",
+            """[["project_types:plugin"],["loaders:paper","loaders:spigot","loaders:bukkit"]]""",
             searchFacets(ResourceFilter(type = "plugin", loader = "paper")),
+        )
+        assertEquals(
+            """[["project_types:modpack"],["mrpack_loaders:neoforge"]]""",
+            searchFacets(ResourceFilter(type = "modpack", loader = "NeoForge")),
         )
     }
 

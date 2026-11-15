@@ -61,6 +61,7 @@ fun ConnectionsScreen(
     onCreate: (String) -> Unit,
     onOpenLocalServerSettings: () -> Unit,
     onOpenUserCenter: () -> Unit,
+    onOpenPanels: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -105,6 +106,15 @@ fun ConnectionsScreen(
                                 TextButton(onClick = { onOpenInstances(ServerRef.LOCAL_DAEMON_ID) }) { Text("查看实例") }
                                 TextButton(onClick = onOpenLocalServerSettings) { Text("运行时设置") }
                             }
+                        }
+                    }
+                }
+                item("other-panels") {
+                    RolithaxCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("其他面板", style = MaterialTheme.typography.titleLarge)
+                            Text("MCSL Future、MCSManager 10、Pterodactyl", style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = onOpenPanels) { Text("管理面板") }
                         }
                     }
                 }

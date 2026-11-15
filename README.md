@@ -52,18 +52,19 @@ Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。
 
 **连接与管理**
 - 同时保存多台 Daemon，所有入口按**实例**寻址，本机实例与各 Daemon 的实例合并在同一个列表里。
-- 扫描 Daemon 页面生成的二维码即可配对；配对依赖本项目的 [Daemon 插件](https://github.com/WLudy1012/Rolithax-MSLX-plugin)，也可以手动填写地址与 API Key。
+- Daemon 安装 [Rolithax 插件](https://github.com/WLudy1012/Rolithax-MSLX-plugin) 后，Android 支持扫码配对，也支持粘贴插件页面复制的配对原文。客户端也支持手动填写地址和 API Key。
+- Android 的「连接 → 其他面板」支持 MCSL Future `/api/v2`、MCSManager 10 和 Pterodactyl Client API，可查看实例状态与日志、发送命令并控制电源。 [设置与功能范围](develop/agent/remote-panels.md)
 - 启动、停止、重启、强制结束、备份；未同意 EULA 时自动引导。实例可置顶，删除需二次确认。
 
 **控制台**
 - SignalR 实时日志，增量解析 ANSI 颜色与样式；发送命令、自动滚动、一键回到最新。
 - 远程与本机实例共用同一套控制台界面。
-- Android 和 Windows 提供结构化控制台。内置 Paper 面板从日志提取运行状态与玩家动态。编写面板可使用 [控制台插件 SDK](https://github.com/WLudy1012/rolithax-console-sdk) 和 [Paper 面板模板](https://github.com/WLudy1012/rolithax-console-plugin-template)。
+- Android 和 Windows 提供 **Rolithax Schema**：C++ 引擎将实时日志转成原生任务面板，支持 XML 界面、YAML 规则、受限 Lua 和热加载。可添加 Git 插件源，默认[官方源](https://github.com/WLudy1012/rolithax-schema-plugins)提供 Paper、LuckPerms 与 Chunky。开发者可使用[独立 SDK](https://github.com/WLudy1012/rolithax-console-sdk)、[模板](https://github.com/WLudy1012/rolithax-console-plugin-template)及附带的 Agent skill。[格式、授权与兼容边界](develop/agent/rolithax-schema.md)
 
 **创建与资源中心**
 - 创建向导覆盖基本信息、服务端核心、Java 环境、资源配置与确认，支持在线核心库、远程下载、本地上传和整合包。
-- 资源中心：浏览 Modrinth 的模组、插件、整合包与数据包，按目标实例的核心与游戏版本筛选；统一检查依赖与冲突后一次安装。
-- 目标是远程 Daemon 时，由 Daemon 所在机器直接下载安装，手机不做中转。
+- 资源中心支持 Modrinth 的模组、插件、整合包和数据包。筛选可跟随目标实例，也可手动选择游戏版本与加载器。安装前统一检查依赖与冲突。
+- 在 Android 的「资源中心 → 资源来源 → CurseForge」填写自己的官方 API Key，即可浏览模组并安装到本机实例。远端 Daemon 可通过 Rolithax 插件直接安装 Modrinth 资源。 [资源中心说明](develop/agent/resource-center.md)
 
 **本机开服**
 - 不依赖 Daemon、Termux 或 proot，在手机上直接运行 Minecraft Java 服务端，详见[本机开服](#本机开服)。
@@ -78,8 +79,7 @@ Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。
 **连接远程 Daemon**
 
 1. 在电脑上启动 MSLX Daemon，准备好它的地址与 API Key。
-2. 打开 App，在「连接守护程序」页填写地址（例如 `https://192.168.1.100:1027`）和 API Key，点击连接。
-   安装了 Rolithax 插件的话，也可以直接扫描插件页面的二维码。
+2. 打开「连接 → 添加 Daemon」。有地址和 API Key 时选择「手动连接」。Daemon 安装 Rolithax 插件后，可在「插件配对」里扫码，或粘贴插件复制的完整原文并点「使用原文配对」。
 3. 进入实例列表，点任意实例即可查看日志、发送命令、启停。
 
 **直接在手机上开服**

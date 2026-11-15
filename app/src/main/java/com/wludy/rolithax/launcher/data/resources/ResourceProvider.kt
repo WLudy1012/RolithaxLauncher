@@ -37,7 +37,9 @@ class ModrinthResourceProvider(private val api: ModrinthApi) : ResourceProvider 
         val body = response.body() ?: throw IllegalStateException("Modrinth 响应为空")
         val hits = body.getAsJsonArray("hits") ?: JsonArray()
         return ResourceSearchPage(
-            projects = hits.mapNotNull { hit -> runCatching { parseProject(hit.asJsonObject, filter.type) }.getOrNull() },
+            projects = hits.mapNotNull { hit ->
+                runCatching { parseProject(hit.asJsonObject, filter.type) }.getOrNull()?.takeIf { it.id.isNotBlank() }
+            },
             totalHits = body.get("total_hits")?.asInt ?: 0,
             resultCount = hits.size(),
             etag = response.headers()["ETag"],
@@ -45,13 +47,18 @@ class ModrinthResourceProvider(private val api: ModrinthApi) : ResourceProvider 
     }
 
     override suspend fun versions(projectId: String, filter: ResourceFilter): List<ResourceVersion> {
+        val loaders = resourceSearchLoaders(filter.type, filter.loader)
+        val loaderFields = JsonObject().apply {
+            if (filter.gameVersion.isNotBlank()) add("game_versions", listOf(filter.gameVersion).toJsonArray())
+            if (filter.type == "modpack" && loaders.isNotEmpty()) add("mrpack_loaders", loaders.toJsonArray())
+        }
         val response = api.versions(
-            projectId,
-            filter.gameVersion.takeIf(String::isNotBlank),
-            filter.loader.takeIf(String::isNotBlank),
+            id = projectId,
+            loaderFields = loaderFields.takeIf { it.size() > 0 }?.toString(),
+            loaders = loaders.takeIf { filter.type != "modpack" && it.isNotEmpty() }?.toJsonArray()?.toString(),
         )
         if (!response.isSuccessful) throw HttpException(response)
-        return response.body().orEmpty().mapNotNull(::parseVersion)
+        return response.body().orEmpty().mapNotNull { parseVersion(it, filter.type) }.filter(filter::matchesVersion)
     }
 
     override suspend fun project(projectId: String): ResourceProject? {
@@ -67,7 +74,7 @@ class ModrinthResourceProvider(private val api: ModrinthApi) : ResourceProvider 
     }
 }
 
-private fun parseVersion(json: JsonObject): ResourceVersion? {
+private fun parseVersion(json: JsonObject, type: String): ResourceVersion? {
     val id = json.get("id")?.takeIf(JsonElement::isJsonPrimitive)?.asString ?: return null
     val files = json.getAsJsonArray("files")?.mapNotNull { item ->
         val file = item.asJsonObject
@@ -103,36 +110,29 @@ private fun parseVersion(json: JsonObject): ResourceVersion? {
         id = id,
         name = json.get("name").stringOrNull().orEmpty(),
         number = json.get("version_number").stringOrNull().orEmpty(),
-        gameVersions = json.getAsJsonArray("game_versions").asStringValues(),
-        loaders = json.getAsJsonArray("loaders").asStringValues(),
+        gameVersions = json.loaderValues("game_versions"),
+        loaders = json.resourceLoaders(type),
         files = files,
         dependencies = dependencies,
-        serverCompatible = json.get("server_side").asStringValues().none { it == "unsupported" },
+        serverCompatible = json.supportsServer(),
     )
 }
 
-private val MOD_LOADERS = setOf("fabric", "forge", "neoforge", "quilt")
-private val PLUGIN_LOADERS = setOf("paper", "spigot", "bukkit")
-
-// Modrinth 搜索只识别 facets，project_type/game_version/loader 查询参数会被忽略并返回全站结果。
 internal fun searchFacets(filter: ResourceFilter): String {
-    val groups = mutableListOf("project_types:${filter.type}")
-    if (filter.gameVersion.isNotBlank()) groups += "game_versions:${filter.gameVersion}"
-    val loader = filter.loader.lowercase()
-    val loaderFits = when (filter.type) {
-        "mod", "modpack" -> loader in MOD_LOADERS
-        "plugin" -> loader in PLUGIN_LOADERS
-        else -> false
+    val facets = JsonArray()
+    facets.add(listOf("project_types:${filter.type}").toJsonArray())
+    if (filter.gameVersion.isNotBlank()) facets.add(listOf("game_versions:${filter.gameVersion}").toJsonArray())
+    val loaders = resourceSearchLoaders(filter.type, filter.loader)
+    if (loaders.isNotEmpty()) {
+        val field = if (filter.type == "modpack") "mrpack_loaders" else "loaders"
+        facets.add(loaders.map { "$field:$it" }.toJsonArray())
     }
-    if (loaderFits) groups += "categories:$loader"
-    return groups.joinToString(prefix = "[", postfix = "]", separator = ",") { "[\"$it\"]" }
+    return facets.toString()
 }
 
 private fun parseProject(json: JsonObject, fallbackType: String): ResourceProject {
-    val environment = json.getAsJsonObject("project_loader_fields")?.get("environment") ?: json.get("environment")
-    val env = environment.asStringValues()
+    val env = json.loaderValues("environment")
     val clientSide = json.get("client_side").asStringValues()
-    val serverSide = json.get("server_side").asStringValues()
     val projectTypes = json.getAsJsonArray("project_types").asStringValues()
     val projectType = fallbackType.takeIf { it in projectTypes }
         ?: projectTypes.firstOrNull()
@@ -147,13 +147,32 @@ private fun parseProject(json: JsonObject, fallbackType: String): ResourceProjec
         downloads = json.get("downloads")?.asLong ?: 0,
         updatedAt = json.get("date_modified").stringOrNull().orEmpty(),
         type = projectType,
-        loaders = json.getAsJsonArray("loaders").asStringValues(),
-        gameVersions = json.getAsJsonObject("project_loader_fields")?.getAsJsonArray("game_versions").asStringValues()
-            .ifEmpty { json.getAsJsonArray("game_versions").asStringValues() },
-        serverCompatible = "client_only" !in env && "unsupported" !in serverSide,
-        clientCompatible = "server_only" !in env && "unsupported" !in clientSide,
+        loaders = json.resourceLoaders(projectType),
+        gameVersions = json.loaderValues("game_versions"),
+        serverCompatible = json.supportsServer(),
+        clientCompatible = !env.allWhenPresent { it in SERVER_ONLY_ENVIRONMENTS } &&
+            !clientSide.allWhenPresent { it == "unsupported" },
     )
 }
+
+private val CLIENT_ONLY_ENVIRONMENTS = setOf("client_only", "singleplayer_only")
+private val SERVER_ONLY_ENVIRONMENTS = setOf("server_only", "dedicated_server_only")
+
+private fun JsonObject.supportsServer(): Boolean =
+    !loaderValues("environment").allWhenPresent { it in CLIENT_ONLY_ENVIRONMENTS } &&
+        !get("server_side").asStringValues().allWhenPresent { it == "unsupported" }
+
+private fun JsonObject.loaderValues(field: String): List<String> =
+    getAsJsonObject("project_loader_fields")?.get(field).asStringValues().ifEmpty { get(field).asStringValues() }
+
+private fun JsonObject.resourceLoaders(type: String): List<String> {
+    val loaders = get("loaders").asStringValues()
+    return if (type == "modpack") loaderValues("mrpack_loaders").ifEmpty { loaders.filterNot { it == "mrpack" } } else loaders
+}
+
+private inline fun List<String>.allWhenPresent(predicate: (String) -> Boolean): Boolean = isNotEmpty() && all(predicate)
+
+private fun List<String>.toJsonArray(): JsonArray = JsonArray(size).also { values -> forEach { values.add(it) } }
 
 private fun JsonArray?.asStringValues(): List<String> = this?.mapNotNull(JsonElement::stringOrNull).orEmpty()
 

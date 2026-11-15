@@ -12,6 +12,7 @@ import com.wludy.rolithax.launcher.data.ensureRepository
 import com.wludy.rolithax.launcher.data.localengine.LocalInstanceStore
 import com.wludy.rolithax.launcher.data.model.ResourceInstallBatchRequest
 import com.wludy.rolithax.launcher.data.model.ResourceInstallItemRequest
+import com.wludy.rolithax.launcher.data.resources.CURSEFORGE_PROVIDER_ID
 import com.wludy.rolithax.launcher.data.resources.LocalResourceInstaller
 import com.wludy.rolithax.launcher.data.resources.ResourceCartEntry
 import com.wludy.rolithax.launcher.data.resources.ResourceFilter
@@ -19,6 +20,7 @@ import com.wludy.rolithax.launcher.data.resources.ResourceIssue
 import com.wludy.rolithax.launcher.data.resources.ResourceProject
 import com.wludy.rolithax.launcher.data.resources.ResourceRepository
 import com.wludy.rolithax.launcher.data.resources.ResourceVersion
+import com.wludy.rolithax.launcher.data.resources.resourceSearchLoaders
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -32,12 +34,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+data class ResourceBrowseFilters(val gameVersion: String, val loader: String)
+
 data class ResourceCenterUiState(
     val loadingTargets: Boolean = true,
     val servers: List<ManagedServer> = emptyList(),
     val selectedServerKey: String? = null,
     val gameVersion: String = "",
     val loader: String = "",
+    val browseFilters: ResourceBrowseFilters? = null,
     val category: String = "mod",
     val providerId: String = "modrinth",
     val query: String = "",
@@ -57,7 +62,12 @@ data class ResourceCenterUiState(
     val installProgress: Float = 0f,
     val installMessage: String = "",
     val message: String? = null,
-)
+) {
+    val browseGameVersion: String get() = browseFilters?.gameVersion ?: gameVersion
+    val browseLoader: String get() = (browseFilters?.loader ?: loader)
+        .takeIf { (providerId != CURSEFORGE_PROVIDER_ID || browseGameVersion.isNotBlank()) && resourceSearchLoaders(category, it).isNotEmpty() }
+        .orEmpty()
+}
 
 class ResourceCenterViewModel(application: Application) : AndroidViewModel(application) {
     private val container = getApplication<RolithaxApplication>().container
@@ -74,12 +84,34 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
 
     private val _state = MutableStateFlow(ResourceCenterUiState())
     val state = _state.asStateFlow()
+    val curseForgeApiKeyConfigured = container.settingsStore.curseForgeApiKeyConfigured
     @OptIn(ExperimentalCoroutinesApi::class)
     val projects = filter.flatMapLatest(repository::projects).cachedIn(viewModelScope)
 
     init {
         loadTargets()
         loadMslCores()
+    }
+
+    fun setProvider(providerId: String) {
+        if (providerId == _state.value.providerId) return
+        closeVersions()
+        _state.update {
+            val category = if (providerId == CURSEFORGE_PROVIDER_ID) "mod" else it.category
+            it.copy(providerId = providerId, category = category)
+        }
+        updateFilter()
+    }
+
+    suspend fun saveCurseForgeApiKey(value: String): String? = try {
+        container.settingsStore.setCurseForgeApiKey(value)
+        null
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: IllegalArgumentException) {
+        error.message ?: "API Key 格式不正确"
+    } catch (_: Exception) {
+        "无法保存 CurseForge API Key"
     }
 
     fun setCategory(type: String) {
@@ -89,6 +121,12 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
 
     fun setServerOnly(enabled: Boolean) {
         _state.update { it.copy(serverOnly = enabled) }
+        updateFilter()
+    }
+
+    fun setBrowseFilters(filters: ResourceBrowseFilters?) {
+        closeVersions()
+        _state.update { it.copy(browseFilters = filters) }
         updateFilter()
     }
 
@@ -108,6 +146,7 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
 
     fun selectServer(server: ManagedServer) {
         val ref = server.ref ?: return
+        closeVersions()
         val selectionId = ++serverSelectionId
         serverSelectionJob?.cancel()
         serverSelectionJob = viewModelScope.launch {
@@ -137,13 +176,15 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun openVersions(project: ResourceProject) {
+        val current = _state.value
+        if (project.type != current.category || (project.providerId != null && project.providerId != current.providerId)) return
         val requestId = ++versionsRequestId
         versionsJob?.cancel()
-        val current = _state.value
         val requestFilter = ResourceFilter(
             project.type,
-            gameVersion = current.gameVersion,
-            loader = current.loader,
+            gameVersion = current.browseGameVersion,
+            loader = current.browseLoader,
+            serverOnly = current.serverOnly && current.providerId != CURSEFORGE_PROVIDER_ID,
             providerId = current.providerId,
         )
         _state.update {
@@ -204,6 +245,10 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
         val targetKey = current.selectedServerKey
         if (targetKey == null) {
             _state.update { it.copy(message = "先选择要安装资源的实例") }
+            return
+        }
+        if (current.providerId == CURSEFORGE_PROVIDER_ID && ServerRef.fromCatalogKey(targetKey)?.isLocal != true) {
+            _state.update { it.copy(message = "CurseForge 模组目前支持安装到本机实例") }
             return
         }
         _state.update { it.copy(cartValidated = false, issues = emptyList()) }
@@ -274,6 +319,10 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
         }
         if (current.cart.isEmpty()) {
             _state.update { it.copy(message = "购物清单为空") }
+            return
+        }
+        if (!target.isLocal && current.cart.any { it.providerId == CURSEFORGE_PROVIDER_ID }) {
+            _state.update { it.copy(message = "请移除清单中的 CurseForge 模组，或选择本机实例安装") }
             return
         }
         if (!current.cartValidated) {
@@ -372,10 +421,10 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
         val state = _state.value
         filter.value = ResourceFilter(
             type = state.category,
-            query = state.query,
-            gameVersion = state.gameVersion,
-            loader = state.loader,
-            serverOnly = state.serverOnly,
+            query = state.query.trim(),
+            gameVersion = state.browseGameVersion,
+            loader = state.browseLoader,
+            serverOnly = state.serverOnly && state.providerId != CURSEFORGE_PROVIDER_ID,
             providerId = state.providerId,
         )
     }
@@ -390,9 +439,15 @@ class ResourceCenterViewModel(application: Application) : AndroidViewModel(appli
             "fabric" in text -> "fabric"
             "quilt" in text -> "quilt"
             "forge" in text -> "forge"
+            "folia" in text -> "folia"
+            "purpur" in text -> "purpur"
             "paper" in text -> "paper"
             "spigot" in text -> "spigot"
             "bukkit" in text -> "bukkit"
+            "velocity" in text -> "velocity"
+            "waterfall" in text -> "waterfall"
+            "bungeecord" in text -> "bungeecord"
+            "sponge" in text -> "sponge"
             else -> ""
         }
     }

@@ -138,7 +138,10 @@ public sealed partial class MainWindow
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        var back = new HyperlinkButton { Content = "‹  服务器", Padding = new Thickness(0, 4, 2, 4) };
+        var backLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        backLabel.Children.Add(new SymbolIcon(Symbol.Back) { Width = 16, Height = 16 });
+        backLabel.Children.Add(Text("服务器"));
+        var back = new HyperlinkButton { Content = backLabel, Padding = new Thickness(0, 4, 2, 4) };
         AutomationProperties.SetName(back, "返回服务器列表");
         back.Click += (_, _) => { LeaveServer(); Render(); };
         var nodeName = Secondary($"/  {node.Connection.Name}");
@@ -151,7 +154,7 @@ public sealed partial class MainWindow
         breadcrumb.Children.Add(back);
         Grid.SetColumn(nodeName, 1);
         breadcrumb.Children.Add(nodeName);
-        var title = Heading(server.Name, ServerDetail(server));
+        var title = Heading(server.Name, server.Core.Length == 0 ? $"实例 #{server.Id}" : $"{server.Core} · #{server.Id}");
         var titleText = (TextBlock)title.Children[0];
         root.Children.Add(CompactStack(breadcrumb, title));
         var commands = ServerCommands(node, server);
@@ -184,6 +187,15 @@ public sealed partial class MainWindow
     {
         var stopped = server.Status == 0;
         var running = server.Status == 2;
+        var summary = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 16, Margin = new Thickness(0, 0, 16, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        summary.Children.Add(ServerState(server));
+        var players = Secondary($"在线 {server.Players} 人");
+        players.VerticalAlignment = VerticalAlignment.Center;
+        summary.Children.Add(players);
         var commands = new CommandBar
         {
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
@@ -191,7 +203,7 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalContentAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 0, 6, 0),
-            Content = ServerState(server),
+            Content = summary,
         };
         AppBarButton Command(string label, Symbol icon, Func<Task> action, bool enabled = true)
         {
@@ -223,7 +235,7 @@ public sealed partial class MainWindow
         var compact = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
         AutomationProperties.SetName(compact, "工作区选项");
         foreach (var (key, label) in new (string, string)[]
-            { ("console-panel", "面板"), ("console", "原始控制台"), ("files", "文件"), ("configuration", "配置"),
+            { ("console-panel", "Rolithax Schema"), ("console", "原始日志"), ("files", "文件"), ("configuration", "配置"),
                 ("addons", "插件 / 模组"), ("resources", "资源") })
         {
             var item = new SelectorBarItem { Text = label, Tag = key };
@@ -245,7 +257,7 @@ public sealed partial class MainWindow
         tabs.Children.Add(compact);
         tabs.SizeChanged += (_, args) =>
         {
-            var narrow = args.NewSize.Width < 480;
+            var narrow = args.NewSize.Width < 620;
             selector.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
             compact.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
         };
@@ -478,8 +490,8 @@ public sealed partial class MainWindow
     }
 
     private static string ConsoleConnectionStatus(ConsoleRun run) =>
-        run.Connected ? "控制台已连接" :
-        run.ConnectionError.Length > 0 ? run.ConnectionError : "等待控制台连接…";
+        run.ConnectionError.Length > 0 ? run.ConnectionError :
+        run.Connected ? "控制台已连接" : "等待控制台连接…";
 
     private async Task PollConsoleAsync()
     {

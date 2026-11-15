@@ -28,6 +28,10 @@ Daemon 接口使用统一响应包装：
 
 MSLX Daemon v1.7.8 仍用 `x-api-key` 接收 API Key。连接探测读取 `GET /api/status`，成功响应的 `data` 是对象。实例列表由独立的 `GET /api/instance/list` 提供，列表失败时保留已验证的连接并允许重试。HTTP 401 表示请求未通过认证，HTTP 403 也可能来自访问策略、权限或 IP 限制，应保留可安全展示的拒绝原因。
 
+## 第三方面板协议
+
+MCSL Future 使用 `/api/v2` WebSocket JSON-RPC。MCSManager 10 使用 Web 面板的用户 API。Pterodactyl 的电源和命令通过 Client API 提交，日志通过临时凭据连接 Wings。连接配置和实例模型定义在 `shared` 的 `panels` 包。 [连接方式、协议来源和功能范围](remote-panels.md)
+
 ## Windows C ABI
 
 `windows/rolithax_core.h` 声明 WinUI 3 使用的 C ABI。会话接收 UTF-8 JSON 配置并持有独立的 REST、SignalR 客户端和流任务。操作参数为 UTF-8 JSON，返回结果包含 `ok` 和 `data`，失败返回 `error`，可附 HTTP 状态与 Daemon 业务码。
@@ -86,7 +90,7 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 
 ## Rolithax Daemon 插件
 
-远程扫码、图标和云端资源直装使用插件前缀：
+远程配对、图标和云端资源直装使用插件前缀：
 
 ```text
 /api/plugin/mslx-plugin-rolithax/...
@@ -98,7 +102,7 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 
 - `/features`：已认证用户查询配对、实例图标和资源安装扩展 API 的启用状态；管理员通过 `/features/{feature}` 修改状态。
 - `/pair/codes`：生成一次性配对码
-- `/pair/redeem`：兑换二维码载荷
+- `/pair/redeem`：兑换一次性配对载荷。Android 扫描二维码或粘贴插件「复制原文」得到的 `mslxp1:` 内容，使用同一兑换流程。
 - `/icon/server/{id}`：实例图标
 - `/resources/install`：在 Daemon 所在机器创建资源安装任务
 - `/resources/install/{id}`：查询安装任务

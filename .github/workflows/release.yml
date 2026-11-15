@@ -154,6 +154,7 @@ jobs:
 
   sync:
     name: 同步 CNB
+    if: ${{ !endsWith(inputs.tag || github.ref_name, '-Beta') }}
     needs: [source, publish]
     uses: ./.github/workflows/cnb-sync.yml
     with:

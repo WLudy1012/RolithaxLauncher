@@ -24,6 +24,7 @@ data class ResourceProject(
     val gameVersions: List<String>,
     val serverCompatible: Boolean,
     val clientCompatible: Boolean = true,
+    val providerId: String? = null,
 )
 
 data class ResourceFile(
@@ -51,14 +52,41 @@ data class ResourceVersion(
     val serverCompatible: Boolean,
 )
 
-fun ResourceVersion.isCompatibleWith(gameVersion: String, loader: String): Boolean =
-    serverCompatible &&
-        (gameVersion.isBlank() || gameVersions.isEmpty() || gameVersion in gameVersions) &&
-        (loader.isBlank() || loaders.isEmpty() || loaders.any { it.equals(loader, ignoreCase = true) })
+fun ResourceVersion.isCompatibleWith(gameVersion: String, loader: String, type: String = "mod"): Boolean =
+    serverCompatible && matchesVersion(gameVersion, resourceTargetLoaders(type, loader))
 
-fun ResourceVersion.hasCompleteCompatibilityMetadata(gameVersion: String, loader: String): Boolean =
+fun ResourceFilter.matchesVersion(version: ResourceVersion): Boolean =
+    (!serverOnly || version.serverCompatible) && version.matchesVersion(gameVersion, resourceSearchLoaders(type, loader))
+
+private fun ResourceVersion.matchesVersion(gameVersion: String, acceptedLoaders: List<String>): Boolean =
+    (gameVersion.isBlank() || gameVersions.isEmpty() || gameVersion in gameVersions) &&
+        (acceptedLoaders.isEmpty() || loaders.isEmpty() || loaders.any { it.lowercase() in acceptedLoaders })
+
+fun resourceSearchLoaders(type: String, loader: String): List<String> {
+    val selected = loader.trim().lowercase()
+    return when (type) {
+        "mod", "modpack" -> listOf(selected).filter { it in MOD_LOADERS }
+        "plugin" -> when (selected) {
+            "paper" -> listOf("paper", "spigot", "bukkit")
+            "purpur" -> listOf("purpur", "paper", "spigot", "bukkit")
+            "spigot" -> listOf("spigot", "bukkit")
+            "waterfall" -> listOf("waterfall", "bungeecord")
+            else -> listOf(selected).filter { it in PLUGIN_LOADERS }
+        }
+        else -> emptyList()
+    }
+}
+
+fun resourceTargetLoaders(type: String, loader: String): List<String> =
+    if (type == "datapack" || loader.isBlank()) emptyList()
+    else resourceSearchLoaders(type, loader).ifEmpty { listOf(loader.trim().lowercase()) }
+
+private val MOD_LOADERS = setOf("fabric", "forge", "neoforge", "quilt", "liteloader", "rift", "babric", "legacy-fabric", "ornithe")
+private val PLUGIN_LOADERS = setOf("bukkit", "folia", "sponge", "velocity", "bungeecord")
+
+fun ResourceVersion.hasCompleteCompatibilityMetadata(gameVersion: String, loader: String, type: String = "mod"): Boolean =
     (gameVersion.isBlank() || gameVersions.isNotEmpty()) &&
-        (loader.isBlank() || loaders.isNotEmpty())
+        (resourceTargetLoaders(type, loader).isEmpty() || loaders.isNotEmpty())
 
 data class ResourceCartEntry(
     val project: ResourceProject,

@@ -100,10 +100,12 @@ internal class SharedDaemonConnection(
         } catch (e: IllegalStateException) {
             val response = generateSequence<Throwable>(e) { it.cause }.filterIsInstance<DaemonException>().firstOrNull()
                 ?: throw e
-            val message = when (response.httpStatus ?: response.businessCode) {
-                401 -> "Daemon 鉴权失败，请检查 API Key"
-                403 -> response.serverMessage?.takeIf { it.isNotBlank() } ?: "Daemon 拒绝访问（403）"
-                else -> throw e
+            val status = response.httpStatus ?: response.businessCode
+            if (status != 401 && status != 403) throw e
+            val message = when {
+                response.businessCode != status -> "连接入口返回 HTTP $status，请检查反向代理和访问策略"
+                status == 401 -> "Daemon 鉴权失败，请检查 API Key"
+                else -> response.serverMessage?.takeIf { it.isNotBlank() } ?: "Daemon 拒绝访问（403）"
             }
             throw IllegalStateException(message, e)
         } catch (_: JsonParseException) {
