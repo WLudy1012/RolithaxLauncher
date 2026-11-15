@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -13,16 +14,17 @@ namespace Rolithax.Windows;
 public sealed partial class MainWindow
 {
     private sealed record ConsolePanelNode(string Id, string Kind, string Label, string? Field, string? Action,
-        ConsolePanelNode[]? Children);
+        ConsolePanelNode[]? Children, string? Description = null, string? Tone = null, string? Unit = null,
+        string? Placeholder = null);
 
     private sealed record ConsolePanelSnapshot(long Revision, long PackageRevision, string PluginId, string Title,
         bool Stale, ConsolePanelNode[] Nodes, Dictionary<string, string> Values, Dictionary<string, string> Evidence);
 
-    private sealed record ConsolePluginSource(string Manifest, string Ui, string Rules);
+    private sealed record ConsolePluginSource(string Manifest, string Ui, string Rules, string Lua = "");
 
     private sealed class ConsolePluginView(ConsoleRun run)
     {
-        public StackPanel Body { get; } = new() { Spacing = 12 };
+        public StackPanel Body { get; } = new() { Spacing = 24, Padding = new Thickness(0, 8, 0, 16) };
         public List<Action<ConsolePanelSnapshot>> Bindings { get; } = [];
         public long? PackageRevision { get; set; }
         public TextBlock? Status { get; set; }
@@ -63,33 +65,46 @@ public sealed partial class MainWindow
         }
 
         var status = view.Status = Secondary(ConsoleConnectionStatus(run));
-        var import = Button("导入面板插件", () => RunAsync(() => ImportConsolePanelAsync(run)));
-        var restore = Button("恢复内置面板", () => RunAsync(() => RestoreConsolePanelAsync(run)));
-        restore.IsEnabled = run.ImportedPanel;
+        var management = new MenuFlyout();
+        var import = new MenuFlyoutItem { Text = "导入本地 ZIP", Icon = new SymbolIcon(Symbol.OpenFile) };
+        import.Click += async (_, _) => await RunAsync(() => ImportConsolePanelAsync(run));
+        management.Items.Add(import);
+        var restore = new MenuFlyoutItem { Text = "恢复内置 Schema", IsEnabled = run.ImportedPanel };
+        restore.Click += async (_, _) => await RunAsync(() => RestoreConsolePanelAsync(run));
+        management.Items.Add(restore);
+        var manage = new DropDownButton
+        {
+            Content = run.Panel?.Title ?? "Rolithax Schema", Flyout = management, MinWidth = 180, MaxWidth = 350,
+        };
+        AutomationProperties.SetName(manage, "选择或管理 Schema 插件");
         var source = (run.ImportedPanel, run.AllowedPanelCommands.Count) switch
         {
-            (false, _) => "内置面板",
-            (true, 0) => "本地插件 · 只读",
-            _ => "本地插件 · 已授予命令权限",
+            (false, _) => "内置 Schema",
+            (true, 0) => "当前插件 · 只读",
+            _ => $"当前插件 · 已授权 {run.AllowedPanelCommands.Count} 项操作",
         };
-        view.Body.Children.Add(Card(AdaptivePair(Section(run.Panel?.Title ?? "控制台面板", Secondary(source), status),
-            Actions(import, restore), 560)));
+        view.Body.Children.Add(AdaptivePair(CompactStack(manage, Secondary(source)),
+            (FrameworkElement)Actions(Button("插件源", () => RunAsync(() => OpenSchemaRepositoryAsync(run))), status), 560));
+        view.Body.Children.Add(SchemaDivider());
         if (run.Panel is not { } snapshot)
         {
-            view.Body.Children.Add(Card(CompactStack(Secondary("正在读取面板…"), new ProgressBar { IsIndeterminate = true })));
+            view.Body.Children.Add(CompactStack(Secondary("正在读取 Rolithax Schema…"), new ProgressBar { IsIndeterminate = true }));
             return;
         }
 
         var stale = new InfoBar
         {
             Severity = InfoBarSeverity.Warning,
-            Message = "控制台日志可能有缺失，面板中的历史数据可能已过时。",
+            Message = "部分日志缺失，以下结果可能不完整。可展开日志依据核对。",
             IsClosable = false,
         };
         view.Bindings.Add(panel => stale.IsOpen = panel.Stale);
         view.Body.Children.Add(stale);
-        foreach (var node in snapshot.Nodes)
-            view.Body.Children.Add(BuildPanelNode(run, view, node, snapshot.PackageRevision));
+        var elements = snapshot.Nodes.Select(node => BuildPanelNode(run, view, node, snapshot.PackageRevision)).ToArray();
+        if (snapshot.Nodes.All(node => node.Kind == "section"))
+            view.Body.Children.Add(SchemaColumns(elements, 350, 2));
+        else foreach (var element in elements) view.Body.Children.Add(element);
+        view.Body.Children.Add(SchemaDivider());
         view.Body.Children.Add(BuildPanelEvidence(view, snapshot.Nodes));
         view.Refresh();
     }
@@ -127,7 +142,7 @@ public sealed partial class MainWindow
         });
         return new Expander
         {
-            Header = "查看日志依据",
+            Header = "日志依据",
             Content = content,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -136,22 +151,71 @@ public sealed partial class MainWindow
 
     private UIElement BuildPanelNode(ConsoleRun run, ConsolePluginView view, ConsolePanelNode node, long revision)
     {
+        string Display(ConsolePanelSnapshot snapshot) => node.Field is { } field &&
+            snapshot.Values.TryGetValue(field, out var text) && text.Length > 0 ? text :
+            node.Field is { } emptyField && snapshot.Evidence.ContainsKey(emptyField) ? "无" : "等待日志";
+        StackPanel Described(UIElement content)
+        {
+            var result = CompactStack(content);
+            if (!string.IsNullOrWhiteSpace(node.Description)) result.Children.Add(Secondary(node.Description));
+            return result;
+        }
         switch (node.Kind)
         {
             case "section":
                 var section = Section(node.Label);
+                section.Spacing = 16;
+                ((TextBlock)section.Children[0]).FontSize = 22;
+                if (!string.IsNullOrWhiteSpace(node.Description)) section.Children.Add(Secondary(node.Description));
                 foreach (var child in node.Children ?? [])
                     section.Children.Add(BuildPanelNode(run, view, child, revision));
-                return Card(section);
+                return section;
 
-            case "text":
-            case "status":
-                var value = Secondary("—");
+            case "row":
+                return SchemaColumns((node.Children ?? []).Select(child => BuildPanelNode(run, view, child, revision)).ToArray(), 180, 3);
+
+            case "divider":
+                return SchemaDivider();
+
+            case "metric":
+                var metric = Text("等待日志", SchemaToneStyle(node.Tone, "Metric"));
+                view.Bindings.Add(snapshot => metric.Text = Display(snapshot) +
+                    (node.Field is { } metricField && snapshot.Values.GetValueOrDefault(metricField, "").Length > 0 && node.Unit is { } unit ? " " + unit : ""));
+                return Described(CompactStack(Secondary(node.Label), metric));
+
+            case "progress":
+                var progressText = Text("等待日志", "BodyStrongTextBlockStyle");
+                var progress = new ProgressBar { Minimum = 0, Maximum = 100, Style = Resource<Style>(SchemaToneStyle(node.Tone, "Progress")) };
+                AutomationProperties.SetName(progress, node.Label);
                 view.Bindings.Add(snapshot =>
                 {
-                    value.Text = node.Field is { } field && snapshot.Values.TryGetValue(field, out var text) && text.Length > 0 ? text : "—";
+                    var raw = node.Field is { } progressField ? snapshot.Values.GetValueOrDefault(progressField, "").Trim().TrimEnd('%') : "";
+                    var valid = double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number);
+                    progress.Visibility = valid ? Visibility.Visible : Visibility.Collapsed;
+                    progress.Value = valid ? Math.Clamp(number, 0, 100) : 0;
+                    progressText.Text = valid ? progress.Value.ToString("0.##", CultureInfo.InvariantCulture) + (node.Unit ?? "%") : "等待日志";
                 });
-                return node.Field is null ? Text(node.Label) : CompactStack(Text(node.Label, "BodyStrongTextBlockStyle"), value);
+                return Described(Stack(AdaptivePair(Text(node.Label, "BodyStrongTextBlockStyle"), progressText, 250), progress));
+
+            case "badge":
+            case "status":
+                var badgeValue = Text("等待日志", SchemaToneStyle(node.Tone, "Text"));
+                view.Bindings.Add(snapshot => badgeValue.Text = Display(snapshot));
+                var badge = new Border
+                {
+                    Style = Resource<Style>(node.Tone == "success" ? "RolithaxSuccessPillStyle" : "RolithaxNeutralPillStyle"),
+                    Child = badgeValue, MaxWidth = 280,
+                };
+                return Described(AdaptivePair(Text(node.Label), badge, 300));
+
+            case "text":
+                var value = Text("等待日志");
+                view.Bindings.Add(snapshot =>
+                {
+                    value.Text = Display(snapshot) +
+                        (node.Field is { } field && snapshot.Values.GetValueOrDefault(field, "").Length > 0 && node.Unit is { } unit ? " " + unit : "");
+                });
+                return Described(node.Field is null ? Text(node.Label) : AdaptivePair(Secondary(node.Label), value, 320, equalColumns: true));
 
             case "list":
                 var list = new ListView
@@ -161,7 +225,7 @@ public sealed partial class MainWindow
                     IsItemClickEnabled = false,
                 };
                 AutomationProperties.SetName(list, node.Label);
-                var empty = Secondary("暂无记录");
+                var empty = Secondary("等待日志");
                 string? previous = null;
                 view.Bindings.Add(snapshot =>
                 {
@@ -173,8 +237,9 @@ public sealed partial class MainWindow
                     list.ItemsSource = rows;
                     list.Visibility = rows.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
                     empty.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+                    empty.Text = Display(snapshot);
                 });
-                return Stack(Text(node.Label, "BodyStrongTextBlockStyle"), list, empty);
+                return Described(Stack(Text(node.Label, "BodyStrongTextBlockStyle"), list, empty));
 
             case "field" when node.Field is { } key:
                 var input = new TextBox
@@ -182,24 +247,73 @@ public sealed partial class MainWindow
                     Header = node.Label,
                     Text = run.PanelDrafts.GetValueOrDefault(key, ""),
                     MaxLength = 128,
+                    PlaceholderText = node.Placeholder ?? "",
                 };
                 AutomationProperties.SetName(input, node.Label);
-                input.TextChanged += (_, _) => run.PanelDrafts[key] = input.Text;
-                return input;
+                input.TextChanged += (_, _) => { run.PanelDrafts[key] = input.Text; view.Refresh(); };
+                return Described(input);
 
             case "button" when node.Action is { } action:
-                var button = Button(node.Label, () => RunAsync(() => SendPanelActionAsync(run, action, revision)));
+                var button = Button(node.Label, () => RunAsync(() => SendPanelActionAsync(run, action, revision)),
+                    accent: node.Tone is not ("neutral" or "danger" or "error"));
+                button.HorizontalAlignment = HorizontalAlignment.Stretch;
+                button.MinHeight = 40;
+                if (node.Tone is "danger" or "error") button.Style = Resource<Style>("SchemaCriticalButtonStyle");
                 view.Bindings.Add(_ =>
                 {
                     var granted = !run.ImportedPanel || run.AllowedPanelCommands.ContainsKey(action);
-                    button.IsEnabled = run.Connected && granted;
+                    var valid = !run.ImportedPanel || !granted || CommandParameter.Matches(run.AllowedPanelCommands[action])
+                        .All(parameter => run.PanelDrafts.GetValueOrDefault(parameter.Groups[1].Value, "").Trim() is { Length: > 0 and <= 128 } draft &&
+                            !draft.Any(char.IsWhiteSpace));
+                    button.IsEnabled = run.Connected && granted && valid;
                     ToolTipService.SetToolTip(button, !granted ? "导入时未授予此命令权限。" : null);
                 });
-                return button;
+                return Described(button);
 
             default:
                 return Secondary("此面板控件无法显示。");
         }
+    }
+
+    private static Border SchemaDivider() => new()
+    {
+        Style = Resource<Style>("SchemaDividerStyle"),
+    };
+
+    private static string SchemaToneStyle(string? tone, string kind) => "Schema" + (tone switch
+    {
+        "danger" or "error" => "Critical",
+        "warning" => "Warning",
+        "success" => "Success",
+        "neutral" => "Neutral",
+        _ => "Primary",
+    }) + kind + "Style";
+
+    private static Grid SchemaColumns(IReadOnlyList<UIElement> elements, double minimumWidth, int maximumColumns)
+    {
+        var grid = new Grid { ColumnSpacing = 28, RowSpacing = 28 };
+        foreach (var element in elements) grid.Children.Add(element);
+        var current = 0;
+        void Layout(double width)
+        {
+            var columns = Math.Clamp((int)((width + grid.ColumnSpacing) / (minimumWidth + grid.ColumnSpacing)), 1, maximumColumns);
+            if (current == columns) return;
+            current = columns;
+            grid.ColumnDefinitions.Clear();
+            grid.RowDefinitions.Clear();
+            for (var column = 0; column < columns; column++) grid.ColumnDefinitions.Add(new ColumnDefinition());
+            for (var row = 0; row < (elements.Count + columns - 1) / columns; row++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (var index = 0; index < elements.Count; index++)
+            {
+                if (elements[index] is not FrameworkElement element) continue;
+                Grid.SetRow(element, index / columns);
+                Grid.SetColumn(element, index % columns);
+            }
+        }
+        Layout(0);
+        grid.SizeChanged += (_, args) => Layout(args.NewSize.Width);
+        return grid;
     }
 
     private void ApplyConsolePanel(ConsoleRun run, JsonElement payload, bool rebuild = false)
@@ -231,32 +345,43 @@ public sealed partial class MainWindow
         if (file is null || !IsCurrentConsole(run))
             return;
         var source = await Task.Run(() => ReadConsolePlugin(file.Path));
+        await ImportConsolePanelSourceAsync(run, source);
+    }
+
+    private async Task ImportConsolePanelSourceAsync(ConsoleRun run, ConsolePluginSource source)
+    {
+        if (!IsCurrentConsole(run))
+            return;
         var result = await CallAsync(run.Node, "consolePanelInspect", new { source });
         if (result.ValueKind != JsonValueKind.Object)
             throw new DaemonException("无法读取控制台插件的命令声明。");
         var commands = result.EnumerateObject().ToArray();
-        var grant = new CheckBox { Content = "允许执行下列命令（每次执行前仍需确认）" };
-        var content = Stack(Secondary("插件只在此实例的当前控制台会话生效。它将读取此会话的日志。"));
-        if (commands.Length > 0)
+        var grants = new Dictionary<string, CheckBox>();
+        using var manifest = JsonDocument.Parse(source.Manifest);
+        var content = Stack(Text($"{manifest.RootElement.Field("id").StringValue()} · {manifest.RootElement.Field("version").StringValue()}",
+                "BodyStrongTextBlockStyle"),
+            Secondary("Schema 插件将读取当前实例会话的日志。仅授权需要的操作，每次发送命令前仍需确认。"));
+        foreach (var command in commands)
         {
+            var grant = new CheckBox { Content = CompactStack(Text(command.Value.StringValue()), Secondary(command.Name)) };
+            AutomationProperties.SetName(grant, $"允许 {command.Value.StringValue()}");
+            grants[command.Name] = grant;
             content.Children.Add(grant);
-            foreach (var command in commands)
-                content.Children.Add(Secondary($"{command.Name}  ·  {command.Value.StringValue()}"));
         }
-        if (!await ConfirmAsync("导入控制台插件", new ScrollViewer { Content = content, MaxHeight = 360 }, "导入") || !IsCurrentConsole(run))
+        if (commands.Length == 0) content.Children.Add(Secondary("此插件仅解析日志，不包含命令操作。"));
+        if (!await ConfirmAsync("加载 Schema 插件", new ScrollViewer { Content = content, MaxHeight = 360 }, "加载") || !IsCurrentConsole(run))
             return;
-        var allowedCommands = grant.IsChecked == true ? commands.Select(command => command.Name).ToArray() : [];
+        var allowedCommands = grants.Where(pair => pair.Value.IsChecked == true).Select(pair => pair.Key).ToArray();
         var snapshot = await CallAsync(run.Node, "consolePanelImport",
             new { id = run.ServerId, streamEpoch = run.Epoch, source, allowedCommands });
         if (!IsCurrentConsole(run))
             return;
         run.ImportedPanel = true;
-        run.AllowedPanelCommands = grant.IsChecked == true
-            ? commands.ToDictionary(command => command.Name, command => command.Value.StringValue())
-            : [];
+        run.AllowedPanelCommands = commands.Where(command => allowedCommands.Contains(command.Name))
+            .ToDictionary(command => command.Name, command => command.Value.StringValue());
         run.PanelDrafts.Clear();
         ApplyConsolePanel(run, snapshot, rebuild: true);
-        Notice("控制台插件已载入。");
+        Notice("Schema 插件已载入。");
     }
 
     private async Task RestoreConsolePanelAsync(ConsoleRun run)
@@ -270,7 +395,7 @@ public sealed partial class MainWindow
         run.AllowedPanelCommands.Clear();
         run.PanelDrafts.Clear();
         ApplyConsolePanel(run, snapshot, rebuild: true);
-        Notice("已恢复内置面板。");
+        Notice("已恢复内置 Schema。");
     }
 
     private async Task SendPanelActionAsync(ConsoleRun run, string actionId, long packageRevision)
@@ -281,8 +406,7 @@ public sealed partial class MainWindow
         var arguments = new Dictionary<string, string>();
         if (run.ImportedPanel)
         {
-            var parameter = CommandParameter.Match(run.AllowedPanelCommands[actionId]);
-            if (parameter.Success)
+            foreach (Match parameter in CommandParameter.Matches(run.AllowedPanelCommands[actionId]))
             {
                 var key = parameter.Groups[1].Value;
                 arguments[key] = run.PanelDrafts.GetValueOrDefault(key, "").Trim();
@@ -293,7 +417,7 @@ public sealed partial class MainWindow
         var confirmedCommand = result.StringValue();
         if (confirmedCommand.Length == 0)
             throw new DaemonException("面板未生成有效命令。");
-        if (run.ImportedPanel && !await ConfirmAsync("执行面板命令",
+        if (run.ImportedPanel && !await ConfirmAsync("执行 Schema 命令",
             Stack(Secondary($"目标为 {run.Node.Connection.Name} 上的服务器 #{run.ServerId}。"),
                 new TextBox { Text = confirmedCommand, IsReadOnly = true, TextWrapping = TextWrapping.Wrap }), "执行"))
             return;
@@ -314,15 +438,20 @@ public sealed partial class MainWindow
             if (file.Length > 512 * 1024)
                 throw new DaemonException("控制台插件压缩包过大。");
             using var zip = new ZipArchive(file);
-            var expected = new[] { "plugin.json", "ui.xml", "rules.yaml" };
-            if (zip.Entries.Count != expected.Length ||
-                expected.Any(name => zip.Entries.Count(entry => entry.FullName == name) != 1))
-                throw new DaemonException("压缩包根目录需要且只允许 plugin.json、ui.xml 和 rules.yaml。");
+            var allowed = new HashSet<string>(StringComparer.Ordinal)
+                { "plugin.json", "ui.xml", "rules.yaml", "business.lua" };
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            if (zip.Entries.Count is < 3 or > 4 || zip.Entries.Any(entry =>
+                    !allowed.Contains(entry.FullName) || !names.Add(entry.FullName) ||
+                    ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000) ||
+                !names.Contains("plugin.json") || !names.Contains("ui.xml") ||
+                (!names.Contains("rules.yaml") && !names.Contains("business.lua")))
+                throw new DaemonException("Schema 包根目录必须包含 plugin.json、ui.xml，以及 rules.yaml 或 business.lua，不能包含重复或其他文件。");
 
             string ReadEntry(string name, int maxFileBytes)
             {
                 var entry = zip.GetEntry(name) ?? throw new InvalidDataException();
-                if (entry.Length < 1 || entry.Length > maxFileBytes)
+                if (entry.Length < (name == "rules.yaml" ? 0 : 1) || entry.Length > maxFileBytes)
                     throw new DaemonException("控制台插件文件为空或过大。");
                 using var stream = entry.Open();
                 using var bytes = new MemoryStream();
@@ -339,8 +468,9 @@ public sealed partial class MainWindow
                 return new UTF8Encoding(false, true).GetString(bytes.GetBuffer(), 0, (int)bytes.Length).TrimStart('\uFEFF');
             }
 
-            return new ConsolePluginSource(ReadEntry(expected[0], 8_192), ReadEntry(expected[1], 65_536),
-                ReadEntry(expected[2], 65_536));
+            return new ConsolePluginSource(ReadEntry("plugin.json", 16_384), ReadEntry("ui.xml", 65_536),
+                names.Contains("rules.yaml") ? ReadEntry("rules.yaml", 65_536) : "",
+                names.Contains("business.lua") ? ReadEntry("business.lua", 131_072) : "");
         }
         catch (Exception error) when (error is InvalidDataException or DecoderFallbackException)
         {

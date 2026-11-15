@@ -10,3 +10,5 @@
 # OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+-keep class com.wludy.rolithax.launcher.shared.console.SchemaNativeBridge { *; }

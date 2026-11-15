@@ -1,5 +1,6 @@
 package com.wludy.rolithax.launcher.data
 
+import com.wludy.rolithax.launcher.data.remote.ApiClient
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -8,6 +9,38 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DaemonConnectionVerificationTest {
+    @Test
+    fun sendsOneLauncherUserAgentThroughTheSharedTransport() = runBlocking {
+        MockWebServer().use { daemon ->
+            daemon.enqueue(MockResponse().setBody("""{"code":200,"data":{"version":"1.7.8"}}"""))
+            val config = DaemonConfig(baseUrl = daemon.url("/").toString(), apiKey = "test-key", allowHttp = true)
+            val registry = DaemonRegistry()
+            try {
+                assertEquals("1.7.8", registry.verifyConnection(config).result.getOrThrow().version)
+                val request = daemon.takeRequest()
+                assertEquals(listOf(ApiClient.USER_AGENT), request.headers.values("User-Agent"))
+                assertEquals(listOf("test-key"), request.headers.values("x-api-key"))
+            } finally {
+                registry.close()
+            }
+        }
+    }
+
+    @Test
+    fun proxyDenialIsReportedSeparatelyFromDaemonAuthentication() = runBlocking {
+        MockWebServer().use { daemon ->
+            daemon.enqueue(MockResponse().setResponseCode(403).setHeader("Content-Type", "text/html").setBody("<h1>403 Forbidden</h1>"))
+            val config = DaemonConfig(baseUrl = daemon.url("/").toString(), apiKey = "test-key", allowHttp = true)
+            val registry = DaemonRegistry()
+            try {
+                val error = runCatching { registry.verifyConnection(config) }.exceptionOrNull()
+                assertEquals("连接入口返回 HTTP 403，请检查反向代理和访问策略", error?.message)
+            } finally {
+                registry.close()
+            }
+        }
+    }
+
     @Test
     fun rejectedApiKeyDoesNotReplaceAnExistingConnection() = runBlocking {
         MockWebServer().use { daemon ->

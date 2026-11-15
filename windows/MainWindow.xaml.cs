@@ -716,6 +716,7 @@ public sealed partial class MainWindow : Window
         var dialog = new ContentDialog
         {
             XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
             Title = title,
             Content = content,
             PrimaryButtonText = action,

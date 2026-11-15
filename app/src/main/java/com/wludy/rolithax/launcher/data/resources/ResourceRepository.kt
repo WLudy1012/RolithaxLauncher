@@ -40,7 +40,7 @@ class ResourceRepository(
             remoteMediator = ResourceRemoteMediator(database, providerFor(filter.providerId), filter),
             pagingSourceFactory = { dao.pagingSource(filter.key) },
         ).flow
-            .mapEntities()
+            .mapEntities(filter.providerId)
 
     suspend fun versions(projectId: String, filter: ResourceFilter): List<ResourceVersion> =
         versionsWithStatus(projectId, filter).versions
@@ -49,11 +49,11 @@ class ResourceRepository(
         val cacheProjectId = "${filter.providerId.lowercase()}:$projectId"
         val cached = dao.versions(cacheProjectId)
             .mapNotNull { runCatching { it.toDomain(gson) }.getOrNull() }
-            .filter { it.isCompatibleWith(filter.gameVersion, filter.loader) }
+            .filter(filter::matchesVersion)
         return try {
             val parsed = providerFor(filter.providerId).versions(projectId, filter)
             dao.putVersions(parsed.map { it.toEntity(gson, cacheProjectId) })
-            ResourceVersionsResult(parsed)
+            ResourceVersionsResult(parsed.filter(filter::matchesVersion))
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -150,11 +150,11 @@ class ResourceRepository(
                             val type = requiredProject?.type ?: "mod"
                             val candidates = versions(
                                 projectId,
-                                ResourceFilter(type, gameVersion = gameVersion, loader = loader, providerId = entry.providerId),
+                                ResourceFilter(type, gameVersion = gameVersion, loader = loader, serverOnly = true, providerId = entry.providerId),
                             )
                             val requiredVersion = dependency.versionId?.let { id -> candidates.firstOrNull { it.id == id } }
                                 ?: candidates.firstOrNull { it.serverCompatible }
-                            if (requiredProject != null && requiredVersion != null && requiredProject.serverCompatible) {
+                            if (requiredProject != null && requiredVersion?.isCompatibleWith(gameVersion, loader, type) == true && requiredProject.serverCompatible) {
                                 val added = ResourceCartEntry(requiredProject, requiredVersion, entry.providerId)
                                 selected[normalizedId] = added
                                 queue.addLast(added)
@@ -173,7 +173,8 @@ class ResourceRepository(
             if (gameVersion.isNotBlank() && entry.version.gameVersions.isNotEmpty() && gameVersion !in entry.version.gameVersions) {
                 issues += ResourceIssue(ResourceIssue.Severity.BLOCKING, "${entry.project.name} 不支持 Minecraft $gameVersion", setOf(entry.project.id))
             }
-            if (loader.isNotBlank() && entry.version.loaders.isNotEmpty() && entry.version.loaders.none { it.equals(loader, ignoreCase = true) }) {
+            val targetLoaders = resourceTargetLoaders(entry.project.type, loader)
+            if (targetLoaders.isNotEmpty() && entry.version.loaders.isNotEmpty() && entry.version.loaders.none { it.lowercase() in targetLoaders }) {
                 issues += ResourceIssue(ResourceIssue.Severity.BLOCKING, "${entry.project.name} 不支持 $loader", setOf(entry.project.id))
             }
             if (!entry.project.serverCompatible || !entry.version.serverCompatible) {
@@ -303,9 +304,11 @@ private class ResourceRemoteMediator(
                     return MediatorResult.Success(sync?.endReached ?: true)
                 }
                 if (offset == 0) lastTag = page.etag ?: lastTag
-                total = page.totalHits.takeIf { it > 0 } ?: total
+                total = page.totalHits
                 rawFetched = page.resultCount
-                val pageItems = page.projects.filter { !filter.serverOnly || it.serverCompatible }
+                val pageItems = page.projects.filter { project ->
+                    project.type == filter.type && (!filter.serverOnly || project.serverCompatible)
+                }
                 val start = if (loadType == LoadType.REFRESH) items.size else dao.itemCount(filter.key) + items.size
                 items += pageItems.mapIndexed { index, project -> project.toEntity(filter.key, start + index) }
                 offset += rawFetched
@@ -341,8 +344,8 @@ private class ResourceRemoteMediator(
     }
 }
 
-private fun Flow<PagingData<ResourceItemEntity>>.mapEntities(): Flow<PagingData<ResourceProject>> =
-    map { data -> data.map(ResourceItemEntity::toDomain) }
+private fun Flow<PagingData<ResourceItemEntity>>.mapEntities(providerId: String): Flow<PagingData<ResourceProject>> =
+    map { data -> data.map { it.toDomain().copy(providerId = providerId) } }
 
 private fun ResourceProject.toEntity(queryKey: String, position: Int) = ResourceItemEntity(
     queryKey = queryKey,

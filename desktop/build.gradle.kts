@@ -24,10 +24,19 @@ dependencies {
 }
 
 val prepareDesktopLegal by tasks.registering(Sync::class) {
+    dependsOn(":shared:buildSchemaNative")
     from(rootProject.file("app/src/main/assets/legal")) {
         into("legal")
     }
+    from(project(":shared").layout.buildDirectory.dir("schema-native/bin")) {
+        include("librolithax_schema.so", "librolithax_schema.dylib", "rolithax_schema.dll")
+    }
     into(layout.buildDirectory.dir("desktop-resources/common"))
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(":shared:buildSchemaNative")
+    systemProperty("jna.library.path", project(":shared").layout.buildDirectory.dir("schema-native/bin").get().asFile.absolutePath)
 }
 
 tasks.matching { it.name.startsWith("prepare") && it.name.endsWith("AppResources") }.configureEach {

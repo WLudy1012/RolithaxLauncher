@@ -16,9 +16,11 @@
 | [`project.md`](project.md) | 产品身份、包名、技术栈、目录结构和功能边界 |
 | [`architecture.md`](architecture.md) | MVVM、依赖容器、数据流、导航和核心模块职责 |
 | [`contracts.md`](contracts.md) | Daemon REST、MSLAPI、SignalR、插件路由和网络约束 |
+| [`remote-panels.md`](remote-panels.md) | MCSL Future、MCSManager 10 与 Pterodactyl 的设置及宿主支持范围 |
 | [控制台插件 SDK](https://github.com/WLudy1012/rolithax-console-sdk) | Android 与 Windows 的面板格式、日志规则、命令授权、热加载和工具链 |
+| [`rolithax-schema.md`](rolithax-schema.md) | C++ 解析引擎、原生工作区、Git 插件源、Lua 包与验证边界 |
 | [`local-server.md`](local-server.md) | 本机实例、JVM 引擎、运行时、存储和保活 |
-| [`resource-center.md`](resource-center.md) | Provider、Modrinth、MSLAPI、缓存、安装与依赖校验 |
+| [`resource-center.md`](resource-center.md) | Modrinth、CurseForge、MSLAPI、筛选、缓存及安装 |
 | [`security.md`](security.md) | 凭据保护、HTTPS、日志、下载校验、备份和权限边界 |
 | [`delivery.md`](delivery.md) | 代码风格、提交、验证、GitHub/CNB 工作流与版本规则 |
 | [`history.md`](history.md) | 重要演进、当前实现依据和已知外部验收边界 |

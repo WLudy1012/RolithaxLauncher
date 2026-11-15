@@ -14,11 +14,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** 一个 Daemon 连接配置。 */
@@ -104,6 +108,7 @@ class SettingsStore(private val context: Context) {
 
     private object Keys {
         val DAEMONS = stringPreferencesKey("daemons")
+        val CURSEFORGE_API_KEY = stringPreferencesKey("curseforge_api_key")
         /** 旧版本写入的损坏 Daemon JSON 备份；读取时会清除，避免明文长期留存。 */
         val DAEMONS_BACKUP = stringPreferencesKey("daemons_backup_corrupt")
         val ACTIVE_DAEMON = stringPreferencesKey("active_daemon")
@@ -163,6 +168,27 @@ class SettingsStore(private val context: Context) {
             localUseShizuku = prefs[Keys.LOCAL_USE_SHIZUKU] ?: false,
             daemonDecodeFailed = decoded?.failed == true,
         )
+    }
+
+    private val curseForgeApiKeyFlow = context.settingsDataStore.data
+        .map { it[Keys.CURSEFORGE_API_KEY] }.distinctUntilChanged()
+        .map { it?.takeIf(CryptoManager::isEncrypted)?.let(CryptoManager::decrypt) }
+        .flowOn(Dispatchers.IO)
+
+    val curseForgeApiKeyConfigured: Flow<Boolean> = curseForgeApiKeyFlow.map { !it.isNullOrBlank() }.catch { emit(false) }
+
+    suspend fun readCurseForgeApiKey(): String? = curseForgeApiKeyFlow.first()
+
+    suspend fun setCurseForgeApiKey(value: String) = mutex.withLock {
+        val key = value.trim()
+        require(key.length <= 4096 && key.all { it.code in 33..126 }) { "API Key 包含无效字符或超出长度限制" }
+        val encrypted = key.takeUnless(String::isEmpty)?.let {
+            withContext(Dispatchers.IO) { CryptoManager.encrypt(it) } ?: error("无法加密 CurseForge API Key")
+        }
+        context.settingsDataStore.edit { prefs ->
+            if (encrypted == null) prefs.remove(Keys.CURSEFORGE_API_KEY)
+            else prefs[Keys.CURSEFORGE_API_KEY] = encrypted
+        }
     }
 
     suspend fun update(transform: (AppSettings) -> AppSettings) = mutex.withLock {

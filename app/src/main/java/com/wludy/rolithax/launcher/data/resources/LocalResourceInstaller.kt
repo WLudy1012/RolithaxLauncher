@@ -229,7 +229,7 @@ class LocalResourceInstaller {
     private data class PackEnvironment(val server: String? = null)
 
     companion object {
-        private val ALLOWED_HOSTS = setOf("cdn.modrinth.com", "cdn.modrinth.net", "edge.forgecdn.net", "mediafilez.forgecdn.net")
+        private val ALLOWED_HOSTS = setOf("cdn.modrinth.com", "cdn.modrinth.net") + CURSEFORGE_DOWNLOAD_HOSTS
         private val SUPPORTED_HASHES = setOf("sha512", "sha256", "sha1")
         private const val MAX_PACK_ENTRIES = 10_000
         private const val MAX_PACK_BYTES = 4L * 1024 * 1024 * 1024

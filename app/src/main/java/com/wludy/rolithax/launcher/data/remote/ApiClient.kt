@@ -42,7 +42,7 @@ object ApiClient {
             .addInterceptor(httpLoggingInterceptor())
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
-                    .addHeader("User-Agent", USER_AGENT)
+                    .header("User-Agent", USER_AGENT)
                     .apply { if (apiKey.isNotBlank()) header("x-api-key", apiKey) }
                     .build()
                 chain.proceed(request)

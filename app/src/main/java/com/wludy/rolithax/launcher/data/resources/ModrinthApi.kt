@@ -26,8 +26,9 @@ interface ModrinthApi {
     @GET("project/{id}/version")
     suspend fun versions(
         @Path("id") id: String,
-        @Query("game_version") gameVersion: String?,
-        @Query("loader") loader: String?,
+        @Query("loader_fields") loaderFields: String?,
+        @Query("loaders") loaders: String?,
+        @Query("include_changelog") includeChangelog: Boolean = false,
     ): Response<List<JsonObject>>
 
     @GET("project/{id}")

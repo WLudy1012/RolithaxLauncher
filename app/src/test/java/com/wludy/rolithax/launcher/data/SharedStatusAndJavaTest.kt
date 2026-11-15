@@ -75,7 +75,7 @@ class SharedStatusAndJavaTest {
             assertEquals("Daemon 鉴权失败，请检查 API Key", runCatching { shared.verify() }.exceptionOrNull()?.message)
             assertEquals("Access from localhost is forbidden. (禁止本机回环访问)", runCatching { shared.verify() }.exceptionOrNull()?.message)
             assertEquals("访问被拒绝：***", runCatching { shared.verify() }.exceptionOrNull()?.message)
-            assertEquals("Daemon 拒绝访问（403）", runCatching { shared.verify() }.exceptionOrNull()?.message)
+            assertEquals("连接入口返回 HTTP 403，请检查反向代理和访问策略", runCatching { shared.verify() }.exceptionOrNull()?.message)
             assertEquals("Daemon 返回了无效的状态响应", runCatching { shared.verify() }.exceptionOrNull()?.message)
             assertEquals("Daemon 未返回状态数据", runCatching { shared.verify() }.exceptionOrNull()?.message)
             assertEquals("Daemon 返回了无效的状态响应", runCatching { shared.verify() }.exceptionOrNull()?.message)

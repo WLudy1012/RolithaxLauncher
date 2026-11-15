@@ -31,4 +31,22 @@ class ResourceCompatibilityTest {
         assertFalse(unknown.hasCompleteCompatibilityMetadata("1.21", "fabric"))
         assertTrue(unknown.hasCompleteCompatibilityMetadata("", ""))
     }
+
+    @Test
+    fun browseFiltersUseTheSameVersionRulesForOnlineAndCachedResults() {
+        val filter = ResourceFilter("mod", gameVersion = "1.21", loader = "fabric", serverOnly = true)
+        assertTrue(filter.matchesVersion(version))
+        assertFalse(filter.matchesVersion(version.copy(gameVersions = listOf("1.20"))))
+        assertFalse(filter.matchesVersion(version.copy(loaders = listOf("forge"))))
+        assertFalse(filter.matchesVersion(version.copy(serverCompatible = false)))
+        assertTrue(filter.copy(serverOnly = false).matchesVersion(version.copy(serverCompatible = false)))
+    }
+
+    @Test
+    fun installationCompatibilityConsidersResourceType() {
+        assertTrue(version.copy(loaders = listOf("bukkit")).isCompatibleWith("1.21", "paper", "plugin"))
+        assertTrue(version.copy(loaders = listOf("datapack")).isCompatibleWith("1.21", "fabric", "datapack"))
+        assertFalse(version.isCompatibleWith("1.21", "paper", "mod"))
+        assertFalse(version.copy(loaders = listOf("paper")).isCompatibleWith("1.21", "folia", "plugin"))
+    }
 }

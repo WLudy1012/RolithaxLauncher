@@ -37,12 +37,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -52,11 +52,14 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
@@ -149,6 +152,7 @@ fun ConsoleScreen(
     var sending by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<ConsolePluginImport?>(null) }
+    var showSources by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<PanelCommandConfirmation?>(null) }
     val resolver = LocalContext.current.contentResolver
     val importPlugin = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -237,8 +241,8 @@ fun ConsoleScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 },
             ) {
-                TextButton(onClick = { showControls = true }) { Text("状态与操作", maxLines = 1) }
                 IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, "实例设置") }
+                IconButton(onClick = { showControls = true }) { Icon(Icons.Filled.MoreVert, "状态与实例操作") }
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -251,36 +255,37 @@ fun ConsoleScreen(
                 verticalArrangement = Arrangement.spacedBy(CardSpacing),
             ) {
                 if (!imeVisible) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        StatusBadge(status = state.status, statusText = state.statusText)
-                        Box(Modifier.weight(1f)) {
-                            if (!state.connected || state.connectionError != null || state.connecting) {
-                                ConnectionStatus(
-                                    connecting = state.connecting,
-                                    connected = state.connected,
-                                    error = state.connectionError,
-                                    onRetry = viewModel::retryConnect,
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                StatusBadge(status = state.status, statusText = state.statusText)
+                                Text(
+                                    buildString {
+                                        append("在线 ${state.onlinePlayers} 人")
+                                        state.uptime?.takeIf(String::isNotBlank)?.let { append(" · 已运行 $it") }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            OutlinedButton(
+                                onClick = { if (state.status == 0) viewModel.sendAction("start") else confirmAction = "stop" },
+                                enabled = !state.busy && state.status in listOf(0, 2),
+                            ) { Text(when (state.status) { 0 -> "启动"; 2 -> "停止"; else -> "操作中…" }) }
                         }
-                        if (state.status == 0 || state.status == 2) {
-                            FilledTonalButton(
-                                onClick = {
-                                    if (state.status == 0) viewModel.sendAction("start") else confirmAction = "stop"
-                                },
-                                enabled = !state.busy,
-                            ) { Text(if (state.status == 0) "启动" else "停止") }
+                        if (!state.connected || state.connectionError != null || state.connecting) {
+                            ConnectionStatus(
+                                connecting = state.connecting, connected = state.connected,
+                                error = state.connectionError, onRetry = viewModel::retryConnect,
+                            )
                         }
                     }
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !showPanel, onClick = { showPanel = false }, label = { Text("原始控制台") })
-                    FilterChip(selected = showPanel, onClick = { showPanel = true }, label = { Text("结构化面板") })
+                TabRow(selectedTabIndex = if (showPanel) 0 else 1, containerColor = Color.Transparent) {
+                    Tab(selected = showPanel, onClick = { showPanel = true }, text = { Text("Rolithax Schema", maxLines = 1) })
+                    Tab(selected = !showPanel, onClick = { showPanel = false }, text = { Text("原始日志") })
                 }
 
                 val consoleModifier = Modifier.fillMaxWidth().weight(1f)
@@ -290,6 +295,7 @@ fun ConsoleScreen(
                         actionsEnabled = state.canSendCommand && !sending,
                         importing = importing,
                         onImport = { importPlugin.launch(arrayOf("*/*")) },
+                        onOpenSources = { showSources = true },
                         onRestore = { viewModel.loadPanel(null) },
                         onAction = { action, arguments, packageRevision ->
                             if (panel.snapshot.pluginId == "rolithax.paper") {
@@ -348,6 +354,17 @@ fun ConsoleScreen(
                 }
             }
         }
+    }
+
+    if (showSources) {
+        SchemaSourcePicker(
+            onDismiss = { showSources = false },
+            onSelected = { imported ->
+                showSources = false
+                pendingImport = imported
+                showPanel = true
+            },
+        )
     }
 
     pendingImport?.let { imported ->

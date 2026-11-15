@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.wludy.rolithax.launcher.data.localengine.LocalServerManager
 import com.wludy.rolithax.launcher.data.remote.ApiClient
+import com.wludy.rolithax.launcher.data.resources.CurseForgeResourceProvider
 import com.wludy.rolithax.launcher.data.resources.ModrinthApiFactory
 import com.wludy.rolithax.launcher.data.resources.ModrinthResourceProvider
 import com.wludy.rolithax.launcher.data.resources.ResourceDatabase
@@ -17,6 +18,8 @@ class AppContainer(context: Context) {
 
     val settingsStore = SettingsStore(appContext)
 
+    val panelRepository by lazy { com.wludy.rolithax.launcher.data.panels.PanelRepository(appContext) }
+
     val backupManager = BackupManager(appContext, settingsStore)
 
     val resourceDatabase by lazy {
@@ -26,7 +29,14 @@ class AppContainer(context: Context) {
     }
 
     val resourceRepository by lazy {
-        ResourceRepository(resourceDatabase, listOf(ModrinthResourceProvider(ModrinthApiFactory.create(appContext))), ApiClient.buildMslServerCoreApi())
+        ResourceRepository(
+            resourceDatabase,
+            listOf(
+                ModrinthResourceProvider(ModrinthApiFactory.create(appContext)),
+                CurseForgeResourceProvider.create(settingsStore::readCurseForgeApiKey),
+            ),
+            ApiClient.buildMslServerCoreApi(),
+        )
     }
 
     val updateRepository = UpdateRepository()

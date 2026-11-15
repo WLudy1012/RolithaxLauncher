@@ -6,10 +6,13 @@
 
 ## 数据来源
 
-- 首期 Provider：Modrinth API v3。
+- Modrinth 提供模组、插件、整合包和数据包。
+- CurseForge 提供 Minecraft 模组搜索、版本查询、依赖检查和本机安装。类目、加载器及依赖关系映射参考 [MSLX 的 CurseForge 实现](https://github.com/MSLTeam/MSLX/blob/dev/MSLX.Daemon/Services/ResourceServices/CurseForgeService.cs)，请求使用 [CurseForge 官方 API](https://docs.curseforge.com/rest-api/)。在资源中心切换到 CurseForge 后配置自己的 API Key。Key 在设备上加密保存，仅发送给官方 API 域名。
+- CurseForge 的文件元数据不统一标记客户端或服务端用途。下载限于官方返回且带有效 SHA-1 的文件，尊重作者的分发设置。当前 Daemon 云端资源安装由 Rolithax 插件处理，支持 Modrinth。
 - 服务端核心：MSLAPI 服务端核心接口。
-- Provider 接口为后续 Hangar、SpigotMC、GitHub Release 和公开 CurseForge 镜像预留扩展点。
-- Modrinth 搜索只识别 `facets`（`project_types`、`game_versions`、`categories` 作加载器）；`project_type`、`game_version`、`loader` 查询参数会被忽略并返回全站结果，不能用来筛选。很多项目同时属于 `mod` 与 `plugin`，解析类型时优先采用当前请求的分类。
+- Provider 接口可接入其他资源来源。
+- Modrinth v3 搜索使用 `facets`，请求按 `project_types`、`game_versions`、`loaders` 筛选。整合包中的 `mrpack` 指文件格式，按实际加载器筛选须使用 `mrpack_loaders`。版本列表通过 `loader_fields` 和 JSON 数组 `loaders` 传参，并与缓存版本执行同一套兼容性过滤。很多项目同时属于 `mod` 与 `plugin`，解析类型时优先采用当前请求的分类。
+- Android 默认按目标实例的游戏版本和加载器浏览，可点击筛选手动覆盖，或恢复跟随目标实例。手动筛选只影响浏览，加入清单和安装始终以目标实例的兼容性为准。CurseForge 按加载器筛选时需要指定游戏版本。
 - 云端安装由 `mslx-plugin-rolithax` 在 Daemon 所在主机完成，避免客户端下载后再上传造成重复流量。
 
 ## 缓存与刷新

@@ -74,7 +74,7 @@ app/src/main/java/com/wludy/rolithax/launcher/
 │   └── AppContainer.kt             手动依赖注入
 └── ui/
     ├── home/                      概览、实例摘要和 Daemon 负载
-    ├── connect/                   连接、扫码配对
+    ├── connect/                   连接、扫码与粘贴配对
     ├── instances/                统一实例列表
     ├── console/                  远程/本地统一控制台
     ├── create/                   创建实例向导

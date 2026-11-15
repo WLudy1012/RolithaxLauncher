@@ -60,6 +60,9 @@
 | Skiko | 0.8.18 | [JetBrains Skiko](https://github.com/JetBrains/skiko)，Apache-2.0；Compose 桌面渲染依赖，另见上游 [NOTICE](https://github.com/JetBrains/skiko/blob/master/NOTICE) |
 | java-keyring（`com.github.javakeyring:java-keyring`） | 1.0.4 | [java-keyring](https://github.com/javakeyring/java-keyring)，BSD-3-Clause；系统凭据存储。版权声明和完整许可文本见同目录 `java-keyring-LICENSE.txt` |
 | JNA / JNA Platform（`net.java.dev.jna`） | 5.15.0 | [Java Native Access](https://github.com/java-native-access/jna/tree/5.15.0)，可选 LGPL-2.1-or-later 或 Apache-2.0；本项目采用 Apache-2.0 |
+| nlohmann/json | 3.12.0 | MIT；Schema 元数据解析，完整许可见 `nlohmann-json-LICENSE.txt` |
+| tinyxml2 | 11.0.0 | zlib；Schema XML 解析，完整许可见 `tinyxml2-LICENSE.txt` |
+| Lua | 5.5.1 | MIT；Schema 受限脚本运行时，完整许可见 `lua-LICENSE.html` |
 
 各组件及其传递依赖可能另附版权、许可或 NOTICE 文件，分发时以实际产物和上游声明为准。
 

@@ -215,6 +215,11 @@ class LocalConsoleViewModel(
         _logs.value = emptyList()
     }
 
+    override fun onCleared() {
+        panelState.close()
+        super.onCleared()
+    }
+
     /** 引擎类型提示：进程内基线在停止后需重启 App，供上层按需提示。 */
     val activeKind: EngineKind? get() = manager.activeKind
 }

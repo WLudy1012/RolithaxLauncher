@@ -21,3 +21,4 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 runtimes/android/SHA256SUMS.txt text eol=lf
+native/schema/vendor/** -text

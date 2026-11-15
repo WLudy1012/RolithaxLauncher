@@ -52,17 +52,19 @@ Android APK 採用 v2 和 v3 簽章。應用程式內可以檢查並安裝更新
 
 **連線與管理**
 - 同時儲存多台 Daemon，所有入口都以**實例**定址，本機實例與各 Daemon 的實例合併在同一份清單中。
-- 掃描 Daemon 頁面產生的 QR Code 即可配對；配對依賴本專案的 [Daemon 外掛](https://github.com/WLudy1012/Rolithax-MSLX-plugin)，也可以手動填寫位址與 API Key。
+- Daemon 安裝 [Rolithax 外掛](https://github.com/WLudy1012/Rolithax-MSLX-plugin) 後，Android 支援掃描 QR Code 或貼上從外掛頁面複製的配對原文。客戶端也支援手動填寫位址與 API Key。
+- Android 的「連線 → 其他面板」支援 MCSL Future `/api/v2`、MCSManager 10 與 Pterodactyl Client API，可檢視實例狀態與日誌、傳送指令並控制電源。 [設定與功能範圍](develop/agent/remote-panels.md)
 - 啟動、停止、重新啟動、強制結束、備份；尚未同意 EULA 時會自動引導。實例可置頂，刪除需二次確認。
 
 **主控台**
 - 透過 SignalR 即時顯示日誌，並以增量方式解析 ANSI 顏色與樣式；可傳送指令、自動捲動、一鍵回到最新。
 - 遠端與本機實例共用同一套主控台介面。
+- Android 與 Windows 提供 **Rolithax Schema**：C++ 引擎將即時日誌轉成原生任務面板，支援 XML 介面、YAML 規則、受限 Lua 與熱載入。可新增 Git 外掛來源，預設[官方來源](https://github.com/WLudy1012/rolithax-schema-plugins)提供 Paper、LuckPerms 與 Chunky。[獨立 SDK](https://github.com/WLudy1012/rolithax-console-sdk)和[範本](https://github.com/WLudy1012/rolithax-console-plugin-template)包含回放工具及 Agent skill。[格式、授權及相容範圍](develop/agent/rolithax-schema.md)
 
 **建立與資源中心**
 - 建立精靈涵蓋基本資訊、伺服器核心、Java 環境、資源配置與確認，支援線上核心庫、遠端下載、本機上傳與整合包。
-- 資源中心：瀏覽 Modrinth 的模組、外掛、整合包與資料包，依目標實例的核心與遊戲版本篩選；統一檢查相依與衝突後一次安裝。
-- 目標為遠端 Daemon 時，由 Daemon 所在的機器直接下載並安裝，手機不做中轉。
+- 資源中心支援 Modrinth 的模組、外掛、整合包與資料包。篩選可跟隨目標實例，也可手動指定遊戲版本與載入器。安裝前會統一檢查相依性與衝突。
+- 在 Android 的「資源中心 → 資源來源 → CurseForge」填入自己的官方 API Key，即可瀏覽模組並安裝到本機實例。遠端 Daemon 可透過 Rolithax 外掛直接安裝 Modrinth 資源。 [資源中心說明](develop/agent/resource-center.md)
 
 **本機開服**
 - 不依賴 Daemon、Termux 或 proot，直接在手機上執行 Minecraft Java 伺服器，詳見[本機開服](#本機開服)。
@@ -77,8 +79,7 @@ Android APK 採用 v2 和 v3 簽章。應用程式內可以檢查並安裝更新
 **連線遠端 Daemon**
 
 1. 在電腦上啟動 MSLX Daemon，準備好它的位址與 API Key。
-2. 開啟 App，在「連線守護程式」頁填入位址（例如 `https://192.168.1.100:1027`）與 API Key 後連線。
-   若已安裝 Rolithax 外掛，也可以直接掃描外掛頁面上的 QR Code。
+2. 開啟「連線 → 新增 Daemon」。已有位址與 API Key 時選擇「手動連線」。Daemon 安裝 Rolithax 外掛後，可在「外掛配對」中掃描 QR Code，或貼上從外掛複製的完整原文，再送出配對。
 3. 進入實例清單，點任一實例即可檢視日誌、傳送指令、啟動或停止。
 
 **直接在手機上開伺服器**
