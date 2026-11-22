@@ -4,7 +4,11 @@ using System.Text.Json;
 
 namespace Rolithax.Windows;
 
-internal sealed record DaemonConnection(Guid Id, string Name, string Address, string ApiKey, bool AllowHttp, bool AllowSelfSigned);
+internal sealed record DaemonConnection(Guid Id, string Name, string Address, string ApiKey, bool AllowHttp, bool AllowSelfSigned,
+    string Kind = "mslx", string NodeId = "")
+{
+    public bool IsThirdParty => Kind is "mcsl" or "mcsm" or "pterodactyl";
+}
 
 internal sealed class ConnectionStore
 {

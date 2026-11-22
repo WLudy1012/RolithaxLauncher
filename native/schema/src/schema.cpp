@@ -98,6 +98,19 @@ void allowedKeys(const Json& j, const std::set<std::string>& keys, const std::st
     if (!j.is_object()) fail(file, line, "Expected an object");
     for (auto it = j.begin(); it != j.end(); ++it) if (!keys.count(it.key())) fail(file, line, "Unknown property: " + it.key());
 }
+bool relativePath(const std::string& value) {
+    if (value.empty() || value.size() > 512 || !validText(value) || value.find_first_of("\\:%?#<>|*\"") != std::string::npos) return false;
+    for (const auto& part : split(value, "/")) {
+        if (part.empty() || part == "." || part == ".." || part.back() == '.' || part.back() == ' ') return false;
+    }
+    return true;
+}
+bool httpsUrl(const std::string& value) {
+    if (!starts(value, "https://") || value.size() > 2048 || !validText(value) || value.find_first_of(" \\#") != std::string::npos) return false;
+    const auto end = value.find_first_of("/?", 8);
+    const auto host = value.substr(8, end == std::string::npos ? end : end - 8);
+    return !host.empty() && host.find('@') == std::string::npos;
+}
 struct Command {
     std::string text;
     Strings inputs;
@@ -114,6 +127,7 @@ struct Command {
             else if (item.second == "token") valid = !v.empty() && v.size() <= 128 && std::all_of(v.begin(), v.end(), [](char c) { return asciiAlnum(c) || std::strchr("_.:/+-", c) != nullptr; });
             else if (item.second == "integer") valid = std::regex_match(v, integer);
             else if (item.second == "number") valid = v.size() <= 32 && std::regex_match(v, number);
+            else if (item.second == "boolean") valid = v == "true" || v == "false";
             if (!valid || v.find('\0') != std::string::npos) return {};
             const auto placeholder = "{" + item.first + "}";
             size_t at = 0;
@@ -139,7 +153,9 @@ Command compileCommand(const Strings& props, int sdk, const std::string& file, i
     }
     if (props.count("inputs")) for (const auto& declaration : split(props.at("inputs"), ",")) {
         const auto pair = split(declaration, ":");
-        if (pair.size() != 2 || !symbol(pair[0]) || !std::set<std::string>{"player", "token", "integer", "number"}.count(pair[1]) || !result.inputs.emplace(pair[0], pair[1]).second) fail(file, line, "Invalid input declaration");
+        if (pair.size() != 2 || !symbol(pair[0]) ||
+            (!std::set<std::string>{"player", "token", "integer", "number"}.count(pair[1]) && !(sdk >= 3 && pair[1] == "boolean")) ||
+            !result.inputs.emplace(pair[0], pair[1]).second) fail(file, line, "Invalid input declaration");
     }
     std::set<std::string> used;
     for (size_t i = 1; i < words.size(); ++i) {
@@ -198,6 +214,9 @@ struct Plugin {
     std::string id, version, server, title, engine = "yaml";
     int sdk = 1;
     Json nodes;
+    Json assets = Json::array(), actions = Json::object(), preflight = Json::array();
+    Json details = Json::object();
+    std::map<std::string, std::set<std::string>> inputValues;
     Strings initial;
     std::vector<Rule> rules;
     std::map<std::string, Command> commands;
@@ -256,7 +275,7 @@ void parseYaml(Plugin& plugin, const std::string& text) {
             if (rule.prefix.empty() && rule.suffix.empty() && rule.contains.empty()) fail("rules.yaml", e.line, "A matcher is required");
             if (!symbol(rule.field)) fail("rules.yaml", e.line, "Invalid state field");
             auto captures = std::set<std::string>{"text", "player", "players", "player-event", "online", "online-summary"};
-            if (plugin.sdk == 2) { captures.insert("number"); captures.insert("percent"); }
+            if (plugin.sdk >= 2) { captures.insert("number"); captures.insert("percent"); }
             if ((rule.operation != "set" && rule.operation != "append") || p.count("value") == p.count("capture") || (p.count("capture") && !captures.count(rule.capture))) fail("rules.yaml", e.line, "Invalid operation, value or capture");
             if (p.count("value")) rule.value = get("value");
             plugin.rules.push_back(std::move(rule));
@@ -279,11 +298,11 @@ void parseXml(Plugin& plugin, const std::string& text) {
     plugin.title = root->Attribute("title");
     if (trim(plugin.title).empty() || plugin.title.size() > 256 || !validText(plugin.title)) fail("ui.xml", 1, "Invalid panel title");
     std::set<std::string> ids;
-    std::function<Json(const tinyxml2::XMLElement*, int)> node;
+    std::function<Json(const tinyxml2::XMLElement*, int, const std::string&)> node;
     auto textChildren = [](const tinyxml2::XMLElement* element) {
         for (auto* child = element->FirstChild(); child; child = child->NextSibling()) if (child->ToText() && !trim(child->Value()).empty()) fail("ui.xml", child->GetLineNum(), "Controls cannot contain text");
     };
-    node = [&](const tinyxml2::XMLElement* element, int depth) -> Json {
+    node = [&](const tinyxml2::XMLElement* element, int depth, const std::string& parent) -> Json {
         if (depth > 8 || ids.size() >= 128) fail("ui.xml", element->GetLineNum(), "Layout is too deeply nested or has too many controls");
         const std::string kind = element->Name();
         Strings attributes;
@@ -294,29 +313,47 @@ void parseXml(Plugin& plugin, const std::string& text) {
         }
         if (!attributes.count("id") || !symbol(attributes["id"]) || !ids.insert(attributes["id"]).second || !attributes.count("label")) fail("ui.xml", element->GetLineNum(), "Control needs a unique ID and a label");
         std::set<std::string> expected{"id", "label"};
-        const bool container = kind == "section" || (plugin.sdk == 2 && kind == "row");
+        const bool modern = plugin.sdk >= 3;
+        const bool container = kind == "section" || (plugin.sdk >= 2 && kind == "row") ||
+            (modern && (kind == "tabs" || kind == "tab" || kind == "expander" || kind == "select"));
+        if (modern && ((kind == "tab") != (parent == "tabs") || (kind == "option") != (parent == "select"))) {
+            fail("ui.xml", element->GetLineNum(), "Tabs contain tab controls and selects contain options");
+        }
         if (kind == "text") { if (attributes.count("field")) expected.insert("field"); }
-        else if (kind == "status" || kind == "list" || kind == "field" || (plugin.sdk == 2 && (kind == "metric" || kind == "progress" || kind == "badge"))) expected.insert("field");
+        else if (kind == "status" || kind == "list" || kind == "field" ||
+            (plugin.sdk >= 2 && (kind == "metric" || kind == "progress" || kind == "badge")) ||
+            (modern && (kind == "toggle" || kind == "select"))) expected.insert("field");
         else if (kind == "button") expected.insert("action");
-        else if (!container && !(plugin.sdk == 2 && kind == "divider")) fail("ui.xml", element->GetLineNum(), "Unknown control");
+        else if (modern && (kind == "image" || kind == "video")) expected.insert("asset");
+        else if (modern && kind == "option") expected.insert("value");
+        else if (!container && !(plugin.sdk >= 2 && kind == "divider")) fail("ui.xml", element->GetLineNum(), "Unknown control");
         for (const auto& attr : expected) if (!attributes.count(attr)) fail("ui.xml", element->GetLineNum(), "Missing control attribute: " + attr);
-        if (plugin.sdk == 2) for (const auto* extension : {"description", "tone", "unit", "placeholder"}) expected.insert(extension);
+        if (plugin.sdk >= 2) for (const auto* extension : {"description", "tone", "unit", "placeholder"}) expected.insert(extension);
         for (const auto& attr : attributes) if (!expected.count(attr.first)) fail("ui.xml", element->GetLineNum(), "Unexpected control attribute");
         for (const auto* key : {"field", "action"}) if (attributes.count(key) && !symbol(attributes[key])) fail("ui.xml", element->GetLineNum(), "Invalid field or action");
         textChildren(element);
         Json children = Json::array();
         for (auto* child = element->FirstChildElement(); child; child = child->NextSiblingElement()) {
-            if (!container) fail("ui.xml", child->GetLineNum(), "Only sections and rows may contain controls");
-            children.push_back(node(child, depth + 1));
+            if (!container) fail("ui.xml", child->GetLineNum(), "Control cannot contain children");
+            children.push_back(node(child, depth + 1, kind));
         }
+        if ((kind == "tabs" || kind == "select") && (children.empty() || children.size() > 32)) fail("ui.xml", element->GetLineNum(), "Expected between 1 and 32 children");
+        if (attributes.count("asset")) {
+            const auto asset = std::find_if(plugin.assets.begin(), plugin.assets.end(), [&](const Json& item) { return item["id"] == attributes.at("asset"); });
+            if (asset == plugin.assets.end() || (kind == "video") != ((*asset)["mediaType"] == "video/mp4")) fail("ui.xml", element->GetLineNum(), "Media asset is missing or has the wrong type");
+        }
+        if (kind == "option" && (attributes.at("value").size() > 128 || !std::all_of(attributes.at("value").begin(), attributes.at("value").end(), [](char c) {
+            return asciiAlnum(c) || std::strchr("_.:/+-", c) != nullptr;
+        }))) fail("ui.xml", element->GetLineNum(), "Option value must be a command token");
         Json result{{"id", attributes["id"]}, {"kind", kind}, {"label", attributes["label"]}, {"children", children}};
         for (const auto* key : {"field", "action", "description", "tone", "unit", "placeholder"}) result[key] = attributes.count(key) ? Json(attributes[key]) : Json(nullptr);
+        for (const auto* key : {"asset", "value"}) if (attributes.count(key)) result[key] = attributes.at(key);
         return result;
     };
     textChildren(root);
     for (auto* sibling = document.FirstChild(); sibling; sibling = sibling->NextSibling()) if (sibling != root) fail("ui.xml", sibling->GetLineNum(), "Expected exactly one panel");
     plugin.nodes = Json::array();
-    for (auto* child = root->FirstChildElement(); child; child = child->NextSiblingElement()) plugin.nodes.push_back(node(child, 1));
+    for (auto* child = root->FirstChildElement(); child; child = child->NextSiblingElement()) plugin.nodes.push_back(node(child, 1, "panel"));
 }
 
 struct LuaRuntime {
@@ -325,11 +362,13 @@ struct LuaRuntime {
     size_t used = 0;
     int ticks = 100000;
     std::chrono::steady_clock::time_point deadline;
-    int callback = LUA_NOREF;
+    int callback = LUA_NOREF, preflightCallback = LUA_NOREF, actionCallback = LUA_NOREF;
     bool running = false;
     std::string script;
     const Strings* callValues = nullptr;
     const std::string* callLine = nullptr;
+    const Json* callResult = nullptr;
+    int callCallback = LUA_NOREF;
 
     static void* allocate(void* context, void* pointer, size_t oldSize, size_t newSize) {
         auto* self = static_cast<LuaRuntime*>(context);
@@ -485,10 +524,33 @@ struct LuaRuntime {
         if (!lua_istable(state, -1)) return luaL_error(state, "Lua must return a plugin table");
         return 1;
     }
+    static void pushResult(lua_State* state, const Json& value) {
+        if (value.is_object()) {
+            lua_createtable(state, 0, static_cast<int>(value.size()));
+            for (auto entry = value.begin(); entry != value.end(); ++entry) {
+                pushResult(state, entry.value());
+                lua_setfield(state, -2, entry.key().c_str());
+            }
+        } else if (value.is_array()) {
+            lua_createtable(state, static_cast<int>(value.size()), 0);
+            lua_Integer index = 1;
+            for (const auto& entry : value) {
+                pushResult(state, entry);
+                lua_rawseti(state, -2, index++);
+            }
+        } else if (value.is_string()) {
+            const auto& string = value.get_ref<const std::string&>();
+            lua_pushlstring(state, string.data(), string.size());
+        } else if (value.is_boolean()) lua_pushboolean(state, value.get<bool>());
+        else if (value.is_number_integer() && !value.is_number_unsigned()) lua_pushinteger(state, value.get<lua_Integer>());
+        else if (value.is_number()) lua_pushnumber(state, value.get<lua_Number>());
+        else lua_pushnil(state);
+    }
     static int invoke(lua_State* state) {
         auto* self = owner(state);
-        lua_rawgeti(state, LUA_REGISTRYINDEX, self->callback);
-        lua_pushlstring(state, self->callLine->data(), self->callLine->size());
+        lua_rawgeti(state, LUA_REGISTRYINDEX, self->callCallback);
+        if (self->callResult) pushResult(state, *self->callResult);
+        else lua_pushlstring(state, self->callLine->data(), self->callLine->size());
         lua_createtable(state, 0, static_cast<int>(self->callValues->size()));
         for (const auto& entry : *self->callValues) {
             lua_pushlstring(state, entry.second.data(), entry.second.size());
@@ -553,7 +615,7 @@ struct LuaRuntime {
                     size_t size = 0; const char* name = lua_tolstring(state, -2, &size);
                     std::string id(name, size);
                     if (!symbol(id)) fail("business.lua", 1, "Invalid action ID");
-                    plugin.commands[id] = compileCommand(stringMap(state, -1, 512, false), 2, "business.lua", 1);
+                    plugin.commands[id] = compileCommand(stringMap(state, -1, 512, false), plugin.sdk, "business.lua", 1);
                     lua_pop(state, 1);
                 }
             }
@@ -561,12 +623,32 @@ struct LuaRuntime {
             lua_getfield(state, -1, "on_log");
             if (!lua_isfunction(state, -1)) fail("business.lua", 1, "on_log must be a function");
             callback = luaL_ref(state, LUA_REGISTRYINDEX);
+            if (plugin.sdk >= 3) {
+                preflightCallback = optionalCallback("on_preflight");
+                actionCallback = optionalCallback("on_action");
+            }
             lua_settop(state, 0);
         } catch (...) { lua_close(state); state = nullptr; throw; }
     }
     ~LuaRuntime() { if (state) lua_close(state); }
+    int optionalCallback(const char* name) {
+        lua_getfield(state, -1, name);
+        if (lua_isnil(state, -1)) { lua_pop(state, 1); return LUA_NOREF; }
+        if (!lua_isfunction(state, -1)) fail("business.lua", 1, std::string(name) + " must be a function");
+        return luaL_ref(state, LUA_REGISTRYINDEX);
+    }
     Strings accept(const std::string& line, const Strings& values) {
-        callValues = &values; callLine = &line;
+        return invokeCallback(callback, &line, nullptr, values);
+    }
+    Strings event(const std::string& type, const Json& result, const Strings& values) {
+        const auto ref = type == "preflight" ? preflightCallback : actionCallback;
+        return ref == LUA_NOREF ? Strings{} : invokeCallback(ref, nullptr, &result, values);
+    }
+    Strings invokeCallback(int ref, const std::string* line, const Json* result, const Strings& values) {
+        callCallback = ref;
+        callValues = &values;
+        callLine = line;
+        callResult = result;
         try {
             protectedCall(invoke);
             Strings updates;
@@ -578,6 +660,85 @@ struct LuaRuntime {
     }
 };
 
+void parseSdk3(Plugin& plugin, const Json& manifest) {
+    const std::string file = "plugin.json";
+    for (const auto* key : {"name", "description", "license", "homepage", "icon"}) {
+        const auto value = stringAt(manifest, key, file);
+        if (trim(value).empty() || value.size() > 512 || !validText(value)) fail(file, 1, "Invalid metadata: " + std::string(key));
+        plugin.details[key] = value;
+    }
+    if (!httpsUrl(plugin.details["homepage"].get_ref<const std::string&>())) fail(file, 1, "Homepage must be an HTTPS URL without credentials");
+    if (!manifest.contains("authors") || !manifest["authors"].is_array() || manifest["authors"].empty() || manifest["authors"].size() > 16) fail(file, 1, "Expected 1 to 16 authors");
+    for (const auto& author : manifest["authors"]) {
+        if (!author.is_string()) fail(file, 1, "Author must be a string");
+        const auto& name = author.get_ref<const std::string&>();
+        if (trim(name).empty() || name.size() > 128 || !validText(name)) fail(file, 1, "Invalid author");
+    }
+    plugin.details["authors"] = manifest["authors"];
+    if (manifest.contains("compatibility")) plugin.details["compatibility"] = manifest["compatibility"];
+    if (!manifest.contains("assets") || !manifest["assets"].is_array() || manifest["assets"].empty() || manifest["assets"].size() > 64) fail(file, 1, "Expected 1 to 64 assets");
+    std::set<std::string> ids, paths;
+    uint64_t total = 0;
+    bool foundIcon = false;
+    static const std::regex sha256("[0-9a-f]{64}");
+    for (const auto& asset : manifest["assets"]) {
+        allowedKeys(asset, {"id", "mediaType", "size", "sha256", "path", "url"}, file);
+        const auto id = stringAt(asset, "id", file), mediaType = stringAt(asset, "mediaType", file);
+        const bool video = mediaType == "video/mp4";
+        if (!symbol(id) || !ids.insert(id).second || (!video && mediaType != "image/png" && mediaType != "image/jpeg" && mediaType != "image/webp")) fail(file, 1, "Invalid asset ID or media type");
+        if (!asset.contains("size") || !asset["size"].is_number_unsigned()) fail(file, 1, "Invalid asset size");
+        const auto size = asset["size"].get<uint64_t>();
+        if (!size || size > (video ? 64ULL : 8ULL) * 1024 * 1024 || total + size > 128ULL * 1024 * 1024) fail(file, 1, "Asset size exceeds its limit");
+        total += size;
+        if (!std::regex_match(stringAt(asset, "sha256", file), sha256)) fail(file, 1, "Asset requires a lowercase SHA-256 digest");
+        if (asset.contains("path") == asset.contains("url")) fail(file, 1, "Asset must declare either path or url");
+        if (asset.contains("path")) {
+            const auto path = stringAt(asset, "path", file);
+            if (!starts(path, "assets/") || !relativePath(path) || !paths.insert(path).second) fail(file, 1, "Invalid or duplicate package asset path");
+        } else if (!httpsUrl(stringAt(asset, "url", file))) fail(file, 1, "Asset URL must use HTTPS without credentials");
+        if (plugin.details["icon"] == id && !video) foundIcon = true;
+    }
+    if (!foundIcon) fail(file, 1, "Plugin icon must reference an image asset");
+    plugin.assets = manifest["assets"];
+
+    if (manifest.contains("actions")) {
+        const auto& actions = manifest["actions"];
+        if (!actions.is_object() || actions.size() > 128) fail(file, 1, "Expected at most 128 actions");
+        for (auto entry = actions.begin(); entry != actions.end(); ++entry) {
+            if (!symbol(entry.key())) fail(file, 1, "Invalid action ID");
+            const auto& action = entry.value();
+            const auto kind = stringAt(action, "kind", file);
+            if (kind == "file") {
+                allowedKeys(action, {"kind", "operation", "root", "path"}, file);
+                static const std::set<std::string> operations{"list", "read", "write", "upload", "download", "rename", "delete", "mkdir"};
+                static const std::set<std::string> roots{"instance", "mcdr-config", "mcdr-plugins", "minecraft"};
+                if (!operations.count(stringAt(action, "operation", file)) || !roots.count(stringAt(action, "root", file)) ||
+                    (action.contains("path") && !relativePath(stringAt(action, "path", file)))) fail(file, 1, "Invalid file action");
+            } else if (kind == "host-task") {
+                allowedKeys(action, {"kind", "taskId"}, file);
+                if (!symbol(stringAt(action, "taskId", file))) fail(file, 1, "Invalid host task ID");
+            } else fail(file, 1, "Unknown action kind");
+        }
+        plugin.actions = actions;
+    }
+    if (manifest.contains("preflight")) {
+        const auto& checks = manifest["preflight"];
+        if (!checks.is_array() || checks.size() > 32) fail(file, 1, "Expected at most 32 preflight requirements");
+        std::set<std::pair<std::string, std::string>> targets;
+        for (const auto& check : checks) {
+            allowedKeys(check, {"kind", "id", "version"}, file);
+            const auto kind = stringAt(check, "kind", file), id = stringAt(check, "id", file), version = stringAt(check, "version", file);
+            const auto validVersionCharacter = [](char c) { return asciiAlnum(c) || std::strchr("_.+-", c) != nullptr; };
+            const auto validIdCharacter = [](char c) { return asciiAlnum(c) || std::strchr("_.-", c) != nullptr; };
+            if ((kind != "mod" && kind != "minecraftPlugin" && kind != "mcdrPlugin") ||
+                id.empty() || id.size() > 128 || !validText(id) || !std::all_of(id.begin(), id.end(), validIdCharacter) ||
+                version.empty() || version.size() > 64 || !validText(version) || !std::all_of(version.begin(), version.end(), validVersionCharacter) ||
+                !targets.emplace(kind, id).second) fail(file, 1, "Invalid or duplicate exact-version preflight requirement");
+        }
+        plugin.preflight = checks;
+    }
+}
+
 std::unique_ptr<Plugin> compile(const Json& source) {
     allowedKeys(source, {"manifest", "ui", "rules", "lua"}, "request.json");
     const auto manifestText = stringAt(source, "manifest", "plugin.json");
@@ -585,9 +746,12 @@ std::unique_ptr<Plugin> compile(const Json& source) {
     auto manifest = parseJson(manifestText, "plugin.json");
     if (!manifest.is_object() || !manifest.contains("sdkVersion") || !manifest["sdkVersion"].is_number_integer()) fail("plugin.json", 1, "Expected an SDK version");
     auto plugin = std::make_unique<Plugin>();
-    if (manifest["sdkVersion"] != 1 && manifest["sdkVersion"] != 2) fail("plugin.json", 1, "Unsupported SDK version");
+    if (manifest["sdkVersion"] != 1 && manifest["sdkVersion"] != 2 && manifest["sdkVersion"] != 3) fail("plugin.json", 1, "Unsupported SDK version");
     plugin->sdk = manifest["sdkVersion"].get<int>();
-    allowedKeys(manifest, plugin->sdk == 1 ? std::set<std::string>{"id", "version", "sdkVersion", "server"} : std::set<std::string>{"id", "version", "sdkVersion", "server", "engine", "name", "description", "compatibility"}, "plugin.json");
+    std::set<std::string> keys{"id", "version", "sdkVersion", "server"};
+    if (plugin->sdk >= 2) keys.insert({"engine", "name", "description", "compatibility"});
+    if (plugin->sdk >= 3) keys.insert({"authors", "license", "homepage", "icon", "assets", "actions", "preflight"});
+    allowedKeys(manifest, keys, "plugin.json");
     if (plugin->sdk == 1 && manifestText.size() > 8192) fail("plugin.json", 1, "Manifest is too large");
     plugin->id = stringAt(manifest, "id", "plugin.json");
     plugin->version = stringAt(manifest, "version", "plugin.json");
@@ -596,7 +760,7 @@ std::unique_ptr<Plugin> compile(const Json& source) {
     static const std::regex version("(?:0|[1-9][0-9]{0,8})(?:\\.(?:0|[1-9][0-9]{0,8})){2}");
     if (plugin->id.size() > 96 || idParts.size() < 2 || !std::all_of(idParts.begin(), idParts.end(), symbol)) fail("plugin.json", 1, "Use a namespaced plugin ID");
     if (!std::regex_match(plugin->version, version) || !symbol(plugin->server)) fail("plugin.json", 1, "Invalid version or server family");
-    if (plugin->sdk == 2) {
+    if (plugin->sdk >= 2) {
         plugin->engine = stringAt(manifest, "engine", "plugin.json");
         if (plugin->engine != "yaml" && plugin->engine != "lua") fail("plugin.json", 1, "Unsupported engine");
         for (const auto* optional : {"name", "description"}) if (manifest.contains(optional)) {
@@ -605,6 +769,7 @@ std::unique_ptr<Plugin> compile(const Json& source) {
         }
         if (manifest.contains("compatibility") && !manifest["compatibility"].is_object()) fail("plugin.json", 1, "compatibility must be an object");
     }
+    if (plugin->sdk >= 3) parseSdk3(*plugin, manifest);
     parseXml(*plugin, stringAt(source, "ui", "ui.xml"));
     if (plugin->engine == "lua") plugin->lua = std::make_unique<LuaRuntime>(*plugin, stringAt(source, "lua", "business.lua"));
     else parseYaml(*plugin, stringAt(source, "rules", "rules.yaml", true));
@@ -615,14 +780,25 @@ std::unique_ptr<Plugin> compile(const Json& source) {
         for (const auto& node : nodes) {
             if (!node["field"].is_null()) {
                 const auto field = node["field"].get<std::string>();
-                if (node["kind"] == "field") inputs.insert(field);
+                if (node["kind"] == "field" || node["kind"] == "toggle" || node["kind"] == "select") {
+                    if (!inputs.insert(field).second && plugin->sdk >= 3) fail("ui.xml", 1, "Duplicate input field: " + field);
+                    if (node["kind"] == "toggle") plugin->inputValues[field] = {"true", "false"};
+                    if (node["kind"] == "select") {
+                        auto& values = plugin->inputValues[field];
+                        for (const auto& option : node["children"]) if (!values.insert(option["value"].get<std::string>()).second) fail("ui.xml", 1, "Duplicate select value");
+                    }
+                }
                 else if (!fields.count(field)) fail("ui.xml", 1, "Unknown state field: " + field);
             }
-            if (!node["action"].is_null() && !plugin->commands.count(node["action"].get<std::string>())) fail("ui.xml", 1, "Unknown action");
+            if (!node["action"].is_null()) {
+                const auto action = node["action"].get<std::string>();
+                if (!plugin->commands.count(action) && !plugin->actions.contains(action)) fail("ui.xml", 1, "Unknown action");
+            }
             validate(node["children"]);
         }
     };
     validate(plugin->nodes);
+    for (const auto& command : plugin->commands) if (plugin->actions.contains(command.first)) fail("plugin.json", 1, "Action duplicates a console command");
     for (const auto& command : plugin->commands) for (const auto& input : command.second.inputs) if (!inputs.count(input.first)) fail(plugin->engine == "lua" ? "business.lua" : "rules.yaml", 1, "Command needs a matching UI input: " + input.first);
     plugin->source = source;
     return plugin;
@@ -700,7 +876,7 @@ struct Model {
     std::map<unsigned char, std::vector<size_t>> index;
     std::vector<size_t> fallback;
     Model(std::unique_ptr<Plugin> next, std::set<std::string> grants) : plugin(std::move(next)), allowed(std::move(grants)), values(plugin->initial) {
-        for (const auto& grant : allowed) if (!plugin->commands.count(grant)) fail("request.json", 1, "Unknown command grant");
+        for (const auto& grant : allowed) if (!plugin->commands.count(grant) && !plugin->actions.contains(grant)) fail("request.json", 1, "Unknown action grant");
         std::set<unsigned char> first;
         for (const auto& rule : plugin->rules) if (!rule.prefix.empty()) first.insert(static_cast<unsigned char>(rule.prefix.front()));
         for (size_t i = 0; i < plugin->rules.size(); ++i) if (plugin->rules[i].prefix.empty()) fallback.push_back(i);
@@ -730,6 +906,9 @@ struct Model {
                 } else updates[rule.field] = *value;
             }
         }
+        return apply(updates, proof);
+    }
+    bool apply(const Strings& updates, const std::string& proof) {
         bool changed = false;
         for (const auto& entry : updates) {
             auto oldValue = values.find(entry.first), oldProof = evidence.find(entry.first);
@@ -763,7 +942,14 @@ struct Session {
     Json metadata(const Plugin& plugin) const {
         Json commands = Json::object();
         for (const auto& entry : plugin.commands) commands[entry.first] = entry.second.text;
-        return {{"id", plugin.id}, {"version", plugin.version}, {"server", plugin.server}, {"title", plugin.title}, {"nodes", plugin.nodes}, {"initial", plugin.initial}, {"commands", commands}, {"engine", plugin.engine}, {"sdkVersion", plugin.sdk}};
+        Json result{{"id", plugin.id}, {"version", plugin.version}, {"server", plugin.server}, {"title", plugin.title}, {"nodes", plugin.nodes}, {"initial", plugin.initial}, {"commands", commands}, {"engine", plugin.engine}, {"sdkVersion", plugin.sdk}};
+        if (plugin.sdk >= 3) {
+            result.update(plugin.details);
+            result["assets"] = plugin.assets;
+            result["actions"] = plugin.actions;
+            result["preflight"] = plugin.preflight;
+        }
+        return result;
     }
     bool gap() { if (stale) return false; stale = true; ++revision; return true; }
     bool log(std::string text) {
@@ -782,9 +968,24 @@ struct Session {
         model = std::move(next); ++packageRevision; ++revision;
         return snapshot();
     }
+    bool matchesRevision(const Json& request, bool required) const {
+        if (!request.contains("expectedRevision") || request["expectedRevision"].is_null()) return !required;
+        const auto& expected = request["expectedRevision"];
+        return (expected.is_number_unsigned() || (expected.is_number_integer() && expected.get<int64_t>() >= 0)) && expected.get<uint64_t>() == packageRevision;
+    }
+    static void validateEventValue(const Json& value, size_t& nodes, int depth = 0) {
+        if (++nodes > 256 || depth > 6) fail("request.json", 1, "Event is too deeply nested or has too many values");
+        if (value.is_object() || value.is_array()) {
+            for (auto entry = value.begin(); entry != value.end(); ++entry) {
+                if (value.is_object() && (entry.key().empty() || entry.key().size() > 128 || !validText(entry.key()))) fail("request.json", 1, "Invalid event key");
+                validateEventValue(entry.value(), nodes, depth + 1);
+            }
+        }
+    }
     Json request(const Json& request) {
         if (!request.is_object()) fail("request.json", 1, "Expected a request object");
         const auto op = stringAt(request, "op", "request.json");
+        if (op == "version") return {{"minSdk", 1}, {"maxSdk", 3}};
         if (op == "snapshot") return snapshot();
         if (op == "inspect" || op == "reload") {
             if (!request.contains("source")) fail("request.json", 1, "Missing source");
@@ -793,7 +994,7 @@ struct Session {
             if (plugin->id == "rolithax.paper") fail("plugin.json", 1, "Reserved built-in plugin ID");
             std::set<std::string> allowed;
             if (request.contains("allowedCommands")) {
-                if (!request["allowedCommands"].is_array() || request["allowedCommands"].size() > 128) fail("request.json", 1, "Invalid command grants");
+                if (!request["allowedCommands"].is_array() || request["allowedCommands"].size() > (plugin->sdk >= 3 ? 256u : 128u)) fail("request.json", 1, "Invalid action grants");
                 for (const auto& grant : request["allowedCommands"]) { if (!grant.is_string()) fail("request.json", 1, "Invalid command grant"); allowed.insert(grant.get<std::string>()); }
             }
             return install(std::move(plugin), std::move(allowed));
@@ -809,18 +1010,36 @@ struct Session {
             auto plugin = compile(builtinSource()); auto grants = allCommands(*plugin);
             return install(std::move(plugin), std::move(grants));
         }
+        if (op == "prepareAction") {
+            const auto action = stringAt(request, "actionId", "request.json");
+            if (!matchesRevision(request, true) || !model->allowed.count(action) || !model->plugin->actions.contains(action)) return nullptr;
+            if (request.contains("arguments") && (!request["arguments"].is_object() || !request["arguments"].empty())) return nullptr;
+            return model->plugin->actions[action];
+        }
+        if (op == "event") {
+            if (!matchesRevision(request, true) || model->plugin->sdk < 3 || !model->plugin->lua) return false;
+            const auto type = stringAt(request, "eventType", "request.json");
+            if (type != "preflight" && type != "action") fail("request.json", 1, "Unknown event type");
+            if (!request.contains("result") || !request["result"].is_object() || request["result"].dump().size() > 16384) fail("request.json", 1, "Event result must be a bounded object");
+            size_t nodes = 0;
+            validateEventValue(request["result"], nodes);
+            const auto updates = model->plugin->lua->event(type, request["result"], model->values);
+            const bool changed = model->apply(updates, type == "preflight" ? "Preflight result" : "Action result");
+            if (changed) ++revision;
+            return changed;
+        }
         if (op == "command") {
             const auto action = stringAt(request, "actionId", "request.json");
             if (!model->allowed.count(action)) return nullptr;
-            if (request.contains("expectedRevision") && !request["expectedRevision"].is_null()) {
-                const auto& expected = request["expectedRevision"];
-                if (!expected.is_number_unsigned() && (!expected.is_number_integer() || expected.get<int64_t>() < 0)) return nullptr;
-                if (expected.get<uint64_t>() != packageRevision) return nullptr;
-            }
+            if (!matchesRevision(request, false)) return nullptr;
             Strings arguments;
             if (request.contains("arguments")) {
                 if (!request["arguments"].is_object() || request["arguments"].size() > 128) return nullptr;
                 for (auto it = request["arguments"].begin(); it != request["arguments"].end(); ++it) { if (!it.value().is_string()) return nullptr; arguments[it.key()] = it.value().get<std::string>(); }
+            }
+            for (const auto& argument : arguments) {
+                const auto values = model->plugin->inputValues.find(argument.first);
+                if (values != model->plugin->inputValues.end() && !values->second.count(argument.second)) return nullptr;
             }
             const auto command = model->plugin->commands.find(action);
             if (command == model->plugin->commands.end()) return nullptr;

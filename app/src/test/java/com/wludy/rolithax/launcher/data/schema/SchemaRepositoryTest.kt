@@ -3,6 +3,8 @@ package com.wludy.rolithax.launcher.data.schema
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -12,6 +14,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SchemaRepositoryTest {
+    @Test
+    fun installedPackageMetadataAndGrantsRoundTrip() {
+        val asset = SchemaAsset(mediaType = "image/png", size = 64, sha256 = "a".repeat(64), path = "icon.png")
+        val install = SchemaInstall("example.panel", "1.0.0", "Example", "b".repeat(64),
+            "https://example.org/README.md", "yaml", catalogIcon = asset)
+        val state = SchemaLibraryState(listOf(install),
+            mapOf("server-1" to SchemaBinding(install.digest, setOf("list-config"))))
+        assertEquals(state, Json.decodeFromString<SchemaLibraryState>(Json.encodeToString(state)))
+    }
+
     @Test
     fun normalizesGitHubAndNestedGitLabRepositories() {
         assertEquals("https://github.com/example/repository",

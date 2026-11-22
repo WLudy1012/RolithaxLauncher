@@ -52,14 +52,15 @@ Desktop development packages are available from successful [desktop CI runs](htt
 
 **Connect and manage**
 - Save multiple Daemons at once. Everything is addressed by **instance**, and local instances are merged with each Daemon's instances in a single list.
-- With the [Rolithax Daemon plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin) installed, Android can pair by scanning a QR code or pasting the pairing text copied from the plugin page. You can also enter the address and API key manually.
-- On Android, **Connections → Other panels** connects to MCSL Future `/api/v2`, MCSManager 10 and the Pterodactyl Client API. View instances and logs, send console commands and control server power. [Setup and supported operations](develop/agent/remote-panels.md)
+- Android and Windows offer MSLX Daemon, MCSL Future, MCSManager 10 and Pterodactyl in the connection picker. View instances and logs, send console commands and control server power. [Setup and supported operations](develop/agent/remote-panels.md)
+- Connect to MSLX with an address and API key, or paste the pairing text generated in the Rolithax Center. Android can also scan the QR code. [Rolithax Daemon plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - Start, stop, restart, force-kill and back up; the EULA prompt guides you when it is not accepted yet. Instances can be pinned, and deletion needs a second confirmation.
 
 **Console**
 - Live logs over SignalR with incremental ANSI color and style parsing; send commands, auto-scroll, jump to latest.
 - Remote and local instances share the same console UI.
-- Android and Windows include **Rolithax Schema**: a C++ runtime turns live logs into native task panels with XML layouts, YAML rules, restricted Lua and hot reload. Add Git plugin sources or use the [official source](https://github.com/WLudy1012/rolithax-schema-plugins) for Paper, LuckPerms and Chunky. The separate [SDK](https://github.com/WLudy1012/rolithax-console-sdk) and [template](https://github.com/WLudy1012/rolithax-console-plugin-template) include replay tools and an agent skill. [Format, grants and compatibility](develop/agent/rolithax-schema.md)
+- **Rolithax Schema** turns live logs into native task panels on Android and Windows. The C++ runtime supports XML layouts, YAML rules and restricted Lua. Panels can include images and videos. Use the plugin center to add Git sources, install complete plugins or import a ZIP. [Official source](https://github.com/WLudy1012/rolithax-schema-plugins) [Plugin SDK and CLI](https://github.com/WLudy1012/rolithax-console-sdk) [Template](https://github.com/WLudy1012/rolithax-console-plugin-template)
+- When enabling a plugin on an instance, you can check required component versions and grant commands or file operations individually. The MSLX extension gives Schema access to MCDR instance files and administrator-registered host tasks. [Format, grants and compatibility](develop/agent/rolithax-schema.md)
 
 **Create and Resource Center**
 - The creation wizard covers basics, server core, Java environment, resources and confirmation, with an online core catalog, remote download, local upload and modpacks.
@@ -79,7 +80,7 @@ Desktop development packages are available from successful [desktop CI runs](htt
 **Connect to a remote Daemon**
 
 1. Start MSLX Daemon on your computer and have its address and API Key ready.
-2. Open **Connections → Add Daemon**. Choose **Manual connection** if you have the address and API key. With the Rolithax plugin installed, open **Plugin pairing** to scan its QR code or paste the complete pairing text and submit it.
+2. On Android, open **Connections**, tap the plus button and choose **MSLX Daemon**. Enter the address and API key under **Manual connection**, or open **Plugin pairing** to scan the QR code or paste the pairing text.
 3. Open the instance list, tap an instance to view logs, send commands, start or stop it.
 
 **Host a server on your phone**
@@ -173,7 +174,7 @@ Architecture, API contracts, security constraints and the release process are do
 
 ## Related repositories
 
-- [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin): the Daemon plugin providing QR pairing, instance icons and remote resource installation.
+- The Daemon extension provides pairing, instance icons and remote resource installation, plus Schema APIs for MCDR directory discovery, version checks and host tasks. [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - [RolithaxLauncher-website](https://github.com/WLudy1012/RolithaxLauncher-website): project website and download page.
 
 ## Feedback

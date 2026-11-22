@@ -37,12 +37,14 @@ fun sessionOpen(configJson: CPointer<ByteVar>?, errorJson: CPointer<CPointerVar<
     errorJson?.pointed?.value = null
     return try {
         val config = parseObject(configJson)
-        StableRef.create(WindowsDaemonSession(
+        val kind = config.string("kind").orEmpty().lowercase()
+        val client: WindowsSession = if (kind in setOf("", "mslx")) WindowsDaemonSession(
             config.requiredString("baseUrl"),
             config.string("apiKey").orEmpty(),
             config.flag("allowHttp"),
             config.flag("allowSelfSigned"),
-        )).asCPointer()
+        ) else WindowsPanelSession(config, kind)
+        StableRef.create(client).asCPointer()
     } catch (error: Exception) {
         errorJson?.pointed?.value = failure(error).toNativeString()
         null
@@ -55,7 +57,7 @@ fun sessionCall(
     operation: CPointer<ByteVar>?,
     argsJson: CPointer<ByteVar>?,
 ): CPointer<ByteVar> {
-    val daemon = session?.asStableRef<WindowsDaemonSession>()?.get()
+    val daemon = session?.asStableRef<WindowsSession>()?.get()
     return try {
         requireNotNull(daemon) { "连接已关闭" }
         val name = requireNotNull(operation?.toKString()) { "缺少操作名称" }
@@ -78,7 +80,7 @@ fun sessionCall(
 
 @CName("rolithax_session_close")
 fun sessionClose(session: COpaquePointer?) {
-    val ref = session?.asStableRef<WindowsDaemonSession>() ?: return
+    val ref = session?.asStableRef<WindowsSession>() ?: return
     try {
         runBlocking { ref.get().close() }
     } finally {
@@ -96,7 +98,7 @@ private fun parseObject(value: CPointer<ByteVar>?): JsonObject =
         Json.parseToJsonElement(it) as? JsonObject ?: throw SerializationException("Expected a JSON object")
     } ?: JsonObject(emptyMap())
 
-private fun failure(error: Exception, daemon: WindowsDaemonSession? = null): JsonObject = buildJsonObject {
+private fun failure(error: Exception, daemon: WindowsSession? = null): JsonObject = buildJsonObject {
     put("ok", false)
     val message = when (error) {
         is SerializationException -> "请求或响应格式无效"

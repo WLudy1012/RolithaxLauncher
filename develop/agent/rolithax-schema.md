@@ -1,42 +1,51 @@
 # Rolithax Schema
 
-Schema 将实时日志转换为原生控件。用户在面板填写参数、确认具体命令后，宿主通过当前实例连接发送命令。解析器不会主动连接服务器，也不会根据日志自动执行操作。
+Rolithax Schema 将实时日志转换为原生控件。插件使用 JSON 描述元数据，使用 XML 定义界面，通过 YAML 或受限的 Lua 从日志提取状态。用户确认后，客户端通过当前实例执行已授权的动作。
 
 ## 引擎与宿主
 
-`native/schema` 是唯一的业务解析实现：C++17 负责 JSON 元数据、XML 控件、YAML 规则、Lua 脚本、日志状态、证据和命令授权。依赖固定版本随源码保存，构建不下载解析器依赖。
+`native/schema` 用 C++17 解析插件，维护日志状态和证据，并校验动作与授权。解析器依赖随源码保存。
 
 - Android 通过 JNI 传递 UTF-8 字节数组，使用现有 NDK 构建。实例退出时销毁会话。
 - Windows 的 Kotlin/Native 核心通过 C ABI 调用同目录的 `rolithax_schema.dll`；WinUI 3 负责布局、输入和命令确认。
 - JVM 桌面使用 JNA。Linux 分发包包含原生库；该宿主的界面能力仍以其已有实现为准。
 
-协议和限额见 [`native/schema/contract.md`](../../native/schema/contract.md)。既有 SDK 1 包保持兼容；SDK 2 增加 `row`、`metric`、`progress`、`badge`、`divider`，支持多参数动作和 Lua。进度是 0–100 的百分比，缺少日志时显示等待状态。
+Android 和 Windows 支持 SDK 1–3。SDK 2 增加指标、进度、徽标、多参数命令和 Lua。SDK 3 增加图片、视频、选项卡、折叠组、开关和选项列表，以及文件和宿主机任务声明。控件、参数和限额见 [原生协议](../../native/schema/contract.md)。
 
-Lua 运行时移除文件、网络、进程、模块及动态加载接口，每次调用限制内存和指令数。Lua 返回字段更新，命令仍由宿主授权。脚本失败保留上次快照，并显示错误或日志缺失状态；失败的热加载不会替换当前插件。每次替换或重置更新包修订号，旧确认不能发送新包的命令。
+Lua 回调可根据日志、版本检查和动作结果更新面板字段。脚本的文件、网络和进程访问受限，回调有内存和执行预算。失败的热加载保留正在使用的插件。包切换后须重新确认待执行动作。
 
-## Git 插件源
+## 插件中心
 
-默认源：[rolithax-schema-plugins](https://github.com/WLudy1012/rolithax-schema-plugins)。可添加 GitHub、GitLab 仓库主页，也可提供自托管的 HTTPS 原始 `README.md` 地址。当前不支持私有仓库凭据或直接克隆任意 Git 协议。
+Android 从「概览 → Schema 插件」进入，Windows 从导航栏的「插件中心」进入。可以查看已安装的插件、浏览目录、添加自定义源或导入本地 ZIP。安装后打开实例控制台的「Rolithax Schema」，选择插件并逐项授权。绑定按实例保存，更新包后需要重新授权。
 
-README 包含且仅包含一个 `rolithax-schema-repository` JSON 代码块，`schemaVersion` 为 1。GitHub/GitLab 先解析提交再读取固定提交的 README 和文件。GitHub 匿名 API 返回 403/429 时使用 HEAD Atom 提交源取得固定 SHA。自托管 README 无 Git 提交发现，仍须校验其声明的每个文件摘要。
+默认源是 [rolithax-schema-plugins](https://github.com/WLudy1012/rolithax-schema-plugins)。自定义源接受公开的 GitHub 或 GitLab 仓库主页，以及可直接下载的 HTTPS `README.md`。GitHub 和 GitLab 的目录及仓库内文件按固定提交读取。自托管目录按声明的大小和摘要校验。
 
-- YAML 的 `source.type=files`：列出 `plugin.json`、`ui.xml`、`rules.yaml` 的相对路径、字节数和 SHA-256。客户端校验后在本地生成 ZIP。
-- `source.type=package`：提供 HTTPS ZIP 下载地址、大小和 SHA-256。Lua 只能按此方式分发，包内是 `business.lua` 源码及元数据，不是本地 DLL 或 Lua 字节码。
-- README 限 256 KiB，ZIP 限 512 KiB；禁止目录穿越、重复条目、未知文件及跨引擎混入业务。文件分别受限，解压不会写出包内路径。
-- 源地址与已下载包保存在应用私有目录；安装后仍进入权限选择。下载、校验和解析不等于获得命令权限。
+目录 V2 使用 `rolithax-schema-repository-v2` 的 JSON 代码块和 `schemaVersion: 2`，要求仓库与插件条目都带作者、主页和图标。插件条目还需声明许可证和 SDK 版本。图标描述包含格式、字节数、SHA-256，以及仓库内相对路径或 HTTPS 地址。兼容旧客户端时，同一 README 可保留 SDK 1、2 使用的 `rolithax-schema-repository` 代码块。
 
-正式协议由[独立 SDK 仓库](https://github.com/WLudy1012/rolithax-console-sdk)维护，模板位于[独立模板仓库](https://github.com/WLudy1012/rolithax-console-plugin-template)。SDK 的校验和回放直接调用同一原生 CLI，不维护第二套规则解析器。
+- YAML 可在 `source.type=files` 下列出三个定义文件和包内媒体。客户端验证每个文件后生成 ZIP。也可直接发布完整 ZIP。
+- Lua 使用 `source.type=package` 发布预构建 ZIP，提供 HTTPS 下载地址、大小和 SHA-256。包内包含 `business.lua` 源码。
+- 安装一次下载完整插件，包含清单声明的 HTTPS 外链媒体。已校验的媒体保存在本地。支持 PNG、JPEG、WebP 和 MP4，单张图片限 8 MiB，单个视频限 64 MiB，SDK 3 的媒体总量和包大小各限 128 MiB。
 
-## 原生工作区
+## 实例权限与版本检查
 
-Android 与 Windows 采用用户选定的任务优先布局：实例状态和启停操作位于顶部，Schema 与原始日志明确切换；解析状态、输入和相关动作分节排列，日志依据可展开。宽窗口允许分节并排，窄窗口按阅读顺序折行。Android 跟随 Material 3 和动态色，Windows 使用 Fluent 原生控件及宿主云母背景。
+声明 `preflight` 的插件在启用时检查版本。MSLX 扩展读取 Minecraft 插件、模组或 MCDR 插件的文件元数据，并按清单要求比较精确版本。缺少组件或检测到不同版本时阻止启用。无法确认版本时，用户可选择继续或取消。
 
-面板显示由插件 XML 和日志决定。设计图中的世界名、进度等只用于布局示例，不得写成生产默认值。原始日志、手动命令、已有文件与配置入口继续由各宿主提供。
+元数据无法确认版本时，如果管理员已为该组件和实例登记只读版本查询，客户端可请求运行该预设。每次查询都要先确认。查询仍无法确认版本时，启用前仍需用户明确同意。文件元数据反映磁盘上的组件版本。
+
+打开已绑定的实例时会再次检查元数据。Windows 如果需要确认，先显示内置面板，可从版本检查提示重新启用原插件。
+
+控制台命令、文件动作和宿主机任务分别按动作授权，执行前再确认目标。文件动作通过 Daemon 的实例文件 API，按清单指定的目录定位。MCDR 适配用于 MSLX 管理的实例，支持 MCDR 配置目录、插件目录及 Minecraft 工作目录。MSLX 扩展提供目录映射。第三方面板提供原始控制台和电源控制。 [面板支持范围](remote-panels.md)
+
+宿主机任务需要在 Daemon 侧部署 Worker，并由管理员在 Rolithax 中心启用。Worker 按任务 ID、用户和实例核对权限，用独立的低权限账户执行预设程序和固定参数。部署步骤见 MSLX 扩展仓库的 `Rolithax.Schema.Worker/README.md`。 [Rolithax MSLX 扩展](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
+
+## SDK 和模板
+
+SDK CLI 提供 `init` 创建项目、`check` 校验源码或 ZIP、`replay` 回放样本、`pack` 打包，以及 `source-index` 校验仓库目录。校验和回放使用客户端同一套 C++ 引擎。SDK 仓库包含插件开发 Agent skill。 [SDK](https://github.com/WLudy1012/rolithax-console-sdk) [模板](https://github.com/WLudy1012/rolithax-console-plugin-template)
 
 ## 验证与兼容范围
 
-官方源提供 Paper、LuckPerms 5.4/5.5、Chunky 1.4/1.5。版本覆盖基于上游格式核对和对应日志样本回放；不要写成所有 Minecraft 平台、语言及每个补丁版本都经过真服测试。Chunky 的暂停和继续指定世界，查询进度遵循上游返回全部任务的行为。
+Paper、LuckPerms 5.4/5.5 和 Chunky 1.4/1.5 的解析覆盖对应日志样本。Chunky 的暂停和继续按世界执行，进度查询读取上游返回的任务。
 
-本地检查包括 CTest、共享解析回归、Android 包和源边界测试、SDK YAML/Lua 回放、Windows C ABI 冒烟测试。UI 验收使用本机模拟 Daemon，不对真实服务器发送命令。
+本地检查包括 CTest、共享解析回归、SDK YAML/Lua 回放、Android APK 和 Windows C ABI。界面使用本机模拟 Daemon 验收。真实 MCDR 部署和独立 Worker 账户仍需实机验收。
 
 构建入口：`:shared:buildSchemaNative`、`:shared:testSchemaNative`、`:shared:desktopTest`。Windows 发布必须同时传入 `RolithaxCorePath` 和 `RolithaxSchemaPath`。Android 与桌面 CI 检查原生库存在，不能只打包宿主代码。

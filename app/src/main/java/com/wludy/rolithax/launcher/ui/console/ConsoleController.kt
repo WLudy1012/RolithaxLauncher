@@ -1,6 +1,8 @@
 package com.wludy.rolithax.launcher.ui.console
 
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
+import com.wludy.rolithax.launcher.shared.console.SchemaAction
+import kotlinx.serialization.json.JsonObject
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -32,7 +34,9 @@ interface ConsoleController {
 
     suspend fun sendPanelAction(actionId: String, arguments: Map<String, String>, packageRevision: Long): Boolean
 
-    fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String> = emptySet())
+    fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String> = emptySet()): Boolean
+    fun prepareSchemaAction(actionId: String, revision: Long): SchemaAction? = null
+    fun applySchemaResult(kind: String, payload: JsonObject, revision: Long) = Unit
 
     /** 发送一个操作动作：start / stop / restart / forceExit / backup。 */
     fun sendAction(action: String)

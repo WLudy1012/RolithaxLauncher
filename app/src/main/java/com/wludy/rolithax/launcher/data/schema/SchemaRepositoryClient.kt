@@ -4,10 +4,13 @@ import com.wludy.rolithax.launcher.shared.console.ConsolePluginCompiler
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import okhttp3.HttpUrl
@@ -18,9 +21,12 @@ import okhttp3.Request
 internal data class SchemaRepositoryFile(val path: String, val sha256: String, val size: Int)
 internal data class SchemaRepositoryEntry(val id: String, val version: String, val name: String,
     val description: String, val engine: String, val type: String, val path: String,
-    val url: String, val sha256: String, val size: Int, val files: List<SchemaRepositoryFile>, val compatibility: String = "")
+    val url: String, val sha256: String, val size: Int, val files: List<SchemaRepositoryFile>, val compatibility: String = "",
+    val sdkVersion: Int = 2, val icon: SchemaAsset? = null, val authors: List<String> = emptyList(),
+    val license: String = "", val homepage: String = "")
 internal data class SchemaRepositoryCatalog(val url: String, val name: String, val description: String,
-    val revision: String, val filesBase: String, val plugins: List<SchemaRepositoryEntry>)
+    val revision: String, val filesBase: String, val plugins: List<SchemaRepositoryEntry>, val icon: SchemaAsset? = null,
+    val authors: List<String> = emptyList(), val homepage: String = "")
 
 internal class SchemaRepositoryClient(private val storage: File, private val http: OkHttpClient = defaultHttp) {
     fun loadSources(): List<String> {
@@ -108,7 +114,18 @@ internal class SchemaRepositoryClient(private val storage: File, private val htt
         return source
     }
 
-    private fun download(address: String, limit: Int): ByteArray {
+    private fun download(address: String, limit: Int): ByteArray =
+        readDownload(address, limit) { it.readSchemaBytes(limit) }
+
+    suspend fun downloadFile(address: String, limit: Int, file: File) {
+        val operation = currentCoroutineContext()
+        operation.ensureActive()
+        readDownload(address, limit) { input ->
+            file.outputStream().use { output -> input.copySchemaBytes(output, limit) { operation.ensureActive() } }
+        }
+    }
+
+    private fun <T> readDownload(address: String, limit: Int, read: (InputStream) -> T): T {
         var url = https(address)
         repeat(6) {
             http.newCall(Request.Builder().url(url).header("User-Agent", "Rolithax-Schema/2.0").build()).execute().use { response ->
@@ -118,7 +135,7 @@ internal class SchemaRepositoryClient(private val storage: File, private val htt
                     if (!response.isSuccessful) throw DownloadFailure(response.code)
                     val body = requireNotNull(response.body)
                     require(body.contentLength() <= limit) { "插件源文件超过大小限制" }
-                    return body.byteStream().use { it.readSchemaBytes(limit) }
+                    return body.byteStream().use(read)
                 }
             }
         }
@@ -151,24 +168,32 @@ internal class SchemaRepositoryClient(private val storage: File, private val htt
 
         fun parseReadme(url: String, filesBase: String, revision: String, readme: String): SchemaRepositoryCatalog {
             require(readme.toByteArray(Charsets.UTF_8).size <= 262_144) { "README 过大" }
-            val blocks = Regex("(?m)^```rolithax-schema-repository[ \\t]*\\r?\\n([\\s\\S]*?)^```[ \\t]*\\r?$").findAll(readme).toList()
-            require(blocks.size == 1) { "README 必须包含一个 rolithax-schema-repository 数据块" }
-            val root = Json.parseToJsonElement(blocks.single().groupValues[1]).jsonObject
-            require(root["schemaVersion"]?.jsonPrimitive?.intOrNull == 1) { "不支持此插件源格式" }
+            val versioned = Regex("(?m)^```rolithax-schema-repository(-v2)?[ \\t]*\\r?\\n([\\s\\S]*?)^```[ \\t]*\\r?$")
+                .findAll(readme).toList().groupBy { it.groupValues[1] == "-v2" }
+            val v2 = versioned.containsKey(true)
+            val blocks = versioned[v2].orEmpty()
+            require(blocks.size == 1) { "README 必须包含唯一的插件源索引" }
+            val root = Json.parseToJsonElement(blocks.single().groupValues[2]).jsonObject
+            require(root["schemaVersion"]?.jsonPrimitive?.intOrNull == if (v2) 2 else 1) { "不支持此插件源格式" }
             require(idPattern.matches(root.required("id"))) { "插件源 ID 无效" }
             val entries = root.getValue("plugins").jsonArray
             require(entries.size <= 256) { "插件源条目过多" }
-            val plugins = entries.map { parseEntry(it.jsonObject) }
+            val plugins = entries.map { parseEntry(it.jsonObject, v2) }
             require(plugins.map { it.id }.distinct().size == plugins.size) { "插件源中存在重复 ID" }
-            return SchemaRepositoryCatalog(url, root.required("name"), root.optional("description"), revision, filesBase, plugins)
+            return SchemaRepositoryCatalog(url, root.required("name"),
+                if (v2) root.required("description") else root.optional("description"), revision, filesBase, plugins,
+                if (v2) root.catalogIcon() else null, if (v2) root.authors() else emptyList(),
+                if (v2) https(root.required("homepage")).toString() else "")
         }
 
-        private fun parseEntry(item: JsonObject): SchemaRepositoryEntry {
+        private fun parseEntry(item: JsonObject, v2: Boolean): SchemaRepositoryEntry {
             val id = item.required("id")
             require(idPattern.matches(id)) { "插件 ID 无效" }
             val engine = item.required("engine")
             val source = item.getValue("source").jsonObject
             val type = source.required("type")
+            val sdk = if (v2) requireNotNull(item["sdkVersion"]?.jsonPrimitive?.intOrNull)
+                .also { require(it in 1..3) { "不支持此 SDK 版本" } } else 2
             var path = ""
             var url = ""
             var hash = ""
@@ -179,21 +204,38 @@ internal class SchemaRepositoryClient(private val storage: File, private val htt
                 files = source.getValue("files").jsonArray.map {
                     val file = it.jsonObject
                     val name = file.required("path")
-                    SchemaRepositoryFile(name, file.hash(), file.size(requireNotNull(SchemaFileLimits[name])))
+                    val limit = SchemaFileLimits[name] ?: if (sdk == 3 && relativePath(name).startsWith("assets/")) {
+                        SchemaMediaLimit
+                    } else error("不支持的插件文件")
+                    SchemaRepositoryFile(name, file.hash(), file.size(limit))
                 }
-                require(files.size == 3 && files.map { it.path }.toSet() == setOf("plugin.json", "ui.xml", "rules.yaml")) { "文件型源需列出三个定义文件" }
+                val names = files.map { it.path }.toSet()
+                require(files.size == names.size && names.containsAll(setOf("plugin.json", "ui.xml", "rules.yaml"))) { "文件型源需列出三个定义文件且不能重复" }
+                if (sdk < 3) require(files.size == 3) { "旧版插件必须恰好包含三个定义文件" }
+                require(files.size <= 67 && files.sumOf { it.size.toLong() } <= SchemaInstallLimit) { "文件型插件超过大小限制" }
             } else if (type == "package" && engine in setOf("yaml", "lua")) {
                 url = https(source.required("url")).toString()
                 hash = source.hash()
-                size = source.size(SchemaPackageLimit)
+                size = source.size(if (sdk == 3) SchemaInstallLimit else SchemaPackageLimit)
             } else error("Lua 插件必须提供预构建 ZIP 包；文件型源仅支持 YAML")
             val compatibility = item["compatibility"] as? JsonObject
             val versions = (compatibility?.get("versions") as? JsonArray)?.mapNotNull {
                 (it as? JsonPrimitive)?.takeIf { value -> value.isString }?.content
             }?.joinToString(" / ").orEmpty().take(256)
-            return SchemaRepositoryEntry(id, item.required("version"), item.optional("name").ifEmpty { id },
-                item.optional("description"), engine, type, path, url, hash, size, files, versions)
+            return SchemaRepositoryEntry(id, item.required("version"), if (v2) item.required("name") else item.optional("name").ifEmpty { id },
+                if (v2) item.required("description") else item.optional("description"), engine, type, path, url, hash, size, files, versions,
+                sdk, if (v2) item.catalogIcon() else null, if (v2) item.authors() else emptyList(),
+                if (v2) item.required("license") else "", if (v2) https(item.required("homepage")).toString() else "")
         }
+
+        private fun JsonObject.authors(): List<String> = getValue("authors").jsonArray.map { it.jsonPrimitive.content }
+            .also { require(it.size in 1..10 && it.all { name -> name.isNotBlank() && name.length <= 128 }) }
+
+        private fun JsonObject.catalogIcon(): SchemaAsset =
+            Json.decodeFromJsonElement<SchemaAsset>(getValue("icon")).also {
+                it.validate(icon = true)
+                it.path?.let(::relativePath)
+            }
 
         private fun relativePath(path: String): String {
             require(path.length in 1..512 && path.split('/').all { segmentPattern.matches(it) && it !in setOf(".", "..") }) { "插件文件路径不安全" }

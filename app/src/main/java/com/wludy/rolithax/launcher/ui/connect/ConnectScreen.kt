@@ -92,6 +92,7 @@ fun ConnectScreen(
     onAutoConnectFailed: () -> Unit = {},
     autoConnect: Boolean = true,
     editingDaemonId: String? = null,
+    embedded: Boolean = false,
 ) {
     val viewModel: ConnectViewModel = viewModel(
         key = "connect_${autoConnect}_$editingDaemonId",
@@ -118,6 +119,7 @@ fun ConnectScreen(
         state = state,
         isEditing = !editingDaemonId.isNullOrBlank(),
         startsManual = autoConnect,
+        embedded = embedded,
         onBack = onBack,
         onScan = {
             scanLauncher.launch(
@@ -142,6 +144,11 @@ fun ConnectScreen(
     )
 
     state.pairCode?.let { PairCodeDialog(it, viewModel::dismissPairCode) }
+    state.pluginNotice?.let { message ->
+        AlertDialog(onDismissRequest = viewModel::finishConnection,
+            title = { Text("MSLX 扩展检查") }, text = { Text(message) },
+            confirmButton = { TextButton(onClick = viewModel::finishConnection) { Text("完成") } })
+    }
 
     failMessage?.let { message ->
         val dismiss = { failMessage = null; autoConnectFailed() }
@@ -175,6 +182,7 @@ private fun ConnectContent(
     state: ConnectUiState,
     isEditing: Boolean,
     startsManual: Boolean,
+    embedded: Boolean,
     onBack: (() -> Unit)?,
     onScan: () -> Unit,
     onSubmitPairing: (String) -> String?,
@@ -196,7 +204,7 @@ private fun ConnectContent(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            TopAppBar(
+            if (!embedded) TopAppBar(
                 title = { Text(if (isEditing) "编辑 Daemon" else "添加 MSLX Daemon") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 navigationIcon = {

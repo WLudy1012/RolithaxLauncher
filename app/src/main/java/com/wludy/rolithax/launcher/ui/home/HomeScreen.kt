@@ -64,6 +64,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     onOpenInstances: (String?) -> Unit,
+    onOpenSchemaCenter: () -> Unit,
     onOpenConnections: () -> Unit,
     onCreate: () -> Unit,
     onEditDaemon: (String) -> Unit,
@@ -135,6 +136,7 @@ fun HomeScreen(
                                         Text("新建实例")
                                     }
                                     TextButton(onClick = onOpenConnections) { Text("管理连接") }
+                                    TextButton(onClick = onOpenSchemaCenter) { Text("Schema 插件") }
                                 }
                             }
                         }

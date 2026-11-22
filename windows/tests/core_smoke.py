@@ -17,10 +17,13 @@ LOG = "控制台连接成功"
 PAPER_LOG = "There are 2 of a max of 20 players online: Steve, Alex"
 FILE = "motd=测试服\n".encode()
 HUB = "/api/hubs/instanceControlHub"
+SCHEMA = "/api/plugin/mslx-plugin-rolithax/schema"
 COMMAND = threading.Event()
 RAW_COMMAND = threading.Event()
 ACTION = threading.Event()
 REDIRECTED = threading.Event()
+TASK = threading.Event()
+MCSL_COMMAND = threading.Event()
 
 
 class Daemon(BaseHTTPRequestHandler):
@@ -53,6 +56,9 @@ class Daemon(BaseHTTPRequestHandler):
             REDIRECTED.set()
             self.envelope({})
             return
+        if url.path == "/api/v2" and parse_qs(url.query).get("token") == [KEY]:
+            self.mcsl()
+            return
         if not self.authorized():
             return
         if url.path == "/api/status":
@@ -61,6 +67,12 @@ class Daemon(BaseHTTPRequestHandler):
             self.reply(302, b"", headers=(("Location", "/redirect-target"),))
         elif url.path == "/api/instance/list":
             self.envelope([dict(id=7, name="测试服", status=2)])
+        elif url.path == f"{SCHEMA}/capabilities":
+            self.envelope(dict(protocolVersion=1, pluginVersion="fixture"))
+        elif url.path == f"{SCHEMA}/instances/7/layout":
+            self.envelope(dict(kind="mcdr", gameDirectory="server", pluginDirectories=["plugins"]))
+        elif url.path == f"{SCHEMA}/instances/7/tasks":
+            self.envelope([dict(id="fixture", title="测试任务", description="C ABI fixture")])
         elif url.path == "/api/files/instance/7/download" and parse_qs(url.query).get("path") == ["服务器.properties"]:
             self.reply(200, FILE, "application/octet-stream")
         elif url.path == HUB and parse_qs(url.query).get("id") == ["fixture-hub"] and self.headers.get("Upgrade", "").lower() == "websocket":
@@ -84,19 +96,21 @@ class Daemon(BaseHTTPRequestHandler):
                 connectionToken="fixture-hub",
                 availableTransports=[dict(transport="WebSockets", transferFormats=["Text"])],
             )).encode())
+        elif path == f"{SCHEMA}/instances/7/preflight" and json.loads(body) == dict(kind="mcdrPlugin", target="probe"):
+            self.envelope(dict(status="found", version="1.2.3"))
+        elif path == f"{SCHEMA}/instances/7/preflight" and json.loads(body) == dict(kind="mod", target="test_mod"):
+            self.envelope(dict(status="unknown", commandProbe=dict(id="probe-" + "a" * 32,
+                title="Version fixture", description="Read version")))
+        elif path == f"{SCHEMA}/instances/7/preflight" and json.loads(body) == dict(kind="mod", target="test_mod", commandProbeId="probe-" + "a" * 32):
+            self.envelope(dict(status="found", version="4.5.6", source="hostCommand"))
+        elif path == f"{SCHEMA}/instances/7/tasks/fixture/run" and json.loads(body) == {}:
+            TASK.set()
+            self.envelope(dict(status="completed", output="测试成功", exitCode=0, truncated=False))
         else:
             self.envelope(None, 404)
 
     def console(self):
-        key = self.headers["Sec-WebSocket-Key"]
-        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
-        self.send_response(101)
-        self.send_header("Upgrade", "websocket")
-        self.send_header("Connection", "Upgrade")
-        self.send_header("Sec-WebSocket-Accept", accept)
-        self.end_headers()
-        self.close_connection = True
-        self.connection.settimeout(10)
+        self.websocket()
         if self.read_message().get("protocol") != "json":
             return
         self.send_message({})
@@ -119,8 +133,42 @@ class Daemon(BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    def websocket(self):
+        key = self.headers["Sec-WebSocket-Key"]
+        accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
+        self.send_response(101)
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.close_connection = True
+        self.connection.settimeout(10)
+
+    def mcsl(self):
+        self.websocket()
+        while True:
+            call = self.read_message()
+            if not call:
+                return
+            method = call.get("method")
+            if method == "mcsl.instance.report.list":
+                result = dict(reports={"fixture": dict(status="running", config=dict(name="MCSL fixture"))})
+            elif method == "mcsl.instance.log.get":
+                result = dict(logs=["MCSL 测试日志"])
+            elif method == "mcsl.instance.command.send" and call.get("params") == dict(instance_id="fixture", command="say 测试"):
+                MCSL_COMMAND.set()
+                result = {}
+            elif method == "mcsl.instance.stop" and call.get("params") == dict(instance_id="fixture"):
+                result = {}
+            else:
+                return
+            self.send_message(dict(jsonrpc="2.0", id=call["id"], result=result), separator=b"")
+
     def read_message(self):
-        first, second = self.rfile.read(2)
+        header = self.rfile.read(2)
+        if len(header) != 2:
+            return {}
+        first, second = header
         size = second & 127
         if size == 126:
             size = struct.unpack("!H", self.rfile.read(2))[0]
@@ -130,8 +178,8 @@ class Daemon(BaseHTTPRequestHandler):
         body = bytes(value ^ mask[i % 4] for i, value in enumerate(self.rfile.read(size)))
         return json.loads(body.rstrip(b"\x1e"))
 
-    def send_message(self, value):
-        frame = json.dumps(value, ensure_ascii=False).encode() + b"\x1e"
+    def send_message(self, value, separator=b"\x1e"):
+        frame = json.dumps(value, ensure_ascii=False).encode() + separator
         header = bytes((0x81, len(frame))) if len(frame) < 126 else bytes((0x81, 126)) + struct.pack("!H", len(frame))
         self.wfile.write(header + frame)
 
@@ -238,6 +286,37 @@ def verify(library):
             assert not request("consolePanelImport", **console, source=dict(source, ui="<!DOCTYPE panel>"), allowedCommands=[])["ok"]
             unchanged = call("consolePoll", **console, afterSequence=2, afterPanelRevision=granted["revision"])
             assert "panel" not in unchanged
+            assert call("schemaCapabilities")["protocolVersion"] == 1
+            assert call("schemaLayout", id=7)["pluginDirectories"] == ["plugins"]
+            assert call("schemaPreflight", id=7, kind="mcdrPlugin", target="probe")["version"] == "1.2.3"
+            preflight_target = dict(id=7, kind="mod", target="test_mod")
+            unknown = call("schemaPreflight", **preflight_target)
+            assert unknown["status"] == "unknown"
+            assert call("schemaPreflight", **preflight_target, commandProbeId=unknown["commandProbe"]["id"]) == dict(
+                status="found", version="4.5.6", source="hostCommand")
+            assert call("schemaTasks", id=7)[0]["title"] == "测试任务"
+            source_v3 = dict(
+                manifest=json.dumps(dict(
+                    id="fixture.actions", name="测试任务", version="1.0.0", sdkVersion=3, server="paper", engine="lua",
+                    description="C ABI fixture", authors=["Fixture"], license="MIT", homepage="https://example.test", icon="icon",
+                    assets=[dict(id="icon", mediaType="image/png", sha256="0" * 64, size=8, path="assets/icon.png")],
+                    actions={"task": dict(kind="host-task", taskId="fixture")},
+                )),
+                ui='<panel title="任务"><text id="status" label="状态" field="state"/><button id="run" label="运行" action="task"/></panel>',
+                lua='return { initial = { state = "Ready" }, on_log = function() return {} end, '
+                    'on_action = function(result) return { state = result.status } end }',
+            )
+            panel_v3 = call("consolePanelImport", **console, source=source_v3, allowedCommands=["task"])
+            task_action = dict(**console, actionId="task", packageRevision=panel_v3["packageRevision"])
+            assert call("consolePanelPrepareIntent", **task_action)["taskId"] == "fixture"
+            assert not request("schemaRunTask", **task_action, taskId="missing")["ok"] and not TASK.is_set()
+            stale_task = dict(task_action, packageRevision=granted["packageRevision"])
+            assert not request("schemaRunTask", **stale_task, taskId="fixture")["ok"] and not TASK.is_set()
+            task = call("schemaRunTask", **task_action, taskId="fixture")
+            assert TASK.is_set() and task["output"] == "测试成功"
+            result = call("consolePanelResult", **console, packageRevision=panel_v3["packageRevision"],
+                          eventType="action", result=dict(status=task["status"]))
+            assert result["values"]["state"] == "completed"
             restored = call("consolePanelRestore", **console)
             assert restored["pluginId"] == "rolithax.paper" and restored["revision"] > granted["revision"]
             assert "Steve" in json.dumps(restored["values"])
@@ -264,8 +343,28 @@ def verify(library):
                 lib.rolithax_session_close(denied)
         finally:
             lib.rolithax_session_close(session)
+        panel = lib.rolithax_session_open(encoded(dict(baseUrl=address, apiKey=KEY, allowHttp=True, kind="mcsl")), ctypes.byref(error))
+        assert panel, read(error)
+        session = panel
+        try:
+            assert call("status")["clientName"] == "MCSL Future"
+            remote = call("instances")[0]
+            assert remote["providerId"] == "fixture" and remote["status"] == 2
+            assert "restart" not in remote["powers"]
+            call("action", id=remote["id"], action="stop")
+            console = dict(id=remote["id"], streamEpoch=call("consoleStart", id=remote["id"])["streamEpoch"])
+            for _ in range(50):
+                logs = call("consolePoll", **console, afterSequence=0)
+                if logs["lines"]:
+                    break
+                time.sleep(0.1)
+            assert logs["connected"] and logs["lines"][0]["line"] == "MCSL 测试日志", logs
+            call("consoleSend", **console, command="say 测试")
+            assert MCSL_COMMAND.wait(5)
+        finally:
+            lib.rolithax_session_close(panel)
             server.shutdown()
-    print("Windows C ABI smoke passed (UTF-8, actions, download, SignalR, panel permissions and revisions, redirect rejection)")
+    print("Windows C ABI smoke passed (UTF-8, download, SignalR, Schema 1/3, host tasks, MCSL Future, redirect rejection)")
 
 
 if __name__ == "__main__":

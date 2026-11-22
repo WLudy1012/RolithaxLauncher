@@ -34,7 +34,7 @@ internal class WindowsDaemonSession(
     private val apiKey: String,
     allowHttp: Boolean,
     allowSelfSigned: Boolean,
-) {
+) : WindowsSession {
     private val endpoint = normalizeDaemonUrl(baseUrl, allowHttp)
     private val http = HttpClient(WinHttp) {
         followRedirects = false
@@ -59,7 +59,7 @@ internal class WindowsDaemonSession(
     private val monitorState = MutableStateFlow(MonitorSnapshot())
     private val creationState = MutableStateFlow(JsonObject(emptyMap()))
 
-    suspend fun close() {
+    override suspend fun close() {
         scopeJob.cancelAndJoin()
         consoleLock.withLock {
             consoleOwner?.workspace?.close()
@@ -71,9 +71,9 @@ internal class WindowsDaemonSession(
         if (publicHttp.isInitialized()) publicHttp.value.close()
     }
 
-    fun redact(message: String): String = if (apiKey.isEmpty()) message else message.replace(apiKey, "***")
+    override fun redact(message: String): String = if (apiKey.isEmpty()) message else message.replace(apiKey, "***")
 
-    suspend fun call(operation: String, args: JsonObject): JsonElement? = with(client) {
+    override suspend fun call(operation: String, args: JsonObject): JsonElement? = with(client) {
         when (operation) {
             "status" -> statusPayload() as? JsonObject ?: throw DaemonException("Daemon 未返回有效状态")
             "instances" -> listInstancesPayload() as? JsonArray ?: throw DaemonException("Daemon 未返回实例列表")
@@ -106,6 +106,36 @@ internal class WindowsDaemonSession(
             "consoleSend" -> sendConsoleCommand(args).let { null }
             "consoleStop" -> stopConsole().let { null }
             "consolePanelInspect" -> inspectConsolePlugin(args)
+            "consolePanelInspectFull" -> Json.encodeToJsonElement(ConsolePluginCompiler.compile(args.pluginSource()))
+            "consolePanelPrepareIntent" -> consoleLock.withLock {
+                val action = requireConsoleOwner(args).workspace.prepareAction(
+                    args.requiredString("actionId"), requireNotNull(args.number("packageRevision")),
+                )
+                Json.encodeToJsonElement(action)
+            }
+            "consolePanelResult" -> consoleLock.withLock {
+                val owner = requireConsoleOwner(args)
+                if (owner.workspace.result(args.requiredString("eventType"), args["result"] as? JsonObject
+                        ?: JsonObject(emptyMap()), requireNotNull(args.number("packageRevision")))) {
+                    owner.panel = owner.workspace.snapshot()
+                }
+                Json.encodeToJsonElement(owner.panel)
+            }
+            "schemaCapabilities" -> schemaCapabilities()
+            "schemaLayout" -> schemaLayout(args.id)
+            "schemaPreflight" -> schemaPreflight(
+                args.id, args.requiredString("kind"), args.requiredString("target"), args.string("commandProbeId"),
+            )
+            "schemaTasks" -> schemaTasks(args.id)
+            "schemaRunTask" -> streams.withLock {
+                val task = consoleLock.withLock {
+                    requireConsoleOwner(args).workspace.prepareAction(
+                        args.requiredString("actionId"), requireNotNull(args.number("packageRevision")),
+                    )?.takeIf { it.kind == "host-task" }?.taskId
+                }
+                require(task != null && task == args.requiredString("taskId")) { "未授权此宿主机任务" }
+                schemaRunTask(args.id, task)
+            }
             "consolePanelImport" -> changeConsolePlugin(args, restore = false)
             "consolePanelRestore" -> changeConsolePlugin(args, restore = true)
             "consolePanelPrepareAction" -> JsonPrimitive(prepareConsolePanelAction(args))

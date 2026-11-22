@@ -85,7 +85,7 @@ fun ConnectionsScreen(
                 IconButton(onClick = viewModel::refreshConnections, enabled = !refreshing) {
                     Icon(Icons.Filled.Refresh, "检测连接")
                 }
-                IconButton(onClick = onAddDaemon) { Icon(Icons.Filled.Add, "添加 Daemon") }
+                IconButton(onClick = onAddDaemon) { Icon(Icons.Filled.Add, "添加连接") }
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -140,7 +140,7 @@ fun ConnectionsScreen(
                             icon = Icons.Filled.Share,
                             title = "还没有远端连接",
                             description = "使用 Daemon 地址与 API 密钥，或扫描配对二维码。",
-                            actionLabel = "添加 Daemon",
+                            actionLabel = "添加连接",
                             onAction = onAddDaemon,
                         )
                     }

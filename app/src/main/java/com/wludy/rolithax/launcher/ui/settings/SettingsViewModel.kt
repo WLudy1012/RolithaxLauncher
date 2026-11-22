@@ -1,6 +1,7 @@
 package com.wludy.rolithax.launcher.ui.settings
 
 import android.app.Application
+import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,8 +13,13 @@ import com.wludy.rolithax.launcher.data.ThemeMode
 import com.wludy.rolithax.launcher.data.ThemeBrightness
 import com.wludy.rolithax.launcher.data.UpdateChannel
 import com.wludy.rolithax.launcher.data.localengine.LocalServerRuntime
+import com.wludy.rolithax.launcher.data.schema.copySchemaBytes
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
@@ -29,6 +35,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     private val container = getApplication<RolithaxApplication>().container
     private val store = container.settingsStore
+    val loadedSettings = container.settings
 
     val settings = store.settingsFlow.stateIn(
         viewModelScope,
@@ -90,20 +97,32 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
      */
     fun importThemeBackground(dark: Boolean, uri: Uri, onDone: (String?) -> Unit) {
         viewModelScope.launch {
-            val path = runCatching {
+            val path = try {
                 withContext(Dispatchers.IO) {
                     val app = getApplication<Application>()
                     val dir = File(app.filesDir, "theme").apply { mkdirs() }
-                    val target = File(dir, if (dark) "background_dark" else "background_light")
-                    app.contentResolver.openInputStream(uri)?.use { input ->
-                        target.outputStream().use { output -> input.copyTo(output) }
-                    } ?: error("无法读取所选图片")
-                    target.absolutePath
+                    val target = File.createTempFile(if (dark) "background_dark_" else "background_light_", ".image", dir)
+                    try {
+                        val operation = currentCoroutineContext()
+                        requireNotNull(app.contentResolver.openInputStream(uri)) { "无法读取所选图片" }.use { input ->
+                            target.outputStream().use { input.copySchemaBytes(it, 16 * 1024 * 1024) { operation.ensureActive() } }
+                        }
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(target.absolutePath, bounds)
+                        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法识别图片格式" }
+                        operation.ensureActive()
+                        withContext(NonCancellable) { store.setThemeBackground(dark, target.absolutePath) }
+                        target.absolutePath
+                    } catch (error: Exception) {
+                        target.delete()
+                        throw error
+                    }
                 }
-            }.onFailure { AppLogger.w("Settings", "导入背景图失败", it) }.getOrNull()
-            if (path != null) {
-                runCatching { store.setThemeBackground(dark, path) }
-                    .onFailure { AppLogger.w("Settings", "保存背景图路径失败", it) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                AppLogger.w("Settings", "导入背景图失败", error)
+                null
             }
             onDone(path)
         }

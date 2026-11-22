@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 
 namespace Rolithax.Windows;
 
@@ -9,7 +10,7 @@ public sealed partial class MainWindow
 {
     private void ShowConnections(StackPanel body)
     {
-        body.Children.Add(PageHeading("连接管理", "管理已保存的 Daemon 和当前连接。", Actions(
+        body.Children.Add(PageHeading("连接管理", "管理已保存的面板和当前连接。", Actions(
             Button("添加连接", () => RunAsync(() => EditConnectionAsync(null)), accent: true),
             Button("粘贴配对码", () => RunAsync(PairAsync)))));
         if (ConnectionStore.HasLegacyConnections && savedAvailable)
@@ -19,7 +20,7 @@ public sealed partial class MainWindow
         var connected = Section($"已连接 · {nodes.Count}");
         body.Children.Add(Card(connected));
         if (nodes.Count == 0)
-            connected.Children.Add(Secondary("尚未连接任何 Daemon。"));
+            connected.Children.Add(Secondary("尚未连接任何面板。"));
         foreach (var node in nodes)
         {
             var tools = Actions(Button("服务器", () =>
@@ -30,7 +31,7 @@ public sealed partial class MainWindow
             if (active != node)
                 tools.Children.Insert(0, Button("设为当前", () => { SelectNode(node); Render(); }));
             var serverSummary = node.ServerListWarning is null ? $"{node.Servers.Length} 台服务器" : "服务器列表不可用";
-            var detail = $"{node.Connection.Address}  ·  {serverSummary}";
+            var detail = $"{ConnectionProviderName(node.Connection)}  ·  {serverSummary}\n{node.Connection.Address}";
             if (active == node)
                 detail += "  ·  当前节点";
             connected.Children.Add(Entry(node.Connection.Name, detail, tools));
@@ -48,57 +49,147 @@ public sealed partial class MainWindow
                 Render();
             }));
             connect.IsEnabled = nodes.All(item => item.Connection.Id != connection.Id);
-            stored.Children.Add(Entry(connection.Name, connection.Address,
+            stored.Children.Add(Entry(connection.Name, $"{ConnectionProviderName(connection)} · {connection.Address}",
                 Actions(connect,
                     Button("编辑", () => RunAsync(() => EditConnectionAsync(connection))),
                     Button("移除", () => RunAsync(() => RemoveConnectionAsync(connection))))));
         }
     }
 
-    private async Task EditConnectionAsync(DaemonConnection? previous, string? pairedAddress = null, string? pairedKey = null,
-        bool pairedHttp = false, bool pairedSelfSigned = false)
+    private static readonly (string Key, string Name, Symbol Icon)[] ConnectionProviders =
+    [
+        ("mslx", "MSLX", Symbol.Link), ("mcsl", "MCSL Future", Symbol.Play),
+        ("mcsm", "MCSManager", Symbol.Manage), ("pterodactyl", "Pterodactyl", Symbol.Globe),
+    ];
+
+    private static string ConnectionProviderName(DaemonConnection connection) =>
+        ConnectionProviders.FirstOrDefault(item => item.Key == connection.Kind).Name ?? "MSLX";
+
+    private async Task EditConnectionAsync(DaemonConnection? previous, bool startPairing = false)
     {
+        var activeKind = previous?.Kind ?? "mslx";
+        var providerGroup = new RadioButtons { MaxColumns = 4 };
+        AutomationProperties.SetName(providerGroup, "连接类型");
+        foreach (var provider in ConnectionProviders)
+        {
+            var label = Text(provider.Name);
+            label.TextAlignment = TextAlignment.Center;
+            var icon = new SymbolIcon(provider.Icon) { RenderTransform = new ScaleTransform { ScaleX = 1.55, ScaleY = 1.55 },
+                RenderTransformOrigin = new global::Windows.Foundation.Point(0.5, 0.5), Width = 38, Height = 38 };
+            var card = CompactStack(icon, label);
+            card.HorizontalAlignment = HorizontalAlignment.Center;
+            var button = new RadioButton { Content = card, MinWidth = 132, MinHeight = 80, IsEnabled = previous is null || activeKind == provider.Key };
+            AutomationProperties.SetName(button, provider.Name);
+            button.GotFocus += (_, _) => button.StartBringIntoView(new BringIntoViewOptions { AnimationDesired = systemUi.AnimationsEnabled });
+            providerGroup.Items.Add(button);
+        }
+        providerGroup.SelectedIndex = Math.Max(0, Array.FindIndex(ConnectionProviders, item => item.Key == activeKind));
+        var carousel = new ScrollViewer { Content = providerGroup, VerticalScrollMode = ScrollMode.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollMode = ScrollMode.Enabled };
         var name = new TextBox { Header = "连接名称", PlaceholderText = "例如 家用服务器", Text = previous?.Name ?? "", MaxLength = 120 };
-        var address = new TextBox { Header = "Daemon 地址", PlaceholderText = "https://daemon.example.com:1027", MaxLength = 2048,
-            Text = pairedAddress ?? previous?.Address ?? "", IsReadOnly = pairedAddress is not null };
-        var key = new PasswordBox { Header = "API Key", Password = pairedKey ?? previous?.ApiKey ?? "", MaxLength = 4096 };
-        AutomationProperties.SetName(name, "连接名称");
-        AutomationProperties.SetName(address, "Daemon 地址");
-        AutomationProperties.SetName(key, "API Key");
-        var allowHttp = new CheckBox { Content = "允许 HTTP 明文连接", IsChecked = pairedHttp || previous?.AllowHttp == true };
-        var selfSigned = new CheckBox { Content = "跳过 HTTPS 证书验证", IsChecked = pairedSelfSigned || previous?.AllowSelfSigned == true };
+        var address = new TextBox { Header = "Daemon 地址", MaxLength = 2048, Text = previous?.Address ?? "" };
+        var key = new PasswordBox { Header = "API Key", Password = previous?.ApiKey ?? "", MaxLength = 4096 };
+        var nodeId = new TextBox { Header = "节点 ID（可选）", Text = previous?.NodeId ?? "", MaxLength = 256 };
+        var usePairCode = new CheckBox { Content = "使用 Rolithax 配对码", IsChecked = startPairing };
+        var pairCode = new TextBox { Header = "配对码", PlaceholderText = "mslxp1:…", MaxLength = 8192 };
+        var allowHttp = new CheckBox { Content = "允许 HTTP 明文连接", IsChecked = previous?.AllowHttp == true };
+        var selfSigned = new CheckBox { Content = "跳过 HTTPS 证书验证", IsChecked = previous?.AllowSelfSigned == true };
         var persist = new CheckBox { Content = "保存到此 Windows 账户", IsChecked = savedAvailable, IsEnabled = savedAvailable && previous is null };
-        var content = Stack(name, address, key, allowHttp, selfSigned, persist);
+        var help = Secondary("");
+        string Kind() => ConnectionProviders[Math.Clamp(providerGroup.SelectedIndex, 0, ConnectionProviders.Length - 1)].Key;
+        bool Pairing() => previous is null && Kind() == "mslx" && usePairCode.IsChecked == true;
+        void UpdateForm()
+        {
+            var kind = Kind();
+            var pairing = Pairing();
+            usePairCode.Visibility = previous is null && kind == "mslx" ? Visibility.Visible : Visibility.Collapsed;
+            pairCode.Visibility = pairing ? Visibility.Visible : Visibility.Collapsed;
+            address.Visibility = key.Visibility = pairing ? Visibility.Collapsed : Visibility.Visible;
+            nodeId.Visibility = kind == "mcsm" ? Visibility.Visible : Visibility.Collapsed;
+            selfSigned.Visibility = kind == "mslx" ? Visibility.Visible : Visibility.Collapsed;
+            allowHttp.Content = kind == "mcsl" ? "允许明文 HTTP / WebSocket" : "允许 HTTP 明文连接";
+            address.Header = kind == "mslx" ? "Daemon 地址" : kind == "mcsl" ? "守护进程地址" : "面板地址";
+            address.PlaceholderText = kind switch
+            {
+                "mcsl" => "wss://mcsl.example.com/api/v2", "mslx" => "https://daemon.example.com:1027",
+                _ => "https://panel.example.com",
+            };
+            key.Header = kind == "mcsl" ? "远程访问 Token" : kind == "pterodactyl" ? "Client API Key" : "API Key";
+            help.Text = kind switch
+            {
+                "mslx" when pairing => "从 MSLX 的 Rolithax 中心复制一次性配对码。",
+                "mslx" => "使用 Daemon 地址和账号的 API Key。",
+                "mcsl" => "使用 MCSL Future /api/v2 地址和远程访问 Token。",
+                "mcsm" => "使用 MCSManager 10 的面板地址和 API Key。",
+                _ => "使用 Pterodactyl 面板地址和 Client API Key。",
+            };
+            AutomationProperties.SetName(address, (string)address.Header);
+            AutomationProperties.SetName(key, (string)key.Header);
+        }
+        providerGroup.SelectionChanged += (_, _) => UpdateForm();
+        usePairCode.Checked += (_, _) => UpdateForm();
+        usePairCode.Unchecked += (_, _) => UpdateForm();
+        UpdateForm();
+        var form = Stack(AcrylicCard(carousel), help, name, usePairCode, pairCode, address, key, nodeId, allowHttp, selfSigned, persist);
+        var content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MaxHeight = Math.Clamp(Root.ActualHeight - 150, 215, 565) };
         string? Validate()
         {
-            if (string.IsNullOrWhiteSpace(key.Password))
-                return "请输入 API Key。";
             try
             {
-                _ = NormalizeAddress(address.Text, allowHttp.IsChecked == true);
+                if (Pairing())
+                {
+                    var endpoint = ParsePairingAddress(pairCode.Text.Trim());
+                    _ = NormalizeAddress(endpoint, allowHttp.IsChecked == true);
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(key.Password)) return $"请输入 {key.Header}。";
+                    _ = NormalizeAddress(address.Text, allowHttp.IsChecked == true, Kind() == "mcsl");
+                }
                 return null;
             }
-            catch (DaemonException error)
-            {
-                return error.Message;
-            }
+            catch (DaemonException error) { return error.Message; }
         }
-        if (!await ConfirmAsync(previous is null ? "添加 Daemon" : "编辑 Daemon", content, "验证并连接", validate: Validate))
-            return;
-        var normalized = NormalizeAddress(address.Text, allowHttp.IsChecked == true);
-        var pinDisabled = selfSigned.IsChecked == true && normalized.Scheme == Uri.UriSchemeHttps;
-        var plainHttp = normalized.Scheme == Uri.UriSchemeHttp;
-        if ((plainHttp || pinDisabled) && !await ConfirmAsync("确认连接安全设置",
-            Secondary(plainHttp ? "HTTP 会明文发送凭据和管理指令。请确认 Daemon 位于可信网络。"
-                : "跳过证书验证后，应用无法确认 Daemon 身份。请确认地址与网络可信。"), "继续连接"))
-            return;
+        if (!await ConfirmAsync(previous is null ? "添加连接" : "编辑连接", content, "验证并连接", validate: Validate, maxWidth: 760)) return;
+
+        var kind = Kind();
+        var payload = Pairing() ? pairCode.Text.Trim() : null;
+        var normalized = NormalizeAddress(payload is null ? address.Text : ParsePairingAddress(payload),
+            allowHttp.IsChecked == true, kind == "mcsl");
+        var insecureTls = kind == "mslx" && selfSigned.IsChecked == true && normalized.Scheme == Uri.UriSchemeHttps;
+        var plainHttp = normalized.Scheme is "http" or "ws";
+        if ((plainHttp || insecureTls) && !await ConfirmAsync("确认连接安全设置",
+            Secondary(plainHttp ? "明文连接会发送可被读取的凭据和管理指令。请确认目标位于可信网络。"
+                : "跳过证书验证后无法确认 Daemon 身份。请确认地址与网络可信。"), "继续连接")) return;
+
+        var apiKey = key.Password.Trim();
+        if (payload is not null)
+        {
+            var draft = new DaemonConnection(Guid.Empty, "", normalized.AbsoluteUri, "", plainHttp, insecureTls);
+            var reply = await RedeemPairAsync(draft, payload);
+            var protocol = reply.Field("protocolVersion");
+            if (protocol.ValueKind != JsonValueKind.Undefined && protocol.LongValue() != 1)
+                throw new DaemonException("配对协议与当前客户端不兼容，请更新 Rolithax 插件和客户端。");
+            var target = NormalizeAddress(reply.Field("daemonUrl").StringValue(normalized.AbsoluteUri), allowHttp.IsChecked == true);
+            if (!string.Equals(normalized.GetLeftPart(UriPartial.Authority), target.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(normalized.AbsolutePath.TrimEnd('/'), target.AbsolutePath.TrimEnd('/'), StringComparison.Ordinal))
+                throw new DaemonException("配对返回了不同的地址，请在 Daemon 上重新生成配对码。");
+            apiKey = reply.Field("apiKey").StringValue();
+            if (apiKey.Length == 0) throw new DaemonException("配对成功响应缺少 API Key，请重新生成配对码。");
+        }
+
         var connection = new DaemonConnection(previous?.Id ?? Guid.NewGuid(),
             string.IsNullOrWhiteSpace(name.Text) ? normalized.Host : name.Text.Trim(),
-            normalized.AbsoluteUri.TrimEnd('/'), key.Password.Trim(), plainHttp, pinDisabled);
-        var duplicate = saved.FirstOrDefault(item => item.Id != connection.Id && SameConnection(item, connection));
-        if (duplicate is not null)
-            throw new DaemonException("这个地址和 API Key 已经保存。请从连接列表打开。");
+            normalized.AbsoluteUri.TrimEnd('/'), apiKey, plainHttp, insecureTls, kind, kind == "mcsm" ? nodeId.Text.Trim() : "");
+        await SaveConnectedAsync(connection, persist.IsChecked == true);
+    }
 
+    private async Task SaveConnectedAsync(DaemonConnection connection, bool persist)
+    {
+        if (saved.Any(item => item.Id != connection.Id && SameConnection(item, connection)))
+            throw new DaemonException("此连接和凭据已保存，请从连接列表打开。");
         var replacement = await OpenNodeAsync(connection);
         if (closed)
         {
@@ -106,11 +197,10 @@ public sealed partial class MainWindow
             return;
         }
         var replaced = nodes.FirstOrDefault(item => item.Connection.Id == connection.Id || SameConnection(item.Connection, connection));
-        if (replaced is not null)
-            await DisconnectAsync(replaced);
+        if (replaced is not null) await DisconnectAsync(replaced);
         nodes.Add(replacement);
         SelectNode(replacement);
-        if (persist.IsChecked == true)
+        if (persist)
         {
             var update = saved.Where(item => item.Id != connection.Id).Append(connection).ToList();
             try
@@ -129,37 +219,7 @@ public sealed partial class MainWindow
         Notice("已连接到 " + connection.Name);
     }
 
-    private async Task PairAsync()
-    {
-        var input = new TextBox { Header = "配对码", PlaceholderText = "mslxp1:…", AcceptsReturn = false, MaxLength = 8192 };
-        var allowHttp = new CheckBox { Content = "允许 HTTP 明文连接" };
-        var selfSigned = new CheckBox { Content = "跳过 HTTPS 证书验证" };
-        var explanation = Secondary("在 Daemon 的 Rolithax 中心生成配对码，再粘贴到这里。");
-        if (!await ConfirmAsync("配对设备", Stack(explanation, input, allowHttp, selfSigned), "兑换"))
-            return;
-        var payload = input.Text.Trim();
-        var address = ParsePairingAddress(payload);
-        var originalUri = NormalizeAddress(address, true);
-        var plainHttp = originalUri.Scheme == Uri.UriSchemeHttp;
-        if (plainHttp && allowHttp.IsChecked != true)
-            throw new DaemonException("配对地址使用 HTTP。确认网络可信后，请勾选允许 HTTP 连接。");
-        var skipTls = originalUri.Scheme == Uri.UriSchemeHttps && selfSigned.IsChecked == true;
-        if ((plainHttp || skipTls) && !await ConfirmAsync("确认配对连接",
-            Secondary(plainHttp ? "配对码会通过 HTTP 明文发送。请确认网络可信。"
-                : "应用将跳过 Daemon 的 HTTPS 证书验证。请确认网络可信。"), "继续配对"))
-            return;
-        var draft = new DaemonConnection(Guid.Empty, "", originalUri.AbsoluteUri, "", plainHttp, skipTls);
-        var reply = await RedeemPairAsync(draft, payload);
-        var target = reply.Field("daemonUrl").StringValue(originalUri.AbsoluteUri);
-        var key = reply.Field("apiKey").StringValue();
-        if (key.Length == 0)
-            throw new DaemonException("配对成功响应缺少 API Key，请重新生成配对码。");
-        var normalized = NormalizeAddress(target, true);
-        if (!string.Equals(originalUri.GetLeftPart(UriPartial.Authority), normalized.GetLeftPart(UriPartial.Authority),
-            StringComparison.OrdinalIgnoreCase))
-            throw new DaemonException("返回的 Daemon 地址与配对码不同。请确认服务器地址后使用 API Key 连接。");
-        await EditConnectionAsync(null, normalized.AbsoluteUri, key, plainHttp, skipTls);
-    }
+    private Task PairAsync() => EditConnectionAsync(null, startPairing: true);
 
     private static async Task<JsonElement> RedeemPairAsync(DaemonConnection draft, string payload)
     {
@@ -224,6 +284,17 @@ public sealed partial class MainWindow
         {
             await CheckNodeStatusAsync(connection, session);
             var node = new Node(connection, session);
+            if (!connection.IsThirdParty)
+            {
+                try
+                {
+                    var capability = await session.CallAsync("schemaCapabilities", secret: connection.ApiKey);
+                    var version = capability.Field("pluginVersion").StringValue();
+                    node.SchemaExtensionStatus = version.Length == 0 ? "未检测到支持 Schema 的 Rolithax 扩展" :
+                        capability.Field("protocolVersion").LongValue() == 1 ? $"Rolithax 扩展 {version}" : $"Rolithax 扩展 {version} 的 Schema 协议不兼容";
+                }
+                catch (DaemonException) { node.SchemaExtensionStatus = "无法确认 Rolithax 扩展版本"; }
+            }
             if (!closed)
                 await RefreshAsync(node, allowUnavailable: true);
             return node;
@@ -303,10 +374,11 @@ public sealed partial class MainWindow
     }
 
     private static bool SameConnection(DaemonConnection left, DaemonConnection right) =>
+        left.Kind == right.Kind && left.NodeId == right.NodeId &&
         string.Equals(left.Address.TrimEnd('/'), right.Address.TrimEnd('/'), StringComparison.Ordinal) &&
         string.Equals(left.ApiKey, right.ApiKey, StringComparison.Ordinal);
 
-    private static Uri NormalizeAddress(string value, bool allowHttp)
+    private static Uri NormalizeAddress(string value, bool allowHttp, bool allowWebSocket = false)
     {
         var input = value.Trim();
         if (input.Length == 0)
@@ -314,11 +386,11 @@ public sealed partial class MainWindow
         if (!input.Contains("://", StringComparison.Ordinal))
             input = "https://" + input;
         if (!Uri.TryCreate(input, UriKind.Absolute, out var address) || string.IsNullOrEmpty(address.Host) ||
-            address.Scheme is not ("https" or "http") || address.UserInfo.Length > 0 ||
+            (address.Scheme is not ("https" or "http") && (!allowWebSocket || address.Scheme is not ("ws" or "wss"))) || address.UserInfo.Length > 0 ||
             address.Query.Length > 0 || address.Fragment.Length > 0)
-            throw new DaemonException("请输入有效的 HTTP 或 HTTPS 地址，地址中不能包含凭据、查询参数或片段。");
-        if (address.Scheme == Uri.UriSchemeHttp && !allowHttp)
-            throw new DaemonException("该地址使用 HTTP。确认网络可信后，请勾选允许 HTTP 连接。");
+            throw new DaemonException("请输入有效的面板地址。地址不能包含凭据、查询参数或片段。");
+        if ((address.Scheme is "http" or "ws") && !allowHttp)
+            throw new DaemonException("该地址使用明文连接。确认网络可信后，请勾选允许明文连接。");
         return address;
     }
 }

@@ -9,7 +9,17 @@ import com.wludy.rolithax.launcher.data.resources.ModrinthApiFactory
 import com.wludy.rolithax.launcher.data.resources.ModrinthResourceProvider
 import com.wludy.rolithax.launcher.data.resources.ResourceDatabase
 import com.wludy.rolithax.launcher.data.resources.ResourceRepository
+import java.io.IOException
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import com.wludy.rolithax.launcher.data.localengine.LocalStorage
 
 /** 简易手动依赖注入容器。 */
 class AppContainer(context: Context) {
@@ -17,8 +27,17 @@ class AppContainer(context: Context) {
     internal val appContext = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val settings = settingsStore.settingsFlow.catch { error ->
+        if (error !is IOException) throw error
+        AppLogger.w("Settings", "启动时无法读取设置", error)
+        emit(AppSettings())
+    }.flowOn(Dispatchers.IO)
+        .stateIn(appScope, SharingStarted.Eagerly, null)
+    val localStorageReady = appScope.async { LocalStorage.migrateRootName(appContext) }
 
     val panelRepository by lazy { com.wludy.rolithax.launcher.data.panels.PanelRepository(appContext) }
+    internal val schemaLibrary by lazy { com.wludy.rolithax.launcher.data.schema.SchemaLibrary(appContext) }
 
     val backupManager = BackupManager(appContext, settingsStore)
 

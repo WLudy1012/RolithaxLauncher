@@ -1,26 +1,36 @@
-using System.IO.Compression;
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Windows.Storage.Pickers;
 
 namespace Rolithax.Windows;
 
 public sealed partial class MainWindow
 {
+    private sealed record SchemaCommandProbe(string Id, string Title, string Description);
+    private sealed record SchemaCheck(SchemaPreflightCheck Requirement, string Status,
+        string? Version = null, SchemaCommandProbe? Command = null)
+    {
+        public string Label
+        {
+            get
+            {
+                var kind = Requirement.Kind switch { "mod" => "模组", "minecraftPlugin" => "Minecraft 插件", _ => "MCDR 插件" };
+                var observed = Version is { } version ? $"检测到 {version}" : Status == "incompatible" ? "未找到" : "无法确认";
+                return $"{kind} {Requirement.Id}：要求 {Requirement.Version}，{observed}";
+            }
+        }
+    }
+
     private sealed record ConsolePanelNode(string Id, string Kind, string Label, string? Field, string? Action,
         ConsolePanelNode[]? Children, string? Description = null, string? Tone = null, string? Unit = null,
-        string? Placeholder = null);
+        string? Placeholder = null, string? Asset = null, string? Value = null);
 
     private sealed record ConsolePanelSnapshot(long Revision, long PackageRevision, string PluginId, string Title,
         bool Stale, ConsolePanelNode[] Nodes, Dictionary<string, string> Values, Dictionary<string, string> Evidence);
-
-    private sealed record ConsolePluginSource(string Manifest, string Ui, string Rules, string Lua = "");
 
     private sealed class ConsolePluginView(ConsoleRun run)
     {
@@ -66,9 +76,9 @@ public sealed partial class MainWindow
 
         var status = view.Status = Secondary(ConsoleConnectionStatus(run));
         var management = new MenuFlyout();
-        var import = new MenuFlyoutItem { Text = "导入本地 ZIP", Icon = new SymbolIcon(Symbol.OpenFile) };
-        import.Click += async (_, _) => await RunAsync(() => ImportConsolePanelAsync(run));
-        management.Items.Add(import);
+        var installed = new MenuFlyoutItem { Text = "选择已安装插件", Icon = new SymbolIcon(Symbol.Library) };
+        installed.Click += async (_, _) => await RunAsync(() => SelectInstalledSchemaAsync(run));
+        management.Items.Add(installed);
         var restore = new MenuFlyoutItem { Text = "恢复内置 Schema", IsEnabled = run.ImportedPanel };
         restore.Click += async (_, _) => await RunAsync(() => RestoreConsolePanelAsync(run));
         management.Items.Add(restore);
@@ -77,14 +87,14 @@ public sealed partial class MainWindow
             Content = run.Panel?.Title ?? "Rolithax Schema", Flyout = management, MinWidth = 180, MaxWidth = 350,
         };
         AutomationProperties.SetName(manage, "选择或管理 Schema 插件");
-        var source = (run.ImportedPanel, run.AllowedPanelCommands.Count) switch
+        var source = (run.ImportedPanel, run.AllowedPanelGrants.Count) switch
         {
             (false, _) => "内置 Schema",
             (true, 0) => "当前插件 · 只读",
-            _ => $"当前插件 · 已授权 {run.AllowedPanelCommands.Count} 项操作",
+            _ => $"当前插件 · 已授权 {run.AllowedPanelGrants.Count} 项操作",
         };
         view.Body.Children.Add(AdaptivePair(CompactStack(manage, Secondary(source)),
-            (FrameworkElement)Actions(Button("插件源", () => RunAsync(() => OpenSchemaRepositoryAsync(run))), status), 560));
+            (FrameworkElement)Actions(Button("插件中心", () => Navigate("schema")), status), 560));
         view.Body.Children.Add(SchemaDivider());
         if (run.Panel is not { } snapshot)
         {
@@ -100,6 +110,28 @@ public sealed partial class MainWindow
         };
         view.Bindings.Add(panel => stale.IsOpen = panel.Stale);
         view.Body.Children.Add(stale);
+        if (run.SchemaCompatibility is { Length: > 0 } compatibility)
+        {
+            var result = new InfoBar
+            {
+                IsOpen = true, IsClosable = false,
+                Severity = run.ImportedPanel && run.SchemaCompatibilityAllowsActions ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+                Message = compatibility,
+            };
+            if (run.SchemaChecks.Length > 0)
+                result.ActionButton = Button("重新检查", () => RunAsync(async () =>
+                {
+                    await RestoreSchemaBindingAsync(run, interactive: true);
+                    if (IsCurrentConsole(run) && tab == "console-panel") BuildConsolePluginView(run, view);
+                }));
+            view.Body.Children.Add(result);
+            if (run.SchemaChecks.Length > 0)
+            {
+                var requirements = CompactStack(run.SchemaChecks.Select(check => (UIElement)Secondary(check)).ToArray());
+                view.Body.Children.Add(new Expander { Header = "版本要求", Content = requirements,
+                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+            }
+        }
         var elements = snapshot.Nodes.Select(node => BuildPanelNode(run, view, node, snapshot.PackageRevision)).ToArray();
         if (snapshot.Nodes.All(node => node.Kind == "section"))
             view.Body.Children.Add(SchemaColumns(elements, 350, 2));
@@ -173,6 +205,28 @@ public sealed partial class MainWindow
 
             case "row":
                 return SchemaColumns((node.Children ?? []).Select(child => BuildPanelNode(run, view, child, revision)).ToArray(), 180, 3);
+
+            case "expander":
+                var expanded = Stack((node.Children ?? []).Select(child => BuildPanelNode(run, view, child, revision)).ToArray());
+                return Described(new Expander { Header = node.Label, Content = expanded,
+                    HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+
+            case "tabs":
+                var tabs = new SelectorBar();
+                AutomationProperties.SetName(tabs, node.Label);
+                var tabContent = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                foreach (var child in node.Children ?? [])
+                    tabs.Items.Add(new SelectorBarItem { Text = child.Label,
+                        Tag = Stack((child.Children ?? []).Select(item => BuildPanelNode(run, view, item, revision)).ToArray()) });
+                tabs.SelectionChanged += (_, _) => tabContent.Content = tabs.SelectedItem?.Tag;
+                tabs.SelectedItem = tabs.Items.FirstOrDefault();
+                var tabStrip = new ScrollViewer { Content = tabs, VerticalScrollMode = ScrollMode.Disabled,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
+                return Described(Stack(Text(node.Label, "BodyStrongTextBlockStyle"), tabStrip, tabContent));
+
+            case "image":
+            case "video":
+                return Described(SchemaMedia(run, node));
 
             case "divider":
                 return SchemaDivider();
@@ -253,6 +307,31 @@ public sealed partial class MainWindow
                 input.TextChanged += (_, _) => { run.PanelDrafts[key] = input.Text; view.Refresh(); };
                 return Described(input);
 
+            case "toggle" when node.Field is { } toggleKey:
+                var initial = node.Value == "true" ? "true" : "false";
+                var toggle = new ToggleSwitch { Header = node.Label,
+                    IsOn = run.PanelDrafts.GetValueOrDefault(toggleKey, initial) == "true" };
+                run.PanelDrafts[toggleKey] = toggle.IsOn ? "true" : "false";
+                toggle.Toggled += (_, _) => { run.PanelDrafts[toggleKey] = toggle.IsOn ? "true" : "false"; view.Refresh(); };
+                return Described(toggle);
+
+            case "select" when node.Field is { } choiceKey:
+                var select = new ComboBox { Header = node.Label, HorizontalAlignment = HorizontalAlignment.Stretch };
+                foreach (var option in node.Children ?? [])
+                    if (option.Value is { } choiceValue)
+                        select.Items.Add(new ComboBoxItem { Content = option.Label, Tag = choiceValue });
+                var selected = run.PanelDrafts.GetValueOrDefault(choiceKey, node.Value ?? "");
+                select.SelectedItem = select.Items.OfType<ComboBoxItem>().FirstOrDefault(item => (string)item.Tag == selected);
+                if (select.SelectedItem is null) run.PanelDrafts.Remove(choiceKey);
+                else run.PanelDrafts[choiceKey] = selected;
+                select.SelectionChanged += (_, _) =>
+                {
+                    if (select.SelectedItem is ComboBoxItem { Tag: string selectedValue }) run.PanelDrafts[choiceKey] = selectedValue;
+                    else run.PanelDrafts.Remove(choiceKey);
+                    view.Refresh();
+                };
+                return Described(select);
+
             case "button" when node.Action is { } action:
                 var button = Button(node.Label, () => RunAsync(() => SendPanelActionAsync(run, action, revision)),
                     accent: node.Tone is not ("neutral" or "danger" or "error"));
@@ -261,12 +340,13 @@ public sealed partial class MainWindow
                 if (node.Tone is "danger" or "error") button.Style = Resource<Style>("SchemaCriticalButtonStyle");
                 view.Bindings.Add(_ =>
                 {
-                    var granted = !run.ImportedPanel || run.AllowedPanelCommands.ContainsKey(action);
-                    var valid = !run.ImportedPanel || !granted || CommandParameter.Matches(run.AllowedPanelCommands[action])
+                    var granted = !run.ImportedPanel || run.AllowedPanelGrants.Contains(action);
+                    var valid = !run.AllowedPanelCommands.TryGetValue(action, out var template) || CommandParameter.Matches(template)
                         .All(parameter => run.PanelDrafts.GetValueOrDefault(parameter.Groups[1].Value, "").Trim() is { Length: > 0 and <= 128 } draft &&
                             !draft.Any(char.IsWhiteSpace));
-                    button.IsEnabled = run.Connected && granted && valid;
-                    ToolTipService.SetToolTip(button, !granted ? "导入时未授予此命令权限。" : null);
+                    button.IsEnabled = run.Connected && granted && valid && run.SchemaCompatibilityAllowsActions;
+                    ToolTipService.SetToolTip(button, !granted ? "此操作尚未授权。" :
+                        !run.SchemaCompatibilityAllowsActions ? "请先完成插件兼容性检查。" : null);
                 });
                 return Described(button);
 
@@ -334,57 +414,194 @@ public sealed partial class MainWindow
             view.Refresh();
     }
 
-    private async Task ImportConsolePanelAsync(ConsoleRun run)
+    private async Task SelectInstalledSchemaAsync(ConsoleRun run)
     {
-        if (!IsCurrentConsole(run))
-            return;
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".zip");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-        var file = await picker.PickSingleFileAsync();
-        if (file is null || !IsCurrentConsole(run))
-            return;
-        var source = await Task.Run(() => ReadConsolePlugin(file.Path));
-        await ImportConsolePanelSourceAsync(run, source);
-    }
-
-    private async Task ImportConsolePanelSourceAsync(ConsoleRun run, ConsolePluginSource source)
-    {
-        if (!IsCurrentConsole(run))
-            return;
-        var result = await CallAsync(run.Node, "consolePanelInspect", new { source });
-        if (result.ValueKind != JsonValueKind.Object)
-            throw new DaemonException("无法读取控制台插件的命令声明。");
-        var commands = result.EnumerateObject().ToArray();
-        var grants = new Dictionary<string, CheckBox>();
-        using var manifest = JsonDocument.Parse(source.Manifest);
-        var content = Stack(Text($"{manifest.RootElement.Field("id").StringValue()} · {manifest.RootElement.Field("version").StringValue()}",
-                "BodyStrongTextBlockStyle"),
-            Secondary("Schema 插件将读取当前实例会话的日志。仅授权需要的操作，每次发送命令前仍需确认。"));
-        foreach (var command in commands)
+        if (!IsCurrentConsole(run)) return;
+        var options = schemaLibrary.Installed().OrderBy(item => item.Metadata.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        if (options.Length == 0)
         {
-            var grant = new CheckBox { Content = CompactStack(Text(command.Value.StringValue()), Secondary(command.Name)) };
-            AutomationProperties.SetName(grant, $"允许 {command.Value.StringValue()}");
-            grants[command.Name] = grant;
+            if (await ConfirmAsync("没有已安装插件", Secondary("请先在插件中心安装或导入插件。"), "打开插件中心"))
+                Navigate("schema");
+            return;
+        }
+        var picker = new ComboBox { Header = "Schema 插件", HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var item in options)
+            picker.Items.Add(new ComboBoxItem { Tag = item, Content = $"{item.Metadata.Name} · {item.Metadata.Version}" });
+        picker.SelectedIndex = Math.Max(0, Array.FindIndex(options, option => option.Metadata.Id == run.SchemaPackage?.Metadata.Id));
+        if (!await ConfirmAsync("选择 Schema 插件",
+            Stack(Secondary($"仅切换 {run.Node.Connection.Name} 的当前实例。"), picker), "配置权限") ||
+            !IsCurrentConsole(run) || picker.SelectedItem is not ComboBoxItem { Tag: SchemaInstallation installation }) return;
+
+        var package = await Task.Run(() => schemaLibrary.Load(installation));
+        var checks = await CheckSchemaAsync(run, package, offerCommands: true);
+        if (!IsCurrentConsole(run) || !await ConfirmSchemaChecksAsync(checks) || !IsCurrentConsole(run)) return;
+        var permissions = new Dictionary<string, CheckBox>();
+        var current = schemaLibrary.Binding(run.Node.Connection.Id, run.SchemaBindingKey);
+        var previousGrants = current?.Installation.Digest == installation.Digest ? current.Value.Binding.Grants : [];
+        var content = Stack(Text($"{package.Metadata.Name} · {package.Metadata.Version}", "BodyStrongTextBlockStyle"),
+            Secondary("插件可根据当前实例日志绘制界面。每项操作都需要单独授权。"));
+        foreach (var (action, command) in package.Commands)
+            AddGrant(action, command, "服务器控制台命令");
+        foreach (var (action, details) in package.Actions)
+        {
+            var description = details.Field("kind").StringValue() == "host-task"
+                ? $"宿主机任务 · {details.Field("taskId").StringValue()}"
+                : $"{FileOperationName(details.Field("operation").StringValue())} · {details.Field("root").StringValue()}/{details.Field("path").StringValue()}";
+            AddGrant(action, description, "Daemon 操作");
+        }
+        if (permissions.Count == 0) content.Children.Add(Secondary("此插件无需操作权限。"));
+        if (!await ConfirmAsync("授权并启用", new ScrollViewer { Content = content, MaxHeight = 395 }, "启用") ||
+            !IsCurrentConsole(run)) return;
+        var grants = permissions.Where(permission => permission.Value.IsChecked == true).Select(permission => permission.Key).ToArray();
+        await LoadSchemaAsync(run, package, grants, checks);
+        if (!IsCurrentConsole(run)) return;
+        await Task.Run(() => schemaLibrary.Bind(run.Node.Connection.Id, run.SchemaBindingKey, installation, grants));
+        Notice("已为此实例启用 Schema 插件。");
+
+        void AddGrant(string action, string title, string kind)
+        {
+            var grant = new CheckBox
+            {
+                IsChecked = previousGrants.Contains(action),
+                Content = CompactStack(Text(title), Secondary(kind)),
+            };
+            AutomationProperties.SetName(grant, $"允许 {title}");
+            permissions.Add(action, grant);
             content.Children.Add(grant);
         }
-        if (commands.Length == 0) content.Children.Add(Secondary("此插件仅解析日志，不包含命令操作。"));
-        if (!await ConfirmAsync("加载 Schema 插件", new ScrollViewer { Content = content, MaxHeight = 360 }, "加载") || !IsCurrentConsole(run))
-            return;
-        var allowedCommands = grants.Where(pair => pair.Value.IsChecked == true).Select(pair => pair.Key).ToArray();
-        var snapshot = await CallAsync(run.Node, "consolePanelImport",
-            new { id = run.ServerId, streamEpoch = run.Epoch, source, allowedCommands });
-        if (!IsCurrentConsole(run))
-            return;
-        run.ImportedPanel = true;
-        run.AllowedPanelCommands = commands.Where(command => allowedCommands.Contains(command.Name))
-            .ToDictionary(command => command.Name, command => command.Value.StringValue());
-        run.PanelDrafts.Clear();
-        ApplyConsolePanel(run, snapshot, rebuild: true);
-        Notice("Schema 插件已载入。");
     }
 
-    private async Task RestoreConsolePanelAsync(ConsoleRun run)
+    private async Task RestoreSchemaBindingAsync(ConsoleRun run, bool interactive = false)
+    {
+        var binding = schemaLibrary.Binding(run.Node.Connection.Id, run.SchemaBindingKey);
+        if (binding is not { } saved || !IsCurrentConsole(run)) return;
+        if (run.ImportedPanel) run.SchemaCompatibilityAllowsActions = false;
+        try
+        {
+            var package = await Task.Run(() => schemaLibrary.Load(saved.Installation));
+            var checks = await CheckSchemaAsync(run, package, interactive);
+            if (!IsCurrentConsole(run)) return;
+            var allow = checks.All(check => check.Status == "compatible") ||
+                interactive && await ConfirmSchemaChecksAsync(checks);
+            if (!IsCurrentConsole(run)) return;
+            if (allow)
+            {
+                await LoadSchemaAsync(run, package, saved.Binding.Grants, checks);
+                return;
+            }
+            if (run.ImportedPanel) await RestoreConsolePanelAsync(run, clearBinding: false);
+            if (!IsCurrentConsole(run)) return;
+            run.SchemaChecks = checks.Select(check => check.Label).ToArray();
+            run.SchemaCompatibility = checks.Any(check => check.Status == "incompatible")
+                ? "已绑定的插件版本要求未满足，当前使用内置 Schema。"
+                : "请确认已绑定插件的版本要求后再启用。当前使用内置 Schema。";
+        }
+        catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException or JsonException or DaemonException)
+        {
+            run.SchemaCompatibility = "无法载入已绑定的插件。请从插件中心检查或重新安装。";
+        }
+    }
+
+    private async Task LoadSchemaAsync(ConsoleRun run, SchemaPackage package, string[] grants, SchemaCheck[] checks)
+    {
+        if (!IsCurrentConsole(run)) return;
+        var snapshot = await CallAsync(run.Node, "consolePanelImport",
+            new { id = run.ServerId, streamEpoch = run.Epoch, source = package.Source, allowedCommands = grants });
+        if (!IsCurrentConsole(run)) return;
+        run.ImportedPanel = true;
+        run.SchemaPackage = package;
+        run.SchemaChecks = checks.Select(check => check.Label).ToArray();
+        run.SchemaCompatibility = checks.Length == 0 ? "" : checks.Any(check => check.Status == "unknown")
+            ? "部分版本无法确认，已按你的选择启用。" : "已验证插件所需版本。";
+        run.SchemaCompatibilityAllowsActions = true;
+        run.AllowedPanelGrants = grants.ToHashSet(StringComparer.Ordinal);
+        run.AllowedPanelCommands = package.Commands.Where(command => run.AllowedPanelGrants.Contains(command.Key))
+            .ToDictionary(command => command.Key, command => command.Value);
+        run.PanelDrafts.Clear();
+        ApplyConsolePanel(run, snapshot, rebuild: true);
+        if (checks.Length == 0 || run.Panel is not { } panel) return;
+        await SendSchemaResultAsync(run, panel.PackageRevision, "preflight", new
+        {
+            checks = checks.Select(check => new
+            {
+                kind = check.Requirement.Kind,
+                id = check.Requirement.Id,
+                expected = check.Requirement.Version,
+                version = check.Version,
+                status = check.Status,
+            }),
+        });
+    }
+
+    private async Task<SchemaCheck[]> CheckSchemaAsync(ConsoleRun run, SchemaPackage package, bool offerCommands)
+    {
+        var results = new List<SchemaCheck>();
+        foreach (var probe in package.Preflight)
+        {
+            if (!IsCurrentConsole(run)) return [];
+            results.Add(await ReadSchemaCheckAsync(run, probe));
+        }
+        if (!offerCommands || results.Any(check => check.Status == "incompatible")) return [.. results];
+        for (var i = 0; i < results.Count; i++)
+        {
+            if (!IsCurrentConsole(run)) return [];
+            var check = results[i];
+            if (check.Command is not { } command) continue;
+            var accepted = await ConfirmAsync("检查插件版本", Stack(Secondary(check.Label),
+                Text(command.Title, "BodyStrongTextBlockStyle"), Secondary(command.Description),
+                Secondary("将在当前实例关联的 Daemon 上运行管理员登记的只读版本探测。")), "运行探测", "跳过");
+            if (!IsCurrentConsole(run)) return [];
+            if (!accepted) continue;
+            results[i] = await ReadSchemaCheckAsync(run, check.Requirement, command.Id);
+            if (results[i].Status == "incompatible") break;
+        }
+        return [.. results];
+    }
+
+    private async Task<SchemaCheck> ReadSchemaCheckAsync(ConsoleRun run, SchemaPreflightCheck probe, string? commandProbeId = null)
+    {
+        try
+        {
+            var reply = await CallAsync(run.Node, "schemaPreflight",
+                new { id = run.ServerId, kind = probe.Kind, target = probe.Id, commandProbeId });
+            var version = reply.Field("version").StringValue();
+            var status = reply.Field("status").StringValue() switch
+            {
+                "found" when version.Length > 0 => probe.Version == version ? "compatible" : "incompatible",
+                "missing" => "incompatible",
+                _ => "unknown",
+            };
+            var descriptor = reply.Field("commandProbe");
+            var command = status == "unknown" && descriptor.ValueKind == JsonValueKind.Object
+                ? descriptor.Deserialize<SchemaCommandProbe>(PanelJson) : null;
+            return new(probe, status, version.Length == 0 ? null : version, command);
+        }
+        catch (DaemonException) { return new(probe, "unknown"); }
+    }
+
+    private async Task<bool> ConfirmSchemaChecksAsync(SchemaCheck[] checks)
+    {
+        if (checks.All(check => check.Status == "compatible")) return true;
+        var list = new ScrollViewer
+        {
+            MaxHeight = 320,
+            Content = CompactStack(checks.Select(check => (UIElement)Secondary(check.Label)).ToArray()),
+        };
+        if (!checks.Any(check => check.Status == "incompatible"))
+            return await ConfirmAsync("部分版本无法确认", list, "仍然启用");
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
+            Title = "版本要求未满足",
+            Content = list,
+            CloseButtonText = "关闭",
+        };
+        await dialog.ShowAsync();
+        return false;
+    }
+
+    private async Task RestoreConsolePanelAsync(ConsoleRun run, bool clearBinding = true)
     {
         if (!IsCurrentConsole(run))
             return;
@@ -392,21 +609,35 @@ public sealed partial class MainWindow
         if (!IsCurrentConsole(run))
             return;
         run.ImportedPanel = false;
+        run.SchemaPackage = null;
+        run.SchemaCompatibility = "";
+        run.SchemaChecks = [];
+        run.SchemaCompatibilityAllowsActions = true;
+        run.AllowedPanelGrants.Clear();
         run.AllowedPanelCommands.Clear();
         run.PanelDrafts.Clear();
         ApplyConsolePanel(run, snapshot, rebuild: true);
-        Notice("已恢复内置 Schema。");
+        if (clearBinding)
+        {
+            await Task.Run(() => schemaLibrary.ClearBinding(run.Node.Connection.Id, run.SchemaBindingKey));
+            Notice("已恢复内置 Schema。");
+        }
     }
 
     private async Task SendPanelActionAsync(ConsoleRun run, string actionId, long packageRevision)
     {
         if (tab != "console-panel" || !IsCurrentConsole(run) || !run.Connected || run.Panel?.PackageRevision != packageRevision ||
-            (run.ImportedPanel && !run.AllowedPanelCommands.ContainsKey(actionId)))
+            !run.SchemaCompatibilityAllowsActions || (run.ImportedPanel && !run.AllowedPanelGrants.Contains(actionId)))
             return;
-        var arguments = new Dictionary<string, string>();
-        if (run.ImportedPanel)
+        if (run.SchemaPackage?.Actions.ContainsKey(actionId) == true)
         {
-            foreach (Match parameter in CommandParameter.Matches(run.AllowedPanelCommands[actionId]))
+            await ExecuteSchemaIntentAsync(run, packageRevision, actionId);
+            return;
+        }
+        var arguments = new Dictionary<string, string>();
+        if (run.AllowedPanelCommands.TryGetValue(actionId, out var template))
+        {
+            foreach (Match parameter in CommandParameter.Matches(template))
             {
                 var key = parameter.Groups[1].Value;
                 arguments[key] = run.PanelDrafts.GetValueOrDefault(key, "").Trim();
@@ -430,51 +661,4 @@ public sealed partial class MainWindow
         Notice("面板命令已发送。");
     }
 
-    private static ConsolePluginSource ReadConsolePlugin(string path)
-    {
-        try
-        {
-            using var file = File.OpenRead(path);
-            if (file.Length > 512 * 1024)
-                throw new DaemonException("控制台插件压缩包过大。");
-            using var zip = new ZipArchive(file);
-            var allowed = new HashSet<string>(StringComparer.Ordinal)
-                { "plugin.json", "ui.xml", "rules.yaml", "business.lua" };
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            if (zip.Entries.Count is < 3 or > 4 || zip.Entries.Any(entry =>
-                    !allowed.Contains(entry.FullName) || !names.Add(entry.FullName) ||
-                    ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000) ||
-                !names.Contains("plugin.json") || !names.Contains("ui.xml") ||
-                (!names.Contains("rules.yaml") && !names.Contains("business.lua")))
-                throw new DaemonException("Schema 包根目录必须包含 plugin.json、ui.xml，以及 rules.yaml 或 business.lua，不能包含重复或其他文件。");
-
-            string ReadEntry(string name, int maxFileBytes)
-            {
-                var entry = zip.GetEntry(name) ?? throw new InvalidDataException();
-                if (entry.Length < (name == "rules.yaml" ? 0 : 1) || entry.Length > maxFileBytes)
-                    throw new DaemonException("控制台插件文件为空或过大。");
-                using var stream = entry.Open();
-                using var bytes = new MemoryStream();
-                var buffer = new byte[4096];
-                int length;
-                while ((length = stream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    if (bytes.Length + length > maxFileBytes)
-                        throw new DaemonException("控制台插件文件过大。");
-                    bytes.Write(buffer, 0, length);
-                }
-                if (bytes.Length != entry.Length)
-                    throw new InvalidDataException();
-                return new UTF8Encoding(false, true).GetString(bytes.GetBuffer(), 0, (int)bytes.Length).TrimStart('\uFEFF');
-            }
-
-            return new ConsolePluginSource(ReadEntry("plugin.json", 16_384), ReadEntry("ui.xml", 65_536),
-                names.Contains("rules.yaml") ? ReadEntry("rules.yaml", 65_536) : "",
-                names.Contains("business.lua") ? ReadEntry("business.lua", 131_072) : "");
-        }
-        catch (Exception error) when (error is InvalidDataException or DecoderFallbackException)
-        {
-            throw new DaemonException("无法读取控制台插件。请使用有效的 UTF-8 ZIP 包。");
-        }
-    }
 }

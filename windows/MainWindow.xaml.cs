@@ -17,7 +17,8 @@ namespace Rolithax.Windows;
 
 public sealed partial class MainWindow : Window
 {
-    private sealed record Server(long Id, string Name, string Core, int Status, string StatusText, long Players)
+    private sealed record Server(long Id, string Name, string Core, int Status, string StatusText, long Players,
+        string ProviderId, string NodeId, HashSet<string> Powers)
     {
         public static Server From(JsonElement value)
         {
@@ -32,7 +33,8 @@ public sealed partial class MainWindow : Window
                     3 => "停止中",
                     4 => "重启中",
                     _ => "未知",
-                }), value.Field("extra").Field("onlinePlayers").LongValue());
+                }), value.Field("extra").Field("onlinePlayers").LongValue(), value.Field("providerId").StringValue(),
+                value.Field("nodeId").StringValue(), value.Field("powers").Items().Select(item => item.StringValue()).ToHashSet(StringComparer.Ordinal));
         }
     }
 
@@ -42,6 +44,7 @@ public sealed partial class MainWindow : Window
         public DaemonSession Session { get; } = session;
         public Server[] Servers { get; set; } = [];
         public string? ServerListWarning { get; set; }
+        public string? SchemaExtensionStatus { get; set; }
         public bool MonitorStarted { get; set; }
         public string? CreationId { get; set; }
         public string? CreationStatus { get; set; }
@@ -95,7 +98,7 @@ public sealed partial class MainWindow : Window
             foreach (var node in nodes)
                 _ = Task.Run(node.Session.Dispose);
         };
-        Render();
+        Render(animate: true);
     }
 
     private void ResizeForDisplay()
@@ -137,8 +140,8 @@ public sealed partial class MainWindow : Window
             LeaveServer();
         Feedback.IsOpen = false;
         page = target;
-        Render();
-        if (page == "users" && active is { } node)
+        Render(animate: true);
+        if (page == "users" && active is { Connection.IsThirdParty: false } node)
             _ = RunAsync(() => ShowUsersAsync(node));
     }
 
@@ -155,7 +158,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void Render()
+    private void Render(bool animate = false)
     {
         ResetConsoleViews();
         monitorText = null;
@@ -170,16 +173,21 @@ public sealed partial class MainWindow : Window
         userResults = null;
         if (page == "instances" && selectedServer is { } server && active is { } node)
         {
-            PageHost.Children.Add(ServerWorkspace(node, server));
+            var workspace = ServerWorkspace(node, server);
+            if (animate) AnimateEntrance(workspace);
+            PageHost.Children.Add(workspace);
             return;
         }
 
         var body = new StackPanel { Spacing = 16, Margin = new Thickness(24, 24, 24, 28),
             MaxWidth = 1180, HorizontalAlignment = HorizontalAlignment.Stretch };
-        PageHost.Children.Add(new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        var scroll = new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        if (animate) AnimateEntrance(scroll);
+        PageHost.Children.Add(scroll);
         switch (page)
         {
             case "connections": ShowConnections(body); break;
+            case "schema": ShowSchemaCenter(body); break;
             case "instances": ShowInstances(body); break;
             case "users": ShowUserShell(body); break;
             case "settings": ShowSettings(body); break;
@@ -289,7 +297,7 @@ public sealed partial class MainWindow : Window
 
     private void AddWindowShortcuts()
     {
-        var pages = new[] { "overview", "instances", "connections", "users", "settings" };
+        var pages = new[] { "overview", "instances", "connections", "schema", "users", "settings" };
         for (var index = 0; index < pages.Length; index++)
         {
             var target = pages[index];
@@ -343,24 +351,27 @@ public sealed partial class MainWindow : Window
         if (active is not { } node)
         {
             body.Children.Add(Card(Stack(
-                Text("还没有连接的 Daemon", "SubtitleTextBlockStyle"),
-                Secondary("连接远端 Daemon 后，可以在这里查看服务器状态和宿主机负载。"),
+                Text("还没有连接的面板", "SubtitleTextBlockStyle"),
+                Secondary("连接面板后，可以在这里查看服务器状态。"),
                 Actions(Button("管理连接", () => Navigate("connections")),
                     Button("粘贴配对码", () => RunAsync(PairAsync))))));
             return;
         }
 
-        monitorText = Secondary("等待宿主机监控数据…");
-        cpuMeter = new Meter("CPU");
-        memoryMeter = new Meter("内存");
+        if (!node.Connection.IsThirdParty)
+        {
+            monitorText = Secondary("等待宿主机监控数据…");
+            cpuMeter = new Meter("CPU");
+            memoryMeter = new Meter("内存");
+        }
         var nodeCard = Card(Stack(
-            Text("当前 Daemon", "BodyStrongTextBlockStyle"), NodePicker(node, showHeader: false),
-            Secondary(node.Connection.Address), Actions(
+            Text("当前连接", "BodyStrongTextBlockStyle"), NodePicker(node, showHeader: false),
+            Secondary(node.Connection.Address), Secondary(node.SchemaExtensionStatus ?? ConnectionProviderName(node.Connection)), Actions(
                 Button("查看服务器", () => Navigate("instances"), accent: true),
                 Button("刷新", () => RefreshDisplayedListAsync(node)))));
-        var monitorCard = Card(Stack(Text("宿主机负载", "BodyStrongTextBlockStyle"),
-            cpuMeter.View, memoryMeter.View, monitorText));
-        body.Children.Add(AdaptivePair(nodeCard, monitorCard, 630, equalColumns: true));
+        if (cpuMeter is { } cpu && memoryMeter is { } memory && monitorText is { } monitor)
+            body.Children.Add(AdaptivePair(nodeCard, Card(Stack(Text("宿主机负载", "BodyStrongTextBlockStyle"), cpu.View, memory.View, monitor)), 630, equalColumns: true));
+        else body.Children.Add(nodeCard);
 
         var runningRows = Section("运行中的服务器");
         if (node.ServerListWarning is { } warning)
@@ -428,11 +439,11 @@ public sealed partial class MainWindow : Window
     private void ShowInstances(StackPanel body)
     {
         var node = active;
-        body.Children.Add(PageHeading("服务器", "查找实例，查看控制台、文件和配置。",
-            node is null ? null : Button("新建服务器", () => RunAsync(() => CreateServerAsync(node)), accent: true)));
+        body.Children.Add(PageHeading("服务器", "查找和管理当前连接的实例。",
+            node is { Connection.IsThirdParty: false } ? Button("新建服务器", () => RunAsync(() => CreateServerAsync(node)), accent: true) : null));
         if (node is null)
         {
-            body.Children.Add(Card(Stack(Text("请先连接 Daemon", "BodyStrongTextBlockStyle"),
+            body.Children.Add(Card(Stack(Text("请先连接面板", "BodyStrongTextBlockStyle"),
                 Button("管理连接", () => Navigate("connections"), accent: true))));
             return;
         }
@@ -472,10 +483,11 @@ public sealed partial class MainWindow : Window
             {
                 var lifecycle = Button(server.Status == 0 ? "启动" : "停止", () => RunAsync(() =>
                     ServerActionAsync(node, server, server.Status == 0 ? "start" : "stop")));
-                lifecycle.IsEnabled = server.Status is 0 or 2;
-                list.Children.Add(ServerRow(server,
-                    Button("控制台", () => OpenServer(node, server, "console-panel")),
-                    Button("文件", () => OpenServer(node, server, "files")), lifecycle));
+                lifecycle.IsEnabled = (server.Status is 0 or 2) && (!node.Connection.IsThirdParty ||
+                    server.Powers.Contains(server.Status == 0 ? "start" : "stop"));
+                var openConsole = Button("控制台", () => OpenServer(node, server, "console-panel"));
+                list.Children.Add(node.Connection.IsThirdParty ? ServerRow(server, openConsole, lifecycle) :
+                    ServerRow(server, openConsole, Button("文件", () => OpenServer(node, server, "files")), lifecycle));
             }
             if (sorted.Length == 0)
                 list.Children.Add(Secondary(node.Servers.Length == 0 ? "当前节点还没有服务器。" : "没有符合筛选条件的服务器。"));
@@ -521,9 +533,9 @@ public sealed partial class MainWindow : Window
 
     private static string ServerDetail(Server server)
     {
-        var id = $"#{server.Id}";
+        var id = server.ProviderId.Length == 0 ? $"#{server.Id}" : server.ProviderId;
         var prefix = server.Core.Length == 0 ? id : $"{server.Core}  ·  {id}";
-        return server.Status == 2 ? $"{prefix}  ·  {server.Players} 位玩家" : prefix;
+        return server.Status == 2 && server.ProviderId.Length == 0 ? $"{prefix}  ·  {server.Players} 位玩家" : prefix;
     }
 
     private static Border ServerState(Server server) => new()
@@ -564,7 +576,7 @@ public sealed partial class MainWindow : Window
     {
         body.Children.Add(Heading("设置", "调整界面外观，查看账户和版本信息。"));
         AddAppearanceSettings(body);
-        if (active is { } node)
+        if (active is { Connection.IsThirdParty: false } node)
             body.Children.Add(Card(Section("账户", Entry("当前账户", node.Connection.Name,
                 Button("查看资料", () => RunAsync(() => ShowProfileAsync(node)))))));
         body.Children.Add(Card(Section("关于", CompactStack(
@@ -711,7 +723,7 @@ public sealed partial class MainWindow : Window
         new() { ItemsSource = choices, SelectedItem = selected, HorizontalAlignment = HorizontalAlignment.Stretch };
 
     private async Task<bool> ConfirmAsync(string title, object content, string action, string cancel = "取消",
-        Func<string?>? validate = null)
+        Func<string?>? validate = null, double? maxWidth = null)
     {
         var dialog = new ContentDialog
         {
@@ -723,6 +735,7 @@ public sealed partial class MainWindow : Window
             CloseButtonText = cancel,
             DefaultButton = ContentDialogButton.Close,
         };
+        if (maxWidth is { } width) dialog.Resources["ContentDialogMaxWidth"] = width;
         if (validate is not null && content is UIElement form)
         {
             var validation = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false };

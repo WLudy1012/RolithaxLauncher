@@ -7,12 +7,16 @@ import com.wludy.rolithax.launcher.data.schema.readSchemaBytes
 import com.wludy.rolithax.launcher.data.schema.readSchemaPackage
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginCompiler
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginSource
+import com.wludy.rolithax.launcher.shared.console.SchemaAction
+import com.wludy.rolithax.launcher.shared.console.SchemaProbe
 
 internal data class ConsolePluginImport(
     val source: ConsolePluginSource,
     val title: String,
     val id: String,
     val commands: Map<String, String>,
+    val actions: Map<String, SchemaAction> = emptyMap(),
+    val preflight: List<SchemaProbe> = emptyList(),
 )
 
 internal fun readConsolePlugin(resolver: ContentResolver, uri: Uri): ConsolePluginImport =
@@ -23,5 +27,5 @@ internal fun readConsolePlugin(resolver: ContentResolver, uri: Uri): ConsolePlug
 internal fun inspectConsolePlugin(source: ConsolePluginSource): ConsolePluginImport {
     val compiled = ConsolePluginCompiler.compile(source)
     require(compiled.id != "rolithax.paper") { "不能覆盖内置 Schema" }
-    return ConsolePluginImport(source, compiled.title, compiled.id, compiled.commands)
+    return ConsolePluginImport(source, compiled.title, compiled.id, compiled.commands, compiled.actions, compiled.preflight)
 }

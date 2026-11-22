@@ -64,18 +64,20 @@ import com.wludy.rolithax.launcher.ui.settings.AppearanceScreen
 import com.wludy.rolithax.launcher.ui.settings.AboutScreen
 import com.wludy.rolithax.launcher.ui.settings.LogViewerScreen
 import com.wludy.rolithax.launcher.ui.settings.LegalDocumentScreen
-import com.wludy.rolithax.launcher.ui.splash.SplashScreen
 import com.wludy.rolithax.launcher.ui.user.UserCenterScreen
 import com.wludy.rolithax.launcher.ui.welcome.WelcomeScreen
+import com.wludy.rolithax.launcher.ui.connect.AddConnectionScreen
+import com.wludy.rolithax.launcher.ui.console.SchemaCenterScreen
 
 object Routes {
-    const val SPLASH = "splash"
     const val WELCOME = "welcome"
     const val CONNECT = "connect?auto={autoConnect}&daemonId={daemonId}"
     const val HOME = "home"
     const val INSTANCES = "instances?source={source}"
     const val CONNECTIONS = "connections"
     const val PANELS = "panels"
+    const val ADD_CONNECTION = "addConnection"
+    const val SCHEMA_CENTER = "schemaCenter"
     const val SETTINGS = "settings"
     const val RESOURCES = "resources"
     const val NEW_INSTANCE = "newInstance?source={source}"
@@ -203,7 +205,7 @@ fun AppNavHost(
             ) {
                 NavHost(
                     navController = navController,
-                    startDestination = Routes.SPLASH,
+                    startDestination = remember { if (settings.onboarded) Routes.HOME else Routes.WELCOME },
                     // Dock 已自行避让导航栏；页面内的 navigationBarsPadding 不应再叠加一次
                     modifier = Modifier.weight(1f).then(
                         if (showBottomDock) Modifier.consumeWindowInsets(WindowInsets.navigationBars) else Modifier,
@@ -215,20 +217,6 @@ fun AppNavHost(
                     popEnterTransition = { EnterTransition.None },
                     popExitTransition = { ExitTransition.None },
                 ) {
-
-            composable(Routes.SPLASH) {
-                // 用 rememberUpdatedState 保证动画结束后拿到最新的 onboarded 状态
-                val latest by rememberUpdatedState(settings)
-                SplashScreen(
-                    onFinished = {
-                        val dest = if (latest.onboarded) Routes.HOME else Routes.WELCOME
-                        navController.navigate(dest) {
-                            popUpTo(Routes.SPLASH) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                )
-            }
 
             composable(Routes.WELCOME) {
                 WelcomeScreen(
@@ -243,6 +231,7 @@ fun AppNavHost(
 
             composable(Routes.HOME) {
                 HomeScreen(
+                    onOpenSchemaCenter = { navController.navigate(Routes.SCHEMA_CENTER) { launchSingleTop = true } },
                     onOpenInstances = { source -> navigateTopLevel(Routes.instances(source)) },
                     onOpenConnections = { navigateTopLevel(Routes.CONNECTIONS) },
                     onCreate = { navController.navigate(Routes.create()) { launchSingleTop = true } },
@@ -356,7 +345,7 @@ fun AppNavHost(
 
             composable(Routes.CONNECTIONS) {
                 ConnectionsScreen(
-                    onAddDaemon = { navController.navigate(Routes.connect(false)) { launchSingleTop = true } },
+                    onAddDaemon = { navController.navigate(Routes.ADD_CONNECTION) { launchSingleTop = true } },
                     onEditDaemon = { id -> navController.navigate(Routes.connect(false, id)) { launchSingleTop = true } },
                     onOpenInstances = { source -> navigateTopLevel(Routes.instances(source)) },
                     onCreate = { source -> navController.navigate(Routes.create(source)) { launchSingleTop = true } },
@@ -370,6 +359,19 @@ fun AppNavHost(
 
             composable(Routes.PANELS) {
                 PanelScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Routes.ADD_CONNECTION) {
+                AddConnectionScreen(onBack = { navController.popBackStack() }, onPanelAdded = {
+                    navController.navigate(Routes.PANELS) {
+                        popUpTo(Routes.ADD_CONNECTION) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                })
+            }
+
+            composable(Routes.SCHEMA_CENTER) {
+                SchemaCenterScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.LOCAL_SERVER_SETTINGS) {
@@ -437,6 +439,8 @@ fun AppNavHost(
                 }
                 ConsoleScreen(
                     controller = controller,
+                    ref = ref,
+                    onOpenSchemaCenter = { navController.navigate(Routes.SCHEMA_CENTER) { launchSingleTop = true } },
                     onBack = { navController.popBackStack() },
                     onOpenSettings = {
                         navController.navigate(Routes.instanceSettings(ref)) {

@@ -117,7 +117,7 @@ private fun BackdropLayer(bitmap: ImageBitmap?, dark: Boolean, modifier: Modifie
                 Modifier
                     .fillMaxSize()
                     .background(
-                        if (dark) Color.Black.copy(alpha = 0.38f) else Color.White.copy(alpha = 0.18f),
+                        scheme.surface.copy(alpha = if (dark) 0.72f else 0.74f),
                     ),
             )
         }
@@ -153,7 +153,7 @@ fun rememberGlassStyle(
     val blur = backdrop != null && sameWindow && backdrop.hasImage &&
         alpha < 0.995f && isRealtimeBlurSupported()
     val minAlpha = when {
-        blur -> if (dark) 0.42f else 0.32f
+        blur -> if (dark) 0.61f else 0.58f
         backdrop?.hasImage == true -> 0.86f
         else -> 0.55f
     }
