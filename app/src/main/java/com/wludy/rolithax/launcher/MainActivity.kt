@@ -39,7 +39,7 @@ import com.wludy.rolithax.launcher.ui.theme.ThemeConfig
 import com.wludy.rolithax.launcher.ui.update.CrashReportDialog
 import com.wludy.rolithax.launcher.ui.update.DisclaimerDialog
 import com.wludy.rolithax.launcher.ui.update.UpdateHost
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -56,8 +56,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         installSplashScreen()
+        super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         pendingRef.value = intentServerRef(intent)
 
@@ -65,8 +65,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             // 用 nullable 初始值区分"尚未加载"与"已加载"：免责协议必须等 DataStore
             // 首次真实值落盘后再渲染，避免非初次打开时 disclaimerAccepted 一闪而过。
-            val settingsState by app.container.settingsStore.settingsFlow
-                .collectAsStateWithLifecycle(initialValue = null as AppSettings?)
+            val settingsState by app.container.settings.collectAsStateWithLifecycle()
+            val storageReady by androidx.compose.runtime.produceState(false, app.container) {
+                app.container.localStorageReady.await()
+                value = true
+            }
             val settings = settingsState ?: AppSettings()
             val darkTheme = when (settings.themeBrightness) {
                 ThemeBrightness.SYSTEM -> isSystemInDarkTheme()
@@ -104,11 +107,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // 启动完成后（onboarded 且 SPLASH 结束）跳转到通知对应的实例控制台
-            LaunchedEffect(settings.onboarded, pendingRef.value) {
+            LaunchedEffect(storageReady, settingsState?.onboarded, pendingRef.value) {
                 val ref = pendingRef.value
-                if (ref != null && settings.onboarded) {
-                    delay(2400) // 等待 SPLASH(1.6s) + 导航动画完成
+                if (ref != null && storageReady && settingsState?.onboarded == true) {
+                    navController.currentBackStackEntryFlow.first()
                     navController.navigate(Routes.console(ref)) {
                         launchSingleTop = true
                     }
@@ -126,7 +128,9 @@ class MainActivity : ComponentActivity() {
             RolithaxTheme(darkTheme = darkTheme, themeConfig = themeConfig) {
                 // 背景层注册为模糊源：各页面 Scaffold 保持透明，玻璃面板实时模糊其后方背景
                 GlassHost(config = themeConfig, modifier = Modifier.fillMaxSize()) {
-                    AppNavHost(settings = settings, navController = navController)
+                    if (settingsState != null && storageReady) {
+                        AppNavHost(settings = settings, navController = navController)
+                    }
                     // 全局更新弹窗：启动自动检查 + 手动检查结果都走这里
                     UpdateHost()
                     // 崩溃报告弹窗：上次会话发生未捕获异常时展示

@@ -82,7 +82,7 @@ internal class SharedDaemonConnection(
             config { dispatcher(transportDispatcher) }
         }
     }
-    private val daemon = DaemonClient(baseUrl, apiKey, http, allowHttp = baseUrl.startsWith("http://", true))
+    internal val daemon = DaemonClient(baseUrl, apiKey, http, allowHttp = baseUrl.startsWith("http://", true))
     private val gson = Gson()
 
     private fun jsonObject(value: Any): JsonObject = Json.parseToJsonElement(gson.toJson(value)).jsonObject

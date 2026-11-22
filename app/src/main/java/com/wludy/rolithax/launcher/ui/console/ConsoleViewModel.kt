@@ -278,13 +278,18 @@ class ConsoleViewModel(
         return sendCommand(command)
     }
 
-    override fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String>) {
+    override fun loadPanel(source: ConsolePluginSource?, allowedCommands: Set<String>): Boolean =
         try {
             panelState.load(source, allowedCommands)
+            true
         } catch (_: IllegalArgumentException) {
             _events.tryEmit(ConsoleEvent.Toast("扩展加载失败，请检查包格式"))
+            false
         }
-    }
+
+    override fun prepareSchemaAction(actionId: String, revision: Long) = panelState.prepare(actionId, revision)
+    override fun applySchemaResult(kind: String, payload: kotlinx.serialization.json.JsonObject, revision: Long) =
+        panelState.result(kind, payload, revision)
 
     override fun sendAction(action: String) {
         val id = instanceId ?: return

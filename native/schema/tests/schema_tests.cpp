@@ -126,6 +126,71 @@ end})");
     call(id, {{"op", "log"}, {"text", "done:recovered"}});
     require(call(id, {{"op", "snapshot"}})["values"]["state"] == "recovered", "Runtime survives budget error");
 }
+Json sdk3Source() {
+    return {{"manifest", R"({
+        "id":"tests.schema-three", "version":"1.0.0", "sdkVersion":3, "server":"paper", "engine":"lua",
+        "name":"Schema 3", "description":"SDK fixture", "authors":["Rolithax"], "license":"AGPL-3.0-only",
+        "homepage":"https://example.org/plugin", "icon":"banner",
+        "assets":[
+            {"id":"banner","mediaType":"image/png","path":"assets/picture.png","size":12,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"},
+            {"id":"demo","mediaType":"video/mp4","url":"https://example.org/demo.mp4","size":12,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+        ],
+        "actions":{
+            "read-config":{"kind":"file","operation":"read","root":"mcdr-config","path":"config.yml"},
+            "host-status":{"kind":"host-task","taskId":"status"}
+        },
+        "preflight":[{"kind":"mcdrPlugin","id":"sample_plugin","version":"2.1.0-rc.1"}]
+    })"}, {"ui", R"(<panel title="Extended">
+      <tabs id="tabs" label="Navigation"><tab id="first" label="Overview">
+        <image id="banner" label="Screenshot" asset="banner"/><video id="demo" label="Demonstration" asset="demo"/>
+        <expander id="choices" label="Parameters"><toggle id="enabled" label="Enabled" field="enabled"/>
+          <select id="world" label="World" field="world"><option id="overworld" label="Overworld" value="world"/></select></expander>
+        <status id="state" label="State" field="state"/><button id="query" label="Query" action="query"/>
+        <button id="config" label="Open config" action="read-config"/>
+      </tab></tabs>
+    </panel>)"}, {"lua", R"(return {
+      initial={state="waiting"},commands={query={text="example {world} {enabled}",inputs="world:token,enabled:boolean"}},
+      on_log=function() end,
+      on_preflight=function(result,state) if result.checks[1].status == "found" then return {state=result.checks[1].version} end end,
+      on_action=function(result,state) if result.ok then return {state="done"} end end
+    })"}};
+}
+void sdk3(uint64_t id) {
+    auto source = sdk3Source();
+    const auto info = call(id, {{"op", "inspect"}, {"source", source}});
+    require(info["sdkVersion"] == 3 && info["assets"].size() == 2 && info["preflight"][0]["id"] == "sample_plugin", "SDK 3 metadata");
+    require(info["nodes"][0]["children"][0]["children"][0]["asset"] == "banner", "Media references are serialized");
+    require(info["actions"]["read-config"]["root"] == "mcdr-config" && info["commands"].contains("query"), "Typed and console actions coexist");
+    call(id, {{"op", "restore"}});
+    const auto installed = call(id, {{"op", "reload"}, {"source", source}, {"allowedCommands", Json::array({"query", "read-config"})}});
+    const auto version = installed["packageRevision"];
+    const Json file{{"op", "prepareAction"}, {"actionId", "read-config"}, {"expectedRevision", version}};
+    require(call(id, file) == info["actions"]["read-config"], "Authorized typed action");
+    auto invalid = file; invalid["arguments"] = {{"path", "config.yml"}};
+    require(call(id, invalid).is_null(), "A typed action cannot override its declared target");
+    invalid = file; invalid.erase("expectedRevision");
+    require(call(id, invalid).is_null(), "Typed action requires an explicit revision");
+    invalid = file; invalid["actionId"] = "host-status";
+    require(call(id, invalid).is_null(), "Unknown grant does not authorize host task");
+    Json query{{"op", "command"}, {"actionId", "query"}, {"expectedRevision", version}, {"arguments", {{"world", "world"}, {"enabled", "true"}}}};
+    require(call(id, query) == "example world true", "Select and toggle supply command input");
+    query["arguments"]["world"] = "other";
+    require(call(id, query).is_null(), "Undeclared select value rejected");
+    const Json checks = Json::array({{{"status", "found"}, {"version", "2.1.0-rc.1"}}});
+    require(call(id, {{"op", "event"}, {"eventType", "preflight"}, {"expectedRevision", version}, {"result", {{"checks", checks}}}}) == true, "Preflight result updates Lua state");
+    require(call(id, {{"op", "snapshot"}})["values"]["state"] == "2.1.0-rc.1", "Lua result value shown");
+    const Json action{{"op", "event"}, {"eventType", "action"}, {"expectedRevision", version}, {"result", {{"ok", true}}}};
+    require(call(id, action) == true, "Action result updates Lua state");
+    const auto before = call(id, {{"op", "snapshot"}});
+    auto bad = source;
+    auto manifest = Json::parse(source["manifest"].get<std::string>());
+    manifest["actions"]["read-config"]["path"] = "../secret.yml";
+    bad["manifest"] = manifest.dump();
+    call(id, {{"op", "reload"}, {"source", bad}}, false);
+    require(call(id, {{"op", "snapshot"}}) == before, "Invalid SDK 3 load rolls back");
+    call(id, {{"op", "reset"}});
+    require(call(id, action) == false && call(id, file).is_null(), "Reset invalidates old results and confirmations");
+}
 void concurrency() {
     const auto id = rolithax_schema_create();
     std::atomic<bool> failed{false};
@@ -145,7 +210,7 @@ int main() {
     const auto id = rolithax_schema_create();
     try {
         require(id != 0, "Create session");
-        builtin(id); yaml(id); lua(id); concurrency();
+        builtin(id); yaml(id); lua(id); sdk3(id); concurrency();
         call(id, {{"op", "restore"}});
         require(call(id, {{"op", "snapshot"}})["pluginId"] == "rolithax.paper", "Restore builtin");
         rolithax_schema_destroy(id);

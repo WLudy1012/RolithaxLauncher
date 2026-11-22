@@ -26,6 +26,8 @@ internal sealed class DaemonSession : IDisposable
             apiKey = connection.ApiKey,
             connection.AllowHttp,
             connection.AllowSelfSigned,
+            connection.Kind,
+            connection.NodeId,
         }, Json);
         var pointer = Native.Open(config, out var error);
         if (pointer == IntPtr.Zero)

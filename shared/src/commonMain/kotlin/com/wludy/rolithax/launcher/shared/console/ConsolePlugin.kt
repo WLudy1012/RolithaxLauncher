@@ -17,7 +17,21 @@ data class ConsolePanelNode(
     val tone: String? = null,
     val unit: String? = null,
     val placeholder: String? = null,
+    val asset: String? = null,
+    val value: String? = null,
 )
+
+@Serializable
+data class SchemaAction(
+    val kind: String,
+    val operation: String? = null,
+    val root: String? = null,
+    val path: String? = null,
+    val taskId: String? = null,
+)
+
+@Serializable
+data class SchemaProbe(val kind: String, val id: String, val version: String)
 
 @Serializable
 data class ConsolePanelSnapshot(
@@ -45,6 +59,8 @@ class CompiledConsolePlugin internal constructor(
     val commands: Map<String, String>,
     val engine: String = "yaml",
     val sdkVersion: Int = 1,
+    val actions: Map<String, SchemaAction> = emptyMap(),
+    val preflight: List<SchemaProbe> = emptyList(),
 ) {
-    val commandIds: Set<String> get() = commands.keys
+    val commandIds: Set<String> get() = commands.keys + actions.keys
 }

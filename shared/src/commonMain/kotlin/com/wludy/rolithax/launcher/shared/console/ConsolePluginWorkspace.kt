@@ -1,6 +1,8 @@
 package com.wludy.rolithax.launcher.shared.console
 
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -38,5 +40,22 @@ class ConsolePluginWorkspace {
         }))
 
     fun close() = session.close()
+
+    fun prepareAction(actionId: String, revision: Long): SchemaAction? {
+        val data = session.request(buildJsonObject {
+            put("op", "prepareAction")
+            put("actionId", actionId)
+            put("expectedRevision", revision)
+        })
+        return if (data == JsonNull) null else schemaJson.decodeFromJsonElement(data)
+    }
+
+    fun result(eventType: String, payload: JsonObject, revision: Long): Boolean =
+        session.request(buildJsonObject {
+            put("op", "event")
+            put("eventType", eventType)
+            put("expectedRevision", revision)
+            put("result", payload)
+        }).jsonPrimitive.boolean
     private fun operation(name: String) = session.request(buildJsonObject { put("op", JsonPrimitive(name)) })
 }

@@ -47,7 +47,7 @@
 | XZ for Java（`org.tukaani:xz`，解压 `.tar.xz` 运行时） | 1.10 | 0BSD（1.9 及更早为 Public Domain） |
 | Apache Commons Compress（tar 归档处理） | 1.27.1 | Apache-2.0 |
 | Shizuku 客户端 API / Provider（`dev.rikka.shizuku:api`、`:provider`） | 13.1.5 | Apache-2.0（按该许可第 6 条附加说明：**不得**复用 Shizuku 管理器自身的界面资源；本应用只调用 API） |
-| `libunpack200.so`（`jniLibs/{arm64-v8a,x86_64}`，Java 8 类库的 pack200 解包器） | 8u442（取自 ZalithLauncher 2 的 `runtimes/jre-8` 归档，bionic 构建） | OpenJDK：GPL-2.0 **with Classpath Exception** |
+| `libunpack200.so`（`jniLibs/{arm64-v8a,x86_64}`，Java 8 类库的 pack200 解包器） | 8u442。arm64 取自 ZalithLauncher 2 的 `runtimes/jre-8` 归档。x86_64 从 [OpenJDK 8u442 源码](https://github.com/openjdk/jdk8u/tree/129290d2ffe3f77ad574bfad8b1ab44f5f3b8fbe) 使用 Android NDK r28b 编译，构建入口为 `native/unpack200/build.py`。 | OpenJDK：GPL-2.0 **with Classpath Exception** |
 
 ### 共享代码与桌面端依赖
 

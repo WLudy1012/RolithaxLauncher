@@ -90,7 +90,7 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 
 ## Rolithax Daemon 插件
 
-远程配对、图标和云端资源直装使用插件前缀：
+配对、图标、云端资源直装和 Schema 扩展共用插件前缀。
 
 ```text
 /api/plugin/mslx-plugin-rolithax/...
@@ -98,17 +98,21 @@ MSLAPI 也使用 `{ code, message, data }` 包装。服务端核心、Java 运�
 
 插件包标识为 `mslx-plugin-rolithax`，最低支持的 MSLX Daemon 版本为 `1.7.3`。插件程序集、目录和前端资源继续使用 Rolithax 命名。
 
-当前使用的路由包括：
+当前使用的路由如下。
 
-- `/features`：已认证用户查询配对、实例图标和资源安装扩展 API 的启用状态；管理员通过 `/features/{feature}` 修改状态。
+- `/features` 供已认证用户查询配对、实例图标、资源安装和宿主机任务的 API 开关。管理员通过 `/features/{feature}` 修改状态。
 - `/pair/codes`：生成一次性配对码
-- `/pair/redeem`：兑换一次性配对载荷。Android 扫描二维码或粘贴插件「复制原文」得到的 `mslxp1:` 内容，使用同一兑换流程。
+- `/pair/redeem` 兑换一次性配对载荷。Android 扫描二维码或粘贴 `mslxp1:` 原文，Windows 支持粘贴原文。新扩展返回 `pluginVersion`、`protocolVersion`。
 - `/icon/server/{id}`：实例图标
 - `/resources/install`：在 Daemon 所在机器创建资源安装任务
 - `/resources/install/{id}`：查询安装任务
 - `/resources/install/{id}/cancel`：取消安装任务
+- `GET /schema/capabilities` 读取扩展版本、协议号和 MCDR 布局、版本探测、宿主机任务的可用状态。
+- `GET /schema/instances/{id}/layout` 读取实例相对的工作目录、MCDR 插件目录、Minecraft 插件目录、模组目录及 `server.properties` 路径。
+- `POST /schema/instances/{id}/preflight` 根据 `kind` 和 `target` 查找组件版本。状态为 `found`、`missing` 或 `unknown`，找到时返回 `version`。未知时可返回当前账号有权使用的 `commandProbe`。用户确认后，客户端在同一请求中追加 `commandProbeId`，Daemon 复查元数据并在仍未知时调用预设。
+- `GET /schema/instances/{id}/tasks` 列出当前账号在实例上可使用的 Worker 任务。用 `POST /schema/instances/{id}/tasks/{taskId}/run` 请求执行其中一项，请求体可为空或传入空对象。
 
-新安装和旧配置中缺失的开关默认启用。关闭资源安装后不再创建新任务，已有任务仍可查询或取消；关闭配对接口不取消已有配对设备的租约校验。实例图标 GET 端点支持 Media Scoped Token，仍按实例权限授权。
+配对、图标和资源安装默认开启，宿主机任务默认关闭。关闭资源安装后仍可查询或取消已有任务。关闭配对接口后，已配对设备仍受租约限制。实例图标 GET 端点接受 Media Scoped Token，继续按实例权限授权。Schema 实例接口使用 Daemon 实例授权和设备租约。 [Schema 动作与 Worker](rolithax-schema.md)
 
 客户端不应恢复已移除的旧版 `/api/plugins/...` 兼容路由。资源安装由 Daemon 侧下载并落地，客户端不把远程文件先下载再上传一遍。
 

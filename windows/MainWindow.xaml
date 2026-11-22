@@ -5,6 +5,10 @@
     <Grid x:Name="Root" RowDefinitions="Auto,*">
         <Border x:Name="SolidWindowBackground" Grid.RowSpan="2" Visibility="Collapsed"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+        <Image x:Name="CustomWindowBackground" Grid.RowSpan="2" Visibility="Collapsed"
+               Stretch="UniformToFill" IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw" />
+        <Border x:Name="AcrylicWindowLayer" Grid.RowSpan="2" Visibility="Collapsed" IsHitTestVisible="False"
+                Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}" />
         <Border x:Name="MicaAltNavigationLayer" Grid.Row="1" Visibility="Collapsed"
                 Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" />
         <TitleBar x:Name="AppTitleBar" Title="Rolithax" Subtitle="远端管理">
@@ -38,6 +42,7 @@
                 <NavigationViewItem x:Name="OverviewNav" Tag="overview" Content="概览" Icon="Home" ToolTipService.ToolTip="概览" />
                 <NavigationViewItem Tag="instances" Content="服务器" Icon="Library" ToolTipService.ToolTip="服务器" />
                 <NavigationViewItem Tag="connections" Content="连接管理" Icon="Link" ToolTipService.ToolTip="连接管理" />
+                <NavigationViewItem Tag="schema" Content="插件中心" Icon="AllApps" ToolTipService.ToolTip="Schema 插件中心" />
                 <NavigationViewItem Tag="users" Content="用户管理" Icon="People" ToolTipService.ToolTip="用户管理" />
                 <NavigationViewItem Tag="settings" Content="设置" Icon="Setting" ToolTipService.ToolTip="设置" />
             </NavigationView.MenuItems>

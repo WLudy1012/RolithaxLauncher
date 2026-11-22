@@ -102,6 +102,13 @@ import com.wludy.rolithax.launcher.ui.theme.GlassCardShape
 import com.wludy.rolithax.launcher.ui.theme.GlassSurface
 import com.wludy.rolithax.launcher.ui.theme.LocalRolithaxDarkTheme
 import com.wludy.rolithax.launcher.shared.console.ConsolePluginException
+import com.wludy.rolithax.launcher.shared.console.SchemaAction
+import com.wludy.rolithax.launcher.data.ServerRef
+import com.wludy.rolithax.launcher.data.schema.SchemaBinding
+import com.wludy.rolithax.launcher.data.schema.SchemaInstall
+import com.wludy.rolithax.launcher.RolithaxApplication
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -130,8 +137,10 @@ private data class PanelCommandConfirmation(
 @Composable
 fun ConsoleScreen(
     controller: ConsoleController,
+    ref: ServerRef,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSchemaCenter: () -> Unit,
 ) {
     val viewModel = controller
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -154,14 +163,72 @@ fun ConsoleScreen(
     var pendingImport by remember { mutableStateOf<ConsolePluginImport?>(null) }
     var showSources by remember { mutableStateOf(false) }
     var pendingCommand by remember { mutableStateOf<PanelCommandConfirmation?>(null) }
-    val resolver = LocalContext.current.contentResolver
+    val library = schemaLibrary()
+    val libraryState by library.state.collectAsStateWithLifecycle()
+    val container = (LocalContext.current.applicationContext as RolithaxApplication).container
+    var pendingInstall by remember { mutableStateOf<SchemaInstall?>(null) }
+    var activeInstall by remember { mutableStateOf<SchemaInstall?>(null) }
+    var activeBinding by remember { mutableStateOf<SchemaBinding?>(null) }
+    var checks by remember { mutableStateOf(emptyList<SchemaCheck>()) }
+    var pendingProbe by remember { mutableStateOf<SchemaCheck?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    var pendingIntent by remember { mutableStateOf<Triple<String, Long, SchemaAction>?>(null) }
+    val binding = libraryState.bindings[ref.catalogKey]
+
+    fun transferError(error: Exception) {
+        scope.launch { snackbarHostState.showSnackbar(error.message ?: "无法读取插件") }
+    }
+
+    fun hasGrant(action: String): Boolean {
+        val current = library.state.value.bindings[ref.catalogKey]
+        return current != null && current == activeBinding && action in current.grants
+    }
+
+    suspend fun prepareInstall(install: SchemaInstall) {
+        val source = library.source(install)
+        val imported = withContext(Dispatchers.IO) { inspectConsolePlugin(source) }
+        checks = container.checkSchema(ref, imported.preflight)
+        pendingInstall = install
+        pendingImport = imported
+        showPanel = true
+    }
+
+    LaunchedEffect(library) { try { library.reload() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { transferError(error) } }
+    LaunchedEffect(binding, state.connected) {
+        val selected = libraryState.installs.firstOrNull { it.digest == binding?.digest }
+        if (selected == null || binding == null) {
+            if (activeInstall != null) viewModel.loadPanel(null)
+            activeInstall = null
+            activeBinding = null
+            return@LaunchedEffect
+        }
+        try {
+            val source = library.source(selected)
+            val imported = withContext(Dispatchers.IO) { inspectConsolePlugin(source) }
+            val latest = container.checkSchema(ref, imported.preflight)
+            if (latest.any { it.status == "incompatible" }) {
+                if (activeInstall != null) viewModel.loadPanel(null)
+                activeInstall = null
+                activeBinding = null
+                transferError(IllegalStateException("${selected.title} 与实例版本不兼容，已暂停加载"))
+            } else if (activeBinding != binding || viewModel.panel.value.snapshot.pluginId != selected.id) {
+                if (viewModel.loadPanel(source, binding.grants)) {
+                    activeInstall = selected
+                    activeBinding = binding
+                    viewModel.applySchemaResult("preflight", latest.payload(), viewModel.panel.value.snapshot.packageRevision)
+                }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: Exception) { transferError(error) }
+    }
     val importPlugin = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null || importing) return@rememberLauncherForActivityResult
         importing = true
         scope.launch {
             val error = try {
-                pendingImport = withContext(Dispatchers.IO) { readConsolePlugin(resolver, uri) }
-                showPanel = true
+                prepareInstall(library.import(uri))
                 null
             } catch (e: CancellationException) {
                 throw e
@@ -293,14 +360,24 @@ fun ConsoleScreen(
                     ConsolePluginPanel(
                         panel = panel,
                         actionsEnabled = state.canSendCommand && !sending,
+                        intentsEnabled = ref.remoteIdOrNull != null && !importing,
+                        resolveMedia = { id -> activeInstall?.let { library.media(it, id) } },
                         importing = importing,
                         onImport = { importPlugin.launch(arrayOf("*/*")) },
                         onOpenSources = { showSources = true },
-                        onRestore = { viewModel.loadPanel(null) },
+                        onRestore = { scope.launch {
+                            try { library.bind(ref.catalogKey, null, emptySet()) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (error: Exception) { transferError(error) }
+                        } },
                         onAction = { action, arguments, packageRevision ->
-                            if (panel.snapshot.pluginId == "rolithax.paper") {
+                            if (action in panel.actions && hasGrant(action)) {
+                                viewModel.prepareSchemaAction(action, packageRevision)?.let {
+                                    pendingIntent = Triple(action, packageRevision, it)
+                                }
+                            } else if (panel.snapshot.pluginId == "rolithax.paper") {
                                 sendPanelCommand(action, arguments, packageRevision)
-                            } else {
+                            } else if (hasGrant(action)) {
                                 val exactCommand = viewModel.previewPanelAction(action, arguments, packageRevision)
                                 if (exactCommand != null) {
                                     pendingCommand = PanelCommandConfirmation(
@@ -357,25 +434,94 @@ fun ConsoleScreen(
     }
 
     if (showSources) {
-        SchemaSourcePicker(
-            onDismiss = { showSources = false },
-            onSelected = { imported ->
-                showSources = false
-                pendingImport = imported
-                showPanel = true
-            },
-        )
+        ModalBottomSheet(onDismissRequest = { showSources = false }) {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp),
+                contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item {
+                    Text("选择已安装插件", style = MaterialTheme.typography.titleLarge)
+                    TextButton(onClick = { showSources = false; onOpenSchemaCenter() }) { Text("打开插件中心") }
+                    if (libraryState.installs.isEmpty()) Text("还没有已安装的插件。")
+                }
+                items(libraryState.installs, key = { it.digest + it.source }) { plugin ->
+                    SchemaListItem(plugin.title, plugin.version, plugin.description,
+                        library.installedIcon(plugin)) {
+                        Button(enabled = !importing, onClick = {
+                            showSources = false
+                            scope.launch {
+                                importing = true
+                                try { prepareInstall(plugin) }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (error: Exception) { transferError(error) }
+                                finally { importing = false }
+                            }
+                        }) { Text("为此实例启用") }
+                    }
+                }
+            }
+        }
     }
 
     pendingImport?.let { imported ->
         ConsolePluginPermissionDialog(
             imported = imported,
-            onDismiss = { pendingImport = null },
+            checks = checks,
+            checking = checking,
+            onProbe = { pendingProbe = it },
+            onDismiss = { if (!checking) pendingImport = null },
             onConfirm = { grants ->
-                viewModel.loadPanel(imported.source, grants)
+                val install = pendingInstall
+                val preflight = checks
                 pendingImport = null
+                if (install != null) scope.launch {
+                    try {
+                        library.bind(ref.catalogKey, install, grants)
+                        if (viewModel.loadPanel(imported.source, grants)) {
+                            activeInstall = install
+                            activeBinding = SchemaBinding(install.digest, grants)
+                            viewModel.applySchemaResult("preflight", preflight.payload(), viewModel.panel.value.snapshot.packageRevision)
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (error: Exception) { transferError(error) }
+                }
             },
         )
+    }
+
+    pendingProbe?.let { check ->
+        check.command?.let { probe ->
+            AlertDialog(
+                onDismissRequest = { pendingProbe = null },
+                title = { Text("运行只读版本检查") },
+                text = { Text(listOf(state.instanceName, probe.title, probe.description).filter(String::isNotBlank).joinToString("\n")) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingProbe = null
+                        checking = true
+                        scope.launch {
+                            try {
+                                val result = container.checkSchema(ref, listOf(check.probe), probe.id).single()
+                                checks = checks.map { if (it == check) result else it }
+                            } catch (cancelled: CancellationException) { throw cancelled }
+                            catch (error: Exception) { transferError(error) }
+                            finally { checking = false }
+                        }
+                    }) { Text("确认检查") }
+                },
+                dismissButton = { TextButton(onClick = { pendingProbe = null }) { Text("取消") } },
+            )
+        }
+    }
+
+    pendingIntent?.let { (actionId, revision, action) ->
+        SchemaInstanceActionDialog(ref, state.instanceName, action,
+            stillGranted = { hasGrant(actionId) && viewModel.prepareSchemaAction(actionId, revision) == action },
+            onResult = { result, summary ->
+                viewModel.applySchemaResult("action", buildJsonObject {
+                    put("actionId", actionId)
+                    put("status", result)
+                    put("summary", summary)
+                }, revision)
+            }, onDismiss = { pendingIntent = null })
     }
 
     pendingCommand?.let { pending ->
@@ -398,7 +544,7 @@ fun ConsoleScreen(
                         val exactCommand = viewModel.previewPanelAction(
                             pending.action, pending.arguments, pending.packageRevision,
                         )
-                        if (exactCommand == pending.command) {
+                        if (hasGrant(pending.action) && exactCommand == pending.command) {
                             sendPanelCommand(pending.action, pending.arguments, pending.packageRevision)
                         } else {
                             scope.launch { snackbarHostState.showSnackbar("面板已变更，请重新选择操作") }

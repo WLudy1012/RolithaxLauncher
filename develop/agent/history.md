@@ -31,9 +31,9 @@
 - 代码、资源和 Native 库已完成 Rolithax 命名（`RolithaxUi`、`DaemonApi`、`librolithaxvm.so` 等）。保留的 `mslx`/`MSLX` 标识均为外部契约或兼容读取：插件路由、`mslxp1:` 配对前缀、`MSLX://` 协议 URI、Keystore 别名、CI 变量 `MSLX_MAVEN_*`，以及导入时仍接受的旧备份魔数 `MSLX-BACKUP`（新备份使用 `RLTX-BACKUP` 和 `.rlxb`）。
 - 当前本机引擎包含进程内 JVM 和 Shizuku 增强模式，运行时、实例和资源安装均以当前源码为准。
 - Android 资源中心支持 Modrinth、CurseForge 模组和 MSLAPI 核心接口。Modrinth v3 版本查询按游戏版本和加载器过滤，整合包按实际加载器分类。浏览筛选可跟随目标实例或手动覆盖，两种模式使用相同的在线和缓存版本判断。已核验 Modrinth v3 的公共筛选端点。
-- Android 新增「其他面板」，接入 MCSL Future、MCSManager 10 和 Pterodactyl 的实例列表、电源与控制台。协议适配在共享层，配置存储和界面在 Android 宿主。 [设置与验证范围](remote-panels.md)
+- Android 与 Windows 的连接选择器并列提供 MSLX Daemon、MCSL Future、MCSManager 10 和 Pterodactyl。三种第三方面板共用协议适配，支持实例列表、电源和原始控制台。 [设置与验证范围](remote-panels.md)
 - Windows 工作区使用 WinUI 3 的 Fluent 控件、系统主题和 DPI 缩放。控制台、文件、设置和插件从同一个实例工作区进入，远端操作保留节点和实例身份。
-- Android 与 WinUI 3 增加了结构化控制台。内置 Paper 面板从日志提取状态，第三方声明式包可在实例会话内导入和替换。共享测试覆盖 YAML 回放、坏包回退、权限和新旧 Daemon 日志协议。Lua 进程隔离、真实服务端行为与真机性能仍需验收。
+- Android 与 WinUI 3 提供独立的 Schema 插件中心。SDK 3 增加本地缓存的媒体、原生组合控件、版本预检、MCDR 文件动作和 Worker 预设任务。插件按实例绑定和授权，已有 SDK 1、2 包仍可导入。 [格式与授权](rolithax-schema.md)
 - 桌面实例设置提供结构化表单与 JSON 编辑；远端文件管理提供创建目录、重命名和删除操作，其中目录删除会递归执行。
 - Linux Compose 客户端打开名为 `server.properties` 的文件后提供结构化属性编辑与文本模式。结构化模式展示已有的已知非续行字段，自定义属性文件路径需要手动打开。
 - 当前版本号、构建号、依赖和发布资产以 Gradle 配置与工作流运行结果为准，不在本文件固定写死。
@@ -50,6 +50,7 @@
 - MSLAPI、Modrinth 和插件服务端返回数据的真实兼容性；本地编译不能替代接口实测。
 - 三种第三方面板的真实部署连接、实例管理与控制台，及使用官方 Key 的 CurseForge 搜索和本机安装。 [第三方面板](remote-panels.md) [资源中心](resource-center.md)
 - Windows 和 Linux 桌面与真实 Daemon 的连接、实例控制、文件与属性编辑、资源安装、系统密钥库存取及窗口交互仍需在对应平台和服务端环境进行端到端验收。
+- Schema 3 的真实 MCDR 部署、视频播放和 Worker 独立低权限账户部署仍需运行验证。
 - HarmonyOS NEXT 已验证 ARM64 领域库与 N-API 桥交叉链接，HAP 打包、设备安装和真实 Daemon 交互仍需华为 SDK 与设备环境。
 
 这些边界应在有设备或远端运行证据后更新，不能用“本地构建成功”替代真实验收结论。

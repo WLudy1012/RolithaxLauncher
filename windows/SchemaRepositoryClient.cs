@@ -11,10 +11,11 @@ namespace Rolithax.Windows;
 internal sealed record SchemaRepositoryFile(string Path, string Sha256, long Size);
 internal sealed record SchemaRepositoryEntry(string Id, string Name, string Version, string Description,
     string Engine, string SourceType, string Path, Uri? PackageUrl, string Sha256, long Size,
-    IReadOnlyList<SchemaRepositoryFile> Files, string Compatibility = "");
+    IReadOnlyList<SchemaRepositoryFile> Files, string Compatibility = "", int SdkVersion = 0,
+    string[]? Authors = null, string License = "", string Homepage = "", SchemaAsset? Icon = null);
 internal sealed record SchemaRepositoryCatalog(string Url, string Name, string Description, string Revision,
-    Uri FilesBase, IReadOnlyList<SchemaRepositoryEntry> Plugins);
-internal sealed record SchemaDownloadedPlugin(string SourceJson, string PackagePath);
+    Uri FilesBase, IReadOnlyList<SchemaRepositoryEntry> Plugins, string Id = "", string[]? Authors = null,
+    string Homepage = "", SchemaAsset? Icon = null);
 
 internal static class SchemaRepositoryClient
 {
@@ -25,15 +26,15 @@ internal static class SchemaRepositoryClient
     private static readonly Regex Hash = new("^[a-fA-F0-9]{64}$", RegexOptions.CultureInvariant);
     private static readonly Regex Commit = new("^[a-fA-F0-9]{40,64}$", RegexOptions.CultureInvariant);
     private static readonly Regex Identifier = new("^[a-z][a-z0-9._-]{0,127}$", RegexOptions.CultureInvariant);
-    private static readonly string Storage = System.IO.Path.Combine(
+    internal static readonly string Storage = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RolithaxLauncher", "schema");
     private static readonly HttpClient Client = CreateClient();
 
     private static HttpClient CreateClient()
     {
-        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
             { Timeout = TimeSpan.FromSeconds(45) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Rolithax-Schema/2.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Rolithax-Schema/3.0");
         return client;
     }
 
@@ -122,28 +123,36 @@ internal static class SchemaRepositoryClient
             readme = uri;
             filesBase = new Uri(uri, ".");
         }
-        var text = Utf8.GetString(await DownloadAsync(readme, 262_144, cancellationToken));
-        var blocks = Regex.Matches(text, @"(?m)^```rolithax-schema-repository\s*\r?\n([\s\S]*?)^```[ \t]*\r?$",
+        var readmeData = await DownloadAsync(readme, 262_144, cancellationToken);
+        if (revision == "README") revision = Convert.ToHexStringLower(SHA256.HashData(readmeData));
+        var text = Utf8.GetString(readmeData);
+        var blocks = Regex.Matches(text, @"(?m)^```rolithax-schema-repository(-v2)?[ \t]*\r?\n([\s\S]*?)^```[ \t]*\r?$",
             RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
-        if (blocks.Count != 1)
-            throw new InvalidDataException("README 必须包含一个 rolithax-schema-repository 数据块。");
-        using var document = JsonDocument.Parse(blocks[0].Groups[1].Value);
+        var newer = blocks.Where(match => match.Groups[1].Success).ToArray();
+        var legacy = blocks.Where(match => !match.Groups[1].Success).ToArray();
+        if (newer.Length > 1 || legacy.Length > 1 || blocks.Count == 0)
+            throw new InvalidDataException("README 缺少唯一的 Rolithax Schema 源索引。");
+        var modern = newer.Length == 1;
+        using var document = JsonDocument.Parse((modern ? newer[0] : legacy[0]).Groups[2].Value);
         var root = document.RootElement;
-        if (!root.TryGetProperty("schemaVersion", out var version) || version.GetInt32() != 1)
+        if (!root.TryGetProperty("schemaVersion", out var version) || version.GetInt32() != (modern ? 2 : 1))
             throw new InvalidDataException("不支持此插件源格式版本。");
-        if (!Identifier.IsMatch(Required(root, "id")))
+        var id = Required(root, "id");
+        if (!Identifier.IsMatch(id))
             throw new InvalidDataException("插件源 ID 无效。");
         var plugins = root.GetProperty("plugins");
         if (plugins.ValueKind != JsonValueKind.Array || plugins.GetArrayLength() > 256)
             throw new InvalidDataException("插件源条目过多或格式错误。");
-        var entries = plugins.EnumerateArray().Select(ParseEntry).ToArray();
+        var entries = plugins.EnumerateArray().Select(item => ParseEntry(item, modern)).ToArray();
         if (entries.Select(entry => entry.Id).Distinct(StringComparer.Ordinal).Count() != entries.Length)
             throw new InvalidDataException("插件源包含重复的插件 ID。");
-        return new SchemaRepositoryCatalog(source, Optional(root, "name", uri.Host), Optional(root, "description"),
-            revision, filesBase, entries);
+        return new SchemaRepositoryCatalog(source, modern ? Required(root, "name") : Optional(root, "name", uri.Host),
+            modern ? Required(root, "description") : Optional(root, "description"), revision, filesBase, entries, id,
+            modern ? Authors(root) : null, modern ? Https(Required(root, "homepage")).AbsoluteUri : "",
+            modern ? IndexIcon(root) : null);
     }
 
-    private static SchemaRepositoryEntry ParseEntry(JsonElement item)
+    private static SchemaRepositoryEntry ParseEntry(JsonElement item, bool modern)
     {
         var id = Required(item, "id");
         if (!Identifier.IsMatch(id)) throw new InvalidDataException("插件 ID 无效。");
@@ -159,14 +168,17 @@ internal static class SchemaRepositoryClient
             path = RelativePath(Required(source, "path"));
             files = source.GetProperty("files").EnumerateArray().Select(file => new SchemaRepositoryFile(
                 RelativePath(Required(file, "path")), Digest(file), Size(file, FileLimit(Required(file, "path"))))).ToArray();
-            if (files.Length != 3 || !files.Select(file => file.Path).Order().SequenceEqual(new[] { "plugin.json", "rules.yaml", "ui.xml" }))
-                throw new InvalidDataException("文件型源必须列出 plugin.json、ui.xml 和 rules.yaml。");
+            var names = files.Select(file => file.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (files.Length > 131 || files.Sum(file => file.Size) > SchemaPackageReader.BundleLimit || names.Count != files.Length ||
+                !new[] { "plugin.json", "rules.yaml", "ui.xml" }.All(name => names.Contains(name)) ||
+                (!modern && files.Length != 3))
+                throw new InvalidDataException("文件型源缺少业务定义文件，或声明的文件超出限制。");
         }
         else if (type == "package" && engine is "yaml" or "lua")
         {
             url = Https(Required(source, "url"));
             sha = Digest(source);
-            size = Size(source, PackageLimit);
+            size = Size(source, modern ? SchemaPackageReader.BundleLimit : PackageLimit);
         }
         else throw new InvalidDataException("Lua 插件必须提供预构建 ZIP 包；文件型源仅支持 YAML。");
         var compatibility = "";
@@ -177,8 +189,27 @@ internal static class SchemaRepositoryClient
                 .Take(12).Select(value => value.GetString() ?? "").Select(value => value[..Math.Min(64, value.Length)]).ToArray();
             if (declared.Length > 0) compatibility = "声明版本：" + string.Join("、", declared);
         }
-        return new SchemaRepositoryEntry(id, Optional(item, "name", id), Required(item, "version"),
-            Optional(item, "description"), engine, type, path, url, sha, size, files, compatibility);
+        var sdk = checked((int)item.Field("sdkVersion").LongValue());
+        if (modern && sdk is < 1 or > 3) throw new InvalidDataException("插件源缺少有效的 SDK 版本。");
+        return new SchemaRepositoryEntry(id, modern ? Required(item, "name") : Optional(item, "name", id), Required(item, "version"),
+            modern ? Required(item, "description") : Optional(item, "description"), engine, type, path, url, sha, size, files, compatibility,
+            sdk, modern ? Authors(item) : null, modern ? Required(item, "license") : "",
+            modern ? Https(Required(item, "homepage")).AbsoluteUri : "", modern ? IndexIcon(item) : null);
+    }
+
+    private static string[] Authors(JsonElement item)
+    {
+        var authors = item.Field("authors").Items().Select(value => value.StringValue()).ToArray();
+        if (authors.Length is < 1 or > 16 || authors.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 128))
+            throw new InvalidDataException("插件源缺少有效的作者列表。");
+        return authors;
+    }
+
+    private static SchemaAsset IndexIcon(JsonElement item)
+    {
+        var icon = SchemaPackageReader.ReadAsset(item.Field("icon"), "icon", requireAssetDirectory: false);
+        if (!icon.MediaType.StartsWith("image/", StringComparison.Ordinal)) throw new InvalidDataException("图标必须是图片。");
+        return icon;
     }
 
     private static async Task<string> GitHubCommitAsync(string project, CancellationToken cancellationToken)
@@ -220,80 +251,45 @@ internal static class SchemaRepositoryClient
         }
     }
 
-    public static async Task<SchemaDownloadedPlugin> InstallAsync(SchemaRepositoryCatalog repository,
-        SchemaRepositoryEntry entry, CancellationToken cancellationToken = default)
+    public static async Task<string> DownloadPackageAsync(SchemaRepositoryCatalog repository,
+        SchemaRepositoryEntry entry, string destination, CancellationToken cancellationToken = default)
     {
-        byte[] package;
+        await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true);
         if (entry.SourceType == "files")
         {
-            using var output = new MemoryStream();
-            using (var zip = new ZipArchive(output, ZipArchiveMode.Create, true))
+            using var zip = new ZipArchive(output, ZipArchiveMode.Create, true);
+            foreach (var file in entry.Files)
             {
-                foreach (var file in entry.Files)
-                {
-                    var content = await DownloadAsync(new Uri(repository.FilesBase, entry.Path + "/" + file.Path),
-                        FileLimit(file.Path), cancellationToken);
-                    Verify(content, file.Sha256, file.Size);
-                    var target = zip.CreateEntry(file.Path, CompressionLevel.Optimal);
-                    target.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
-                    await using var stream = target.Open();
-                    await stream.WriteAsync(content, cancellationToken);
-                }
+                var target = zip.CreateEntry(file.Path, CompressionLevel.Optimal);
+                target.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                await using var stream = target.Open();
+                await DownloadVerifiedAsync(new Uri(repository.FilesBase, entry.Path + "/" + file.Path),
+                    file.Sha256, file.Size, stream, cancellationToken);
             }
-            package = output.ToArray();
         }
         else
         {
-            package = await DownloadAsync(entry.PackageUrl!, PackageLimit, cancellationToken);
-            Verify(package, entry.Sha256, entry.Size);
+            await DownloadVerifiedAsync(entry.PackageUrl!, entry.Sha256, entry.Size, output, cancellationToken);
         }
-        var sourceJson = ReadPackage(package, entry);
-        var cache = System.IO.Path.Combine(Storage, "packages");
-        Directory.CreateDirectory(cache);
-        var destination = System.IO.Path.Combine(cache, Convert.ToHexStringLower(SHA256.HashData(package)) + ".zip");
-        await File.WriteAllBytesAsync(destination, package, cancellationToken);
-        return new SchemaDownloadedPlugin(sourceJson, destination);
-    }
-
-    private static string ReadPackage(byte[] bytes, SchemaRepositoryEntry entry)
-    {
-        if (bytes.Length > PackageLimit) throw new InvalidDataException("Schema 包超过 512 KiB。");
-        using var stream = new MemoryStream(bytes, false);
-        using var zip = new ZipArchive(stream);
-        var contents = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var file in zip.Entries)
-        {
-            var limit = FileLimit(file.FullName);
-            if (file.Length < (file.FullName == "rules.yaml" ? 0 : 1) || file.Length > limit || contents.ContainsKey(file.FullName) ||
-                ((file.ExternalAttributes >> 16) & 0xF000) == 0xA000)
-                throw new InvalidDataException("Schema 包包含空文件、超限文件或重复文件。");
-            using var input = file.Open();
-            using var output = new MemoryStream();
-            var buffer = new byte[4096];
-            int read;
-            while ((read = input.Read(buffer)) > 0)
-            {
-                if (output.Length + read > limit) throw new InvalidDataException("Schema 文件超出大小限制。");
-                output.Write(buffer, 0, read);
-            }
-            if (output.Length != file.Length) throw new InvalidDataException("Schema 文件长度不符。");
-            contents.Add(file.FullName, Utf8.GetString(output.ToArray()).TrimStart('\uFEFF'));
-        }
-        if (!contents.TryGetValue("plugin.json", out var manifest) || !contents.ContainsKey("ui.xml") ||
-            (entry.Engine == "lua" ? !contents.ContainsKey("business.lua") : !contents.ContainsKey("rules.yaml")))
-            throw new InvalidDataException("Schema 包缺少必要文件。");
-        if (entry.Engine == "yaml" && (contents.Count != 3 || string.IsNullOrWhiteSpace(contents["rules.yaml"])) ||
-            entry.Engine == "lua" && !string.IsNullOrWhiteSpace(contents.GetValueOrDefault("rules.yaml", "")))
-            throw new InvalidDataException("Schema 包业务文件与引擎声明不符。");
-        using var metadata = JsonDocument.Parse(manifest);
-        if (Required(metadata.RootElement, "id") != entry.Id || Required(metadata.RootElement, "version") != entry.Version ||
-            Optional(metadata.RootElement, "engine", "yaml") != entry.Engine)
-            throw new InvalidDataException("Schema 包元数据与插件源声明不符。");
-        return JsonSerializer.Serialize(new { manifest, ui = contents["ui.xml"],
-            rules = contents.GetValueOrDefault("rules.yaml", ""), lua = contents.GetValueOrDefault("business.lua", "") }, Json);
+        return destination;
     }
 
     private static async Task<byte[]> DownloadAsync(Uri uri, int limit, CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream();
+        await DownloadToAsync(uri, limit, stream, null, cancellationToken);
+        return stream.ToArray();
+    }
+
+    internal static async Task DownloadVerifiedAsync(Uri uri, string digest, long size, Stream output, CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        if (await DownloadToAsync(uri, size, output, hash, cancellationToken) != size ||
+            !Convert.ToHexString(hash.GetHashAndReset()).Equals(digest, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("文件大小或 SHA-256 校验失败，请刷新插件源后重试。");
+    }
+
+    private static async Task<long> DownloadToAsync(Uri uri, long limit, Stream output, IncrementalHash? hash, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(45));
@@ -310,26 +306,22 @@ internal static class SchemaRepositoryClient
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > limit) throw new InvalidDataException("下载内容超过大小限制。");
             await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-            using var output = new MemoryStream();
             var buffer = new byte[8192];
+            var size = 0L;
             int read;
             while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
             {
-                if (output.Length + read > limit) throw new InvalidDataException("下载内容超过大小限制。");
-                output.Write(buffer, 0, read);
+                size += read;
+                if (size > limit) throw new InvalidDataException("下载内容超过大小限制。");
+                hash?.AppendData(buffer.AsSpan(0, read));
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             }
-            return output.ToArray();
+            return size;
         }
         throw new InvalidDataException("下载重定向次数过多。");
     }
 
-    private static void Verify(byte[] bytes, string digest, long size)
-    {
-        if (bytes.LongLength != size || !Convert.ToHexString(SHA256.HashData(bytes)).Equals(digest, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("文件大小或 SHA-256 校验失败，请刷新插件源后重试。");
-    }
-
-    private static Uri Https(string value)
+    internal static Uri Https(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.UserInfo.Length > 0 || uri.Fragment.Length > 0)
             throw new ArgumentException("插件源与下载地址必须使用 HTTPS，且不能包含账号密码。");
@@ -349,6 +341,7 @@ internal static class SchemaRepositoryClient
     private static int FileLimit(string path) => path switch
     {
         "plugin.json" => 16_384, "ui.xml" or "rules.yaml" => 65_536, "business.lua" => 131_072,
+        _ when path.StartsWith("assets/", StringComparison.Ordinal) => SchemaPackageReader.VideoLimit,
         _ => throw new InvalidDataException("Schema 包含未知文件或目录。"),
     };
 

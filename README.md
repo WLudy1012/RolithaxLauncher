@@ -52,14 +52,15 @@ Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。
 
 **连接与管理**
 - 同时保存多台 Daemon，所有入口按**实例**寻址，本机实例与各 Daemon 的实例合并在同一个列表里。
-- Daemon 安装 [Rolithax 插件](https://github.com/WLudy1012/Rolithax-MSLX-plugin) 后，Android 支持扫码配对，也支持粘贴插件页面复制的配对原文。客户端也支持手动填写地址和 API Key。
-- Android 的「连接 → 其他面板」支持 MCSL Future `/api/v2`、MCSManager 10 和 Pterodactyl Client API，可查看实例状态与日志、发送命令并控制电源。 [设置与功能范围](develop/agent/remote-panels.md)
+- Android 和 Windows 的「添加连接」提供 MSLX Daemon、MCSL Future、MCSManager 10 和 Pterodactyl。选择面板后，可查看实例状态与日志、发送命令并控制电源。 [设置与功能范围](develop/agent/remote-panels.md)
+- MSLX 支持手动填写地址和 API Key，也可粘贴 Rolithax 中心生成的配对原文。Android 还可扫码配对。 [Rolithax Daemon 插件](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - 启动、停止、重启、强制结束、备份；未同意 EULA 时自动引导。实例可置顶，删除需二次确认。
 
 **控制台**
 - SignalR 实时日志，增量解析 ANSI 颜色与样式；发送命令、自动滚动、一键回到最新。
 - 远程与本机实例共用同一套控制台界面。
-- Android 和 Windows 提供 **Rolithax Schema**：C++ 引擎将实时日志转成原生任务面板，支持 XML 界面、YAML 规则、受限 Lua 和热加载。可添加 Git 插件源，默认[官方源](https://github.com/WLudy1012/rolithax-schema-plugins)提供 Paper、LuckPerms 与 Chunky。开发者可使用[独立 SDK](https://github.com/WLudy1012/rolithax-console-sdk)、[模板](https://github.com/WLudy1012/rolithax-console-plugin-template)及附带的 Agent skill。[格式、授权与兼容边界](develop/agent/rolithax-schema.md)
+- Android 和 Windows 提供 **Rolithax Schema**。C++ 引擎将实时日志转成原生任务面板，支持 XML 布局、YAML 规则、受限 Lua 以及图片和视频。插件中心可浏览自定义 Git 插件源、完整安装插件和导入 ZIP。 [官方插件源](https://github.com/WLudy1012/rolithax-schema-plugins) [插件 SDK 和 CLI](https://github.com/WLudy1012/rolithax-console-sdk) [模板](https://github.com/WLudy1012/rolithax-console-plugin-template)
+- 在实例上启用插件时可检查所需组件版本，并单独授权每项命令或文件动作。配合 MSLX 扩展，可访问 MCDR 实例文件及请求管理员预设的宿主机任务。 [格式、授权与兼容范围](develop/agent/rolithax-schema.md)
 
 **创建与资源中心**
 - 创建向导覆盖基本信息、服务端核心、Java 环境、资源配置与确认，支持在线核心库、远程下载、本地上传和整合包。
@@ -79,7 +80,7 @@ Windows 工作区参考 MSLX 的管理页面层级，用 WinUI 3 独立实现。
 **连接远程 Daemon**
 
 1. 在电脑上启动 MSLX Daemon，准备好它的地址与 API Key。
-2. 打开「连接 → 添加 Daemon」。有地址和 API Key 时选择「手动连接」。Daemon 安装 Rolithax 插件后，可在「插件配对」里扫码，或粘贴插件复制的完整原文并点「使用原文配对」。
+2. 在 Android 打开「连接」，点右上角的加号并选择 MSLX Daemon。用「手动连接」填写地址和 API Key，或在「插件配对」里扫码或粘贴配对原文。
 3. 进入实例列表，点任意实例即可查看日志、发送命令、启停。
 
 **直接在手机上开服**
@@ -173,7 +174,7 @@ app/src/main/cpp/            进程内 JVM 的 Native 桥接
 
 ## 相关仓库
 
-- [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)：Daemon 插件，提供扫码配对、实例图标与资源远端直装。
+- Daemon 扩展提供配对、实例图标、资源远端直装，以及 Schema 所需的 MCDR 目录识别、版本检查和宿主机任务接口。 [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - [RolithaxLauncher-website](https://github.com/WLudy1012/RolithaxLauncher-website)：项目官网与下载页。
 
 ## 反馈

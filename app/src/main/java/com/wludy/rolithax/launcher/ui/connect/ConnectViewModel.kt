@@ -15,6 +15,10 @@ import com.wludy.rolithax.launcher.data.remote.DaemonApi
 import com.wludy.rolithax.launcher.data.remote.PairingPayloadCodec
 import com.wludy.rolithax.launcher.data.remote.pairingEndpoint
 import com.wludy.rolithax.launcher.data.remote.samePairingEndpoint
+import com.wludy.rolithax.launcher.shared.schemaCapabilities
+import com.wludy.rolithax.launcher.shared.DaemonException
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -46,6 +50,7 @@ data class ConnectUiState(
     val generating: Boolean = false,
     /** 生成成功的配对码（非空时界面弹二维码窗）。 */
     val pairCode: PairCodeData? = null,
+    val pluginNotice: String? = null,
 )
 
 class ConnectViewModel(
@@ -193,8 +198,29 @@ class ConnectViewModel(
                 Result.failure(e)
             }
             if (result.isSuccess) {
-                _state.update { it.copy(loading = false, autoChecking = false) }
-                _connected.tryEmit(Unit)
+                if (auto) finishConnection()
+                else {
+                    val notice = withTimeoutOrNull(4_000) {
+                        val daemon = registry.repositoryFor(config.id)?.consoleConnection?.daemon
+                        try {
+                            val capabilities = daemon?.schemaCapabilities() as? JsonObject
+                            val version = capabilities?.get("pluginVersion")?.jsonPrimitive?.contentOrNull
+                            val protocol = capabilities?.get("protocolVersion")?.jsonPrimitive?.intOrNull
+                            when {
+                                daemon == null -> "已连接。暂时无法读取扩展版本。"
+                                capabilities == null -> "已连接。未发现支持 Schema 3 的 Rolithax 扩展，基础管理可用。"
+                                protocol != 1 -> "已连接。扩展版本 ${version ?: "未知"} 的 Schema 协议不兼容。"
+                                else -> "已连接。Rolithax 扩展 ${version ?: "版本未知"}，协议 $protocol。"
+                            }
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: DaemonException) {
+                            if (error.httpStatus == 401 || error.httpStatus == 403)
+                                "已连接。当前凭据无权读取扩展能力。"
+                            else "已连接。暂时无法读取扩展版本。"
+                        } catch (_: Exception) { "已连接。暂时无法读取扩展版本。" }
+                    } ?: "已连接。扩展版本检查超时。"
+                    _state.update { it.copy(loading = false, autoChecking = false, pluginNotice = notice) }
+                }
             } else {
                 val message = "连接失败：${result.exceptionOrNull()?.message ?: "未知错误"}"
                 _state.update {
@@ -206,6 +232,11 @@ class ConnectViewModel(
                 }
             }
         }
+    }
+
+    fun finishConnection() {
+        _state.update { it.copy(loading = false, autoChecking = false, pluginNotice = null) }
+        _connected.tryEmit(Unit)
     }
 
     fun onScanResult(contents: String?) {

@@ -31,6 +31,12 @@ public sealed partial class MainWindow
         public bool EulaAcknowledged { get; set; }
         public ConsolePanelSnapshot? Panel { get; set; }
         public bool ImportedPanel { get; set; }
+        public SchemaPackage? SchemaPackage { get; set; }
+        public string SchemaCompatibility { get; set; } = "";
+        public string[] SchemaChecks { get; set; } = [];
+        public bool SchemaCompatibilityAllowsActions { get; set; } = true;
+        public HashSet<string> AllowedPanelGrants { get; set; } = [];
+        public string SchemaBindingKey => ServerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         public Dictionary<string, string> AllowedPanelCommands { get; set; } = [];
         public Dictionary<string, string> PanelDrafts { get; } = [];
     }
@@ -51,7 +57,7 @@ public sealed partial class MainWindow
         remotePath = "";
         if (page != "instances")
             Navigate("instances");
-        await ChangeTabAsync(node, server, destination);
+        await ChangeTabAsync(node, server, node.Connection.IsThirdParty ? "console" : destination);
     });
 
     private void LeaveServer()
@@ -98,6 +104,7 @@ public sealed partial class MainWindow
                     return;
                 var epoch = start.Field("streamEpoch").LongValue();
                 consoleRun = new ConsoleRun(node, server.Id, epoch);
+                if (!node.Connection.IsThirdParty) await RestoreSchemaBindingAsync(consoleRun);
             }
             catch
             {
@@ -160,9 +167,12 @@ public sealed partial class MainWindow
         var commands = ServerCommands(node, server);
         Grid.SetRow(commands, 1);
         root.Children.Add(commands);
-        var tabs = WorkspaceTabs(node, server);
-        Grid.SetRow(tabs, 2);
-        root.Children.Add(tabs);
+        if (!node.Connection.IsThirdParty)
+        {
+            var tabs = WorkspaceTabs(node, server);
+            Grid.SetRow(tabs, 2);
+            root.Children.Add(tabs);
+        }
         workspaceBody = new Grid();
         Grid.SetRow(workspaceBody, 3);
         root.Children.Add(workspaceBody);
@@ -195,7 +205,7 @@ public sealed partial class MainWindow
         summary.Children.Add(ServerState(server));
         var players = Secondary($"在线 {server.Players} 人");
         players.VerticalAlignment = VerticalAlignment.Center;
-        summary.Children.Add(players);
+        if (!node.Connection.IsThirdParty) summary.Children.Add(players);
         var commands = new CommandBar
         {
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
@@ -211,10 +221,13 @@ public sealed partial class MainWindow
             button.Click += async (_, _) => await RunAsync(action);
             return button;
         }
-        commands.PrimaryCommands.Add(Command(stopped ? "启动" : "停止", stopped ? Symbol.Play : Symbol.Stop,
-            () => ServerActionAsync(node, server, stopped ? "start" : "stop"), stopped || running));
-        commands.PrimaryCommands.Add(Command("重启", Symbol.Sync, () => ServerActionAsync(node, server, "restart"), running));
-        commands.PrimaryCommands.Add(Command("备份", Symbol.Save, () => ServerActionAsync(node, server, "backup"), running));
+        bool Supports(string action) => !node.Connection.IsThirdParty || server.Powers.Contains(action);
+        var lifecycle = stopped ? "start" : "stop";
+        if (Supports(lifecycle)) commands.PrimaryCommands.Add(Command(stopped ? "启动" : "停止", stopped ? Symbol.Play : Symbol.Stop,
+            () => ServerActionAsync(node, server, lifecycle), stopped || running));
+        if (Supports("restart")) commands.PrimaryCommands.Add(Command("重启", Symbol.Sync, () => ServerActionAsync(node, server, "restart"), running));
+        if (!node.Connection.IsThirdParty) commands.PrimaryCommands.Add(Command("备份", Symbol.Save,
+            () => ServerActionAsync(node, server, "backup"), running));
         commands.PrimaryCommands.Add(Command("刷新状态", Symbol.Refresh, async () =>
         {
             await RefreshAsync(node);
@@ -223,8 +236,8 @@ public sealed partial class MainWindow
             else
                 Render();
         }));
-        commands.SecondaryCommands.Add(Command("强制停止", Symbol.Stop, () => ServerActionAsync(node, server, "forceExit"), !stopped));
-        commands.SecondaryCommands.Add(Command("删除服务器", Symbol.Delete, () => DeleteServerAsync(node, server), stopped));
+        if (Supports("kill")) commands.SecondaryCommands.Add(Command("强制停止", Symbol.Stop, () => ServerActionAsync(node, server, "forceExit"), !stopped));
+        if (!node.Connection.IsThirdParty) commands.SecondaryCommands.Add(Command("删除服务器", Symbol.Delete, () => DeleteServerAsync(node, server), stopped));
         return commands;
     }
 
@@ -370,7 +383,16 @@ public sealed partial class MainWindow
         var heading = Section("实时输出", consoleStatus);
         heading.Spacing = 2;
         var outputTitle = heading.Children[0];
-        panel.Children.Add(AdaptivePair(heading, Actions(search, follow, copy, clear, consoleEula), 690));
+        var toolbar = Actions(search, follow, copy, clear, consoleEula);
+        if (run.Node.Connection.IsThirdParty)
+        {
+            toolbar.Children.Add(Button("重连", () => RunAsync(async () =>
+            {
+                StopConsole();
+                await ChangeTabAsync(run.Node, server, "console");
+            })));
+        }
+        panel.Children.Add(AdaptivePair(heading, toolbar, 690));
         consoleOutput = new TextBox
         {
             Style = Resource<Style>("RolithaxTerminalOutputStyle"),

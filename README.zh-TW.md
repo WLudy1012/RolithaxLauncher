@@ -44,7 +44,7 @@ Android APK 採用 v2 和 v3 簽章。應用程式內可以檢查並安裝更新
 | [Linux](desktop/README.md) | 多 Daemon、實例控制、主控台、檔案、設定、資源及使用者管理 | x64，Compose Desktop |
 | [HarmonyOS NEXT](harmony/README.md) | 儲存多個 Daemon、搜尋和控制實例、主控台及檔案管理 | 原生 ARM64 專案，HAP 與實機驗收待驗證 |
 
-桌面介面參考 MSLX 的管理頁面層級，以本專案 Compose 元件獨立實作。桌面功能與 Android 尚未完全對齊；下方功能說明主要描述 Android 端。鴻蒙的具體範圍見 [harmony/README.md](harmony/README.md)。
+Windows 工作區參考 MSLX 的管理頁面層級，使用 WinUI 3 獨立實作。下方功能主要描述 Android 端。
 
 桌面開發包可從成功的[桌面持續整合](https://github.com/WLudy1012/RolithaxLauncher/actions/workflows/desktop.yml)執行中下載。
 
@@ -52,14 +52,15 @@ Android APK 採用 v2 和 v3 簽章。應用程式內可以檢查並安裝更新
 
 **連線與管理**
 - 同時儲存多台 Daemon，所有入口都以**實例**定址，本機實例與各 Daemon 的實例合併在同一份清單中。
-- Daemon 安裝 [Rolithax 外掛](https://github.com/WLudy1012/Rolithax-MSLX-plugin) 後，Android 支援掃描 QR Code 或貼上從外掛頁面複製的配對原文。客戶端也支援手動填寫位址與 API Key。
-- Android 的「連線 → 其他面板」支援 MCSL Future `/api/v2`、MCSManager 10 與 Pterodactyl Client API，可檢視實例狀態與日誌、傳送指令並控制電源。 [設定與功能範圍](develop/agent/remote-panels.md)
+- Android 與 Windows 的新增連線頁面提供 MSLX Daemon、MCSL Future、MCSManager 10 和 Pterodactyl。選擇面板後，可檢視實例狀態與日誌、傳送指令並控制電源。 [設定與功能範圍](develop/agent/remote-panels.md)
+- MSLX 支援手動填寫位址與 API Key，也可貼上 Rolithax 中心產生的配對原文。Android 還可掃描 QR Code 配對。 [Rolithax Daemon 外掛](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - 啟動、停止、重新啟動、強制結束、備份；尚未同意 EULA 時會自動引導。實例可置頂，刪除需二次確認。
 
 **主控台**
 - 透過 SignalR 即時顯示日誌，並以增量方式解析 ANSI 顏色與樣式；可傳送指令、自動捲動、一鍵回到最新。
 - 遠端與本機實例共用同一套主控台介面。
-- Android 與 Windows 提供 **Rolithax Schema**：C++ 引擎將即時日誌轉成原生任務面板，支援 XML 介面、YAML 規則、受限 Lua 與熱載入。可新增 Git 外掛來源，預設[官方來源](https://github.com/WLudy1012/rolithax-schema-plugins)提供 Paper、LuckPerms 與 Chunky。[獨立 SDK](https://github.com/WLudy1012/rolithax-console-sdk)和[範本](https://github.com/WLudy1012/rolithax-console-plugin-template)包含回放工具及 Agent skill。[格式、授權及相容範圍](develop/agent/rolithax-schema.md)
+- Android 與 Windows 提供 **Rolithax Schema**。C++ 引擎將即時日誌轉成原生任務面板，支援 XML 版面、YAML 規則、受限 Lua，以及圖片和影片。外掛中心可瀏覽自訂 Git 外掛來源、完整安裝外掛及匯入 ZIP。 [官方外掛來源](https://github.com/WLudy1012/rolithax-schema-plugins) [外掛 SDK 與 CLI](https://github.com/WLudy1012/rolithax-console-sdk) [範本](https://github.com/WLudy1012/rolithax-console-plugin-template)
+- 在實例上啟用外掛時可檢查所需元件版本，並逐項授權指令或檔案操作。透過 MSLX 擴充功能，可存取 MCDR 實例檔案及請求管理員預設的主機工作。 [格式、授權與相容範圍](develop/agent/rolithax-schema.md)
 
 **建立與資源中心**
 - 建立精靈涵蓋基本資訊、伺服器核心、Java 環境、資源配置與確認，支援線上核心庫、遠端下載、本機上傳與整合包。
@@ -79,7 +80,7 @@ Android APK 採用 v2 和 v3 簽章。應用程式內可以檢查並安裝更新
 **連線遠端 Daemon**
 
 1. 在電腦上啟動 MSLX Daemon，準備好它的位址與 API Key。
-2. 開啟「連線 → 新增 Daemon」。已有位址與 API Key 時選擇「手動連線」。Daemon 安裝 Rolithax 外掛後，可在「外掛配對」中掃描 QR Code，或貼上從外掛複製的完整原文，再送出配對。
+2. 在 Android 開啟「連線」，點選右上角的加號並選擇 MSLX Daemon。使用「手動連線」填寫位址和 API Key，或在外掛配對頁掃描 QR Code 或貼上配對原文。
 3. 進入實例清單，點任一實例即可檢視日誌、傳送指令、啟動或停止。
 
 **直接在手機上開伺服器**
@@ -173,7 +174,7 @@ app/src/main/cpp/            行程內 JVM 的 Native 橋接
 
 ## 相關倉庫
 
-- [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)：Daemon 外掛，提供掃碼配對、實例圖示與資源遠端直裝。
+- Daemon 擴充功能提供配對、實例圖示與資源遠端安裝，以及 Schema 所需的 MCDR 目錄辨識、版本檢查與主機工作介面。 [Rolithax-MSLX-plugin](https://github.com/WLudy1012/Rolithax-MSLX-plugin)
 - [RolithaxLauncher-website](https://github.com/WLudy1012/RolithaxLauncher-website)：專案官網與下載頁。
 
 ## 回報問題

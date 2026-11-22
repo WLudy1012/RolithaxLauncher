@@ -12,6 +12,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -23,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.UUID
 
 /** 一个 Daemon 连接配置。 */
@@ -191,8 +193,9 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    suspend fun update(transform: (AppSettings) -> AppSettings) = mutex.withLock {
-        val next = transform(settingsFlow.first())
+    suspend fun update(transform: (AppSettings) -> AppSettings): Unit = mutex.withLock {
+        val previous = settingsFlow.first()
+        val next = transform(previous)
         val encryptedDaemons = encodeDaemons(next.daemons)
         context.settingsDataStore.edit { prefs ->
             prefs[Keys.DAEMONS] = encryptedDaemons
@@ -222,6 +225,14 @@ class SettingsStore(private val context: Context) {
             prefs[Keys.LOCAL_KEEP_SCREEN_ON] = next.localKeepScreenOn
             prefs[Keys.LOCAL_USE_SERIAL_GC] = next.localUseSerialGc
             prefs[Keys.LOCAL_USE_SHIZUKU] = next.localUseShizuku
+        }
+        val obsolete = setOf(previous.lightBackgroundPath, previous.darkBackgroundPath) -
+            setOf(next.lightBackgroundPath, next.darkBackgroundPath, "")
+        if (obsolete.isNotEmpty()) withContext(Dispatchers.IO + NonCancellable) {
+            runCatching {
+                val root = File(context.filesDir, "theme").canonicalFile
+                obsolete.map { File(it).canonicalFile }.filter { it.parentFile == root }.forEach { it.delete() }
+            }.onFailure { AppLogger.w("Settings", "清理旧背景图失败", it) }
         }
     }
 

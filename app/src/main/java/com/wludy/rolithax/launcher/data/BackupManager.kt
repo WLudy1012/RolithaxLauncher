@@ -27,6 +27,9 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
@@ -207,16 +210,14 @@ class BackupManager(
             val stagedLight = File(staging, "theme/background_light")
             val stagedDark = File(staging, "theme/background_dark")
             themeDir.mkdirs()
-            val lightTarget = File(themeDir, "background_light")
-            val darkTarget = File(themeDir, "background_dark")
-            val themeBackup = File(app.cacheDir, "backup-theme-${UUID.randomUUID()}").apply { mkdirs() }
-            val oldLight = backupThemeFile(lightTarget, themeBackup, "background_light")
-            val oldDark = backupThemeFile(darkTarget, themeBackup, "background_dark")
+            val lightTarget = File(themeDir, "background_light_${UUID.randomUUID()}.image")
+            val darkTarget = File(themeDir, "background_dark_${UUID.randomUUID()}.image")
             try {
-                replaceThemeFile(stagedLight, lightTarget)
-                replaceThemeFile(stagedDark, darkTarget)
-                settingsStore.update { current ->
-                    current.copy(
+                if (stagedLight.isFile) stagedLight.copyTo(lightTarget)
+                if (stagedDark.isFile) stagedDark.copyTo(darkTarget)
+                currentCoroutineContext().ensureActive()
+                withContext(NonCancellable) {
+                    settingsStore.update { current -> current.copy(
                         daemons = settings.daemons,
                         activeDaemonId = settings.activeDaemonId,
                         themeMode = settings.themeMode,
@@ -233,48 +234,18 @@ class BackupManager(
                         localKeepScreenOn = settings.localKeepScreenOn,
                         localUseSerialGc = settings.localUseSerialGc,
                         localUseShizuku = false,
-                    )
+                    ) }
                 }
             } catch (error: Throwable) {
-                restoreThemeFile(oldLight, lightTarget)
-                restoreThemeFile(oldDark, darkTarget)
+                lightTarget.delete()
+                darkTarget.delete()
                 throw error
-            } finally {
-                themeBackup.deleteRecursively()
             }
         } catch (error: Throwable) {
             committed.forEach { it.deleteRecursively() }
             throw error
         } finally {
             prepared.forEach { it.temporary.deleteRecursively() }
-        }
-    }
-
-    private fun replaceThemeFile(source: File, target: File) {
-        if (!source.isFile) {
-            target.delete()
-            return
-        }
-        val temporary = File(target.parentFile, ".${target.name}.${UUID.randomUUID()}.part")
-        source.copyTo(temporary, overwrite = false)
-        if (!temporary.renameTo(target)) {
-            temporary.copyTo(target, overwrite = true)
-            temporary.delete()
-        }
-    }
-
-    private fun backupThemeFile(source: File, backupDir: File, name: String): File? {
-        if (!source.isFile) return null
-        val backup = File(backupDir, name)
-        source.copyTo(backup, overwrite = true)
-        return backup
-    }
-
-    private fun restoreThemeFile(backup: File?, target: File) {
-        if (backup == null) {
-            target.delete()
-        } else {
-            backup.copyTo(target, overwrite = true)
         }
     }
 

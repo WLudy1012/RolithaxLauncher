@@ -75,7 +75,7 @@ fun SettingsScreen(
     onOpenConnections: () -> Unit,
     viewModel: SettingsViewModel = viewModel(),
 ) {
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val settings by viewModel.loadedSettings.collectAsStateWithLifecycle()
     var backupMode by remember { mutableStateOf<String?>(null) }
     var backupPassword by remember { mutableStateOf("") }
     var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
@@ -172,14 +172,14 @@ fun SettingsScreen(
                         ChannelOption(
                             title = "稳定版",
                             subtitle = "仅接收正式稳定版更新（推荐）",
-                            selected = settings.updateChannel == UpdateChannel.STABLE,
-                            onClick = { viewModel.setUpdateChannel(UpdateChannel.STABLE) },
+                            selected = settings?.updateChannel == UpdateChannel.STABLE,
+                            onClick = { if (settings != null) viewModel.setUpdateChannel(UpdateChannel.STABLE) },
                         )
                         ChannelOption(
                             title = "测试版",
                             subtitle = "同时接收 Beta 测试版更新",
-                            selected = settings.updateChannel == UpdateChannel.BETA,
-                            onClick = { viewModel.setUpdateChannel(UpdateChannel.BETA) },
+                            selected = settings?.updateChannel == UpdateChannel.BETA,
+                            onClick = { if (settings != null) viewModel.setUpdateChannel(UpdateChannel.BETA) },
                         )
                     }
                 }

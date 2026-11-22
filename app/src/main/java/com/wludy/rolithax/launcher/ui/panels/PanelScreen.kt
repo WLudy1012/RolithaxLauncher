@@ -361,13 +361,14 @@ private fun PanelConsole(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PanelEditor(
+internal fun PanelEditor(
     profile: PanelProfile,
     isNew: Boolean,
     busy: Boolean,
     error: String?,
     onSave: (PanelProfile) -> Unit,
     onClose: () -> Unit,
+    embedded: Boolean = false,
 ) {
     var name by remember(profile.id) { mutableStateOf(profile.name) }
     var kind by remember(profile.id) { mutableStateOf(profile.kind) }
@@ -376,13 +377,10 @@ private fun PanelEditor(
     var nodeId by remember(profile.id) { mutableStateOf(profile.nodeId) }
     var allowHttp by remember(profile.id) { mutableStateOf(profile.allowHttp) }
 
-    AlertDialog(
-        onDismissRequest = { if (!busy) onClose() },
-        title = { Text(if (isNew) "添加面板" else "编辑面板") },
-        text = {
+    val fields: @Composable () -> Unit = {
             Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!embedded) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PanelKind.entries.forEach { option ->
                         FilterChip(selected = option == kind, enabled = !busy,
                             onClick = {
@@ -424,14 +422,23 @@ private fun PanelEditor(
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-        },
-        confirmButton = {
+        }
+    val save: @Composable () -> Unit = {
             TextButton(
                 enabled = !busy && address.isNotBlank() && token.isNotBlank(),
                 onClick = { onSave(profile.copy(name = name, kind = kind, baseUrl = address.trim(), token = token.trim(),
                     allowHttp = allowHttp, nodeId = if (kind == PanelKind.MCSM) nodeId.trim() else "")) },
             ) { Text(if (busy) "正在验证…" else "验证并保存") }
-        },
+        }
+    if (embedded) Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        fields()
+        save()
+    } else AlertDialog(
+        onDismissRequest = { if (!busy) onClose() },
+        title = { Text(if (isNew) "添加面板" else "编辑面板") },
+        text = fields,
+        confirmButton = save,
         dismissButton = { TextButton(onClick = onClose, enabled = !busy) { Text("取消") } },
     )
 }

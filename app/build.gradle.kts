@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -24,9 +25,9 @@ android {
         applicationId = "com.wludy.rolithax.launcher"
         minSdk = 24
         targetSdk = 35
-        versionCode = 50
+        versionCode = 51
         // 本地打包脚本可通过 -PversionName 覆盖版本名。
-        versionName = (project.findProperty("versionName") as String?) ?: "1.8.4"
+        versionName = (project.findProperty("versionName") as String?) ?: "1.8.5"
 
         ndk {
             // arm64 真机 + x86_64 模拟器（本机开服调试用）

@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -18,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -27,12 +30,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -42,6 +51,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -49,11 +60,20 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.wludy.rolithax.launcher.shared.console.ConsolePanelNode
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import coil.compose.AsyncImage
+import java.io.File
+
+private val LocalSchemaMedia = staticCompositionLocalOf<(String) -> File?> { { null } }
+private val LocalSchemaIntentsEnabled = staticCompositionLocalOf { false }
 
 @Composable
 internal fun ConsolePluginPanel(
     panel: ConsolePanelUiState,
     actionsEnabled: Boolean,
+    intentsEnabled: Boolean,
+    resolveMedia: (String) -> File?,
     importing: Boolean,
     onImport: () -> Unit,
     onOpenSources: () -> Unit,
@@ -62,9 +82,11 @@ internal fun ConsolePluginPanel(
     modifier: Modifier = Modifier,
 ) {
     val snapshot = panel.snapshot
+    val grantedActions = panel.commands.size + panel.actions.size
     val inputs = remember(snapshot.pluginId, snapshot.packageRevision) { mutableStateMapOf<String, String>() }
     var showEvidence by remember(snapshot.pluginId, snapshot.packageRevision) { mutableStateOf(false) }
     var showManage by remember { mutableStateOf(false) }
+    CompositionLocalProvider(LocalSchemaMedia provides resolveMedia, LocalSchemaIntentsEnabled provides intentsEnabled) {
     Column(
         modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -86,12 +108,12 @@ internal fun ConsolePluginPanel(
                 }
                 OutlinedButton(onClick = onOpenSources, enabled = !importing) {
                     Icon(Icons.Default.Settings, null, Modifier.size(18.dp))
-                    Text("插件源", Modifier.padding(start = 6.dp))
+                    Text("已安装插件", Modifier.padding(start = 6.dp))
                 }
             }
             Text(
                 if (snapshot.pluginId == "rolithax.paper") "Rolithax Schema · 内置"
-                else "${snapshot.pluginId} · ${if (panel.commands.isEmpty()) "只读" else "已授权 ${panel.commands.size} 项操作"}",
+                else "${snapshot.pluginId} · ${if (grantedActions == 0) "只读" else "已授权 $grantedActions 项操作"}",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -143,6 +165,7 @@ internal fun ConsolePluginPanel(
             }
         }
     }
+    }
 }
 
 private fun collectPanelLabels(nodes: List<ConsolePanelNode>, labels: MutableMap<String, String>) {
@@ -166,7 +189,7 @@ private fun PanelNode(
     val display = value ?: if (node.field in snapshot.evidence) "无" else "等待日志"
     val tone = schemaTone(node.tone)
     when (node.kind) {
-        "section" -> Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        "section", "tab" -> Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(node.label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             SchemaDescription(node.description)
             for (child in node.children) key(child.id) {
@@ -194,20 +217,74 @@ private fun PanelNode(
                 modifier = modifier.fillMaxWidth(),
             )
         }
+        "image", "video" -> {
+            val file = node.asset?.let(LocalSchemaMedia.current)
+            if (file == null) Text("${node.label} · 资源不可用", style = MaterialTheme.typography.bodySmall)
+            else if (node.kind == "image") AsyncImage(file, node.label, modifier.fillMaxWidth().heightIn(max = 320.dp))
+            else SchemaVideo(file, node.label, modifier)
+        }
+        "tabs" -> {
+            var selected by remember(node.id, snapshot.packageRevision) { mutableStateOf(0) }
+            val tabs = node.children
+            if (tabs.isNotEmpty()) Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ScrollableTabRow(selectedTabIndex = selected.coerceIn(tabs.indices)) {
+                    tabs.forEachIndexed { index, tab ->
+                        Tab(index == selected, onClick = { selected = index }, text = { Text(tab.label) })
+                    }
+                }
+                PanelNode(tabs[selected.coerceIn(tabs.indices)], panel, inputs, actionsEnabled, onAction)
+            }
+        }
+        "expander" -> {
+            var expanded by remember(node.id, snapshot.packageRevision) { mutableStateOf(false) }
+            Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
+                    Text(node.label, Modifier.weight(1f))
+                    Icon(Icons.Default.KeyboardArrowDown, if (expanded) "折叠" else "展开")
+                }
+                if (expanded) node.children.forEach { child -> PanelNode(child, panel, inputs, actionsEnabled, onAction) }
+            }
+        }
+        "toggle" -> node.field?.let { field ->
+            Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(node.label, Modifier.weight(1f))
+                Switch(checked = (inputs[field] ?: value) == "true", onCheckedChange = { inputs[field] = it.toString() })
+            }
+        }
+        "select" -> node.field?.let { field ->
+            var expanded by remember { mutableStateOf(false) }
+            val choice = node.children.firstOrNull { it.value == (inputs[field] ?: value) }
+            Column(modifier.fillMaxWidth()) {
+                Text(node.label, style = MaterialTheme.typography.labelLarge)
+                Box {
+                    OutlinedButton(onClick = { expanded = true }) { Text(choice?.label ?: "选择") }
+                    DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+                        node.children.forEach { option ->
+                            DropdownMenuItem(text = { Text(option.label) }, onClick = {
+                                option.value?.let { inputs[field] = it }
+                                expanded = false
+                            })
+                        }
+                    }
+                }
+            }
+        }
         "button" -> node.action?.let { action ->
             val command = panel.commands[action]
+            val intent = panel.actions[action]
             val fields = remember(command) { schemaParameter.findAll(command.orEmpty()).map { it.groupValues[1] }.distinct().toList() }
-            val arguments = fields.associateWith { inputs[it].orEmpty().trim() }
+            val arguments = fields.associateWith { (inputs[it] ?: snapshot.values[it]).orEmpty().trim() }
             val valid = arguments.values.all { it.isNotEmpty() && it.length <= 128 && it.none(Char::isWhitespace) }
             Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Button(
                     onClick = { onAction(action, arguments, snapshot.packageRevision) },
-                    enabled = actionsEnabled && command != null && valid,
+                    enabled = (actionsEnabled && command != null && valid) ||
+                        (intent != null && LocalSchemaIntentsEnabled.current),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = tone, contentColor = schemaOnTone(node.tone)),
                 ) { Text(node.label) }
                 SchemaDescription(
-                    if (command == null) "此操作尚未授权，重新加载插件可更改权限。" else node.description,
+                    if (command == null && intent == null) "此操作尚未授权，可重新启用插件更改权限。" else node.description,
                 )
             }
         }
@@ -268,6 +345,30 @@ private fun PanelNode(
 }
 
 @Composable
+private fun SchemaVideo(file: File, label: String, modifier: Modifier) {
+    val context = LocalContext.current
+    var started by remember(file) { mutableStateOf(false) }
+    var failed by remember(file) { mutableStateOf(false) }
+    if (!started) {
+        FilledTonalButton(onClick = { started = true }, modifier = modifier) { Text("播放 $label") }
+        return
+    }
+    val player = remember(file, context) { android.widget.VideoView(context) }
+    DisposableEffect(player) { onDispose { player.stopPlayback() } }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { player.pause() }
+    if (failed) Text("无法播放 $label", style = MaterialTheme.typography.bodySmall)
+    else AndroidView(factory = {
+        player.apply {
+            contentDescription = label
+            setMediaController(android.widget.MediaController(context).also { it.setAnchorView(this) })
+            setOnErrorListener { _, _, _ -> failed = true; stopPlayback(); true }
+            setVideoURI(android.net.Uri.fromFile(file))
+            start()
+        }
+    }, modifier = modifier.fillMaxWidth().aspectRatio(16f / 9f))
+}
+
+@Composable
 private fun SchemaDescription(text: String?) {
     if (!text.isNullOrBlank()) Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
@@ -291,6 +392,9 @@ private fun schemaOnTone(tone: String?): Color = when (tone) {
 @Composable
 internal fun ConsolePluginPermissionDialog(
     imported: ConsolePluginImport,
+    checks: List<SchemaCheck> = emptyList(),
+    checking: Boolean,
+    onProbe: (SchemaCheck) -> Unit,
     onDismiss: () -> Unit,
     onConfirm: (Set<String>) -> Unit,
 ) {
@@ -304,8 +408,19 @@ internal fun ConsolePluginPermissionDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(imported.id, style = MaterialTheme.typography.labelMedium)
-                Text("扩展仅在当前控制台会话内使用。勾选后，面板按钮可向此实例发送对应命令。")
-                for ((id, template) in imported.commands) {
+                Text("授权只对当前实例和此版本有效。发送命令或执行任务前仍需确认。")
+                checks.forEach { check ->
+                    val status = when (check.status) {
+                        "compatible" -> "兼容"
+                        "incompatible" -> "不兼容"
+                        else -> "无法确认"
+                    }
+                    Text("${check.probe.id} · $status（要求 ${check.probe.version}，发现 ${check.version ?: "未知"}）")
+                    if (check.status == "unknown" && check.command != null) {
+                        TextButton(enabled = !checking, onClick = { onProbe(check) }) { Text("运行只读版本检查") }
+                    }
+                }
+                for ((id, template) in imported.commands + imported.actions.mapValues { it.value.label() }) {
                     val checked = id in grants
                     Row(
                         Modifier
@@ -327,11 +442,16 @@ internal fun ConsolePluginPermissionDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(grants) }) {
-                Text(if (grants.isEmpty()) "以只读方式加载" else "授权并加载")
+            TextButton(enabled = !checking && checks.none { it.status == "incompatible" }, onClick = { onConfirm(grants) }) {
+                Text(when {
+                    checking -> "正在检查"
+                    checks.any { it.status == "unknown" } -> "接受未知版本并加载"
+                    grants.isEmpty() -> "以只读方式加载"
+                    else -> "授权并加载"
+                })
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(enabled = !checking, onClick = onDismiss) { Text("取消") } },
     )
 }
 
