@@ -31,7 +31,7 @@ public sealed partial class MainWindow
         body.Children.Add(AdaptivePair(choices, search, 640));
 
         var content = new StackPanel { Spacing = 12 };
-        body.Children.Add(AcrylicCard(content));
+        body.Children.Add(Card(content));
         CancellationTokenSource? viewLifetime = null;
         Action? updateSearch = null;
         bool Match(string name, string id) => name.Contains(search.Text.Trim(), StringComparison.CurrentCultureIgnoreCase) ||
@@ -280,7 +280,7 @@ public sealed partial class MainWindow
         return box;
     }
 
-    private static Grid IconAndDetails(Grid icon, FrameworkElement details)
+    private static Grid IconAndDetails(FrameworkElement icon, FrameworkElement details)
     {
         var row = new Grid { ColumnSpacing = 12 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });

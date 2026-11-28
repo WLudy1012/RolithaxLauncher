@@ -142,8 +142,8 @@ public sealed partial class MainWindow
     {
         var root = new Grid { Margin = new Thickness(24, 20, 24, 24), RowSpacing = 12 };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        if (!node.Connection.IsThirdParty)
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         var backLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         backLabel.Children.Add(new SymbolIcon(Symbol.Back) { Width = 16, Height = 16 });
@@ -161,20 +161,20 @@ public sealed partial class MainWindow
         breadcrumb.Children.Add(back);
         Grid.SetColumn(nodeName, 1);
         breadcrumb.Children.Add(nodeName);
-        var title = Heading(server.Name, server.Core.Length == 0 ? $"实例 #{server.Id}" : $"{server.Core} · #{server.Id}");
-        var titleText = (TextBlock)title.Children[0];
-        root.Children.Add(CompactStack(breadcrumb, title));
+        var titleText = Text(server.Name, "TitleTextBlockStyle");
+        AutomationProperties.SetHeadingLevel(titleText, Microsoft.UI.Xaml.Automation.Peers.AutomationHeadingLevel.Level1);
+        var context = Actions(ServerState(server), Secondary(ServerDetail(server)));
+        var title = Stack(breadcrumb, titleText, context);
         var commands = ServerCommands(node, server);
-        Grid.SetRow(commands, 1);
-        root.Children.Add(commands);
+        root.Children.Add(AdaptivePair(title, commands, 890));
         if (!node.Connection.IsThirdParty)
         {
             var tabs = WorkspaceTabs(node, server);
-            Grid.SetRow(tabs, 2);
+            Grid.SetRow(tabs, 1);
             root.Children.Add(tabs);
         }
         workspaceBody = new Grid();
-        Grid.SetRow(workspaceBody, 3);
+        Grid.SetRow(workspaceBody, root.RowDefinitions.Count - 1);
         root.Children.Add(workspaceBody);
         if (tab is "console" or "console-panel")
             workspaceBody.Children.Add(ConsoleFor(node, server) is { } run
@@ -197,15 +197,6 @@ public sealed partial class MainWindow
     {
         var stopped = server.Status == 0;
         var running = server.Status == 2;
-        var summary = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 16, Margin = new Thickness(0, 0, 16, 0),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        summary.Children.Add(ServerState(server));
-        var players = Secondary($"在线 {server.Players} 人");
-        players.VerticalAlignment = VerticalAlignment.Center;
-        if (!node.Connection.IsThirdParty) summary.Children.Add(players);
         var commands = new CommandBar
         {
             Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
@@ -213,7 +204,6 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalContentAlignment = VerticalAlignment.Center,
             Padding = new Thickness(0, 0, 6, 0),
-            Content = summary,
         };
         AppBarButton Command(string label, Symbol icon, Func<Task> action, bool enabled = true)
         {

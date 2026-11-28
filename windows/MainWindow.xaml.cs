@@ -179,9 +179,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var body = new StackPanel { Spacing = 16, Margin = new Thickness(24, 24, 24, 28),
-            MaxWidth = 1180, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var body = new StackPanel { Spacing = 20, MaxWidth = 1180, HorizontalAlignment = HorizontalAlignment.Stretch };
         var scroll = new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        void SetInsets(double width) => scroll.Padding = width < 620
+            ? new Thickness(16, 16, 16, 20) : new Thickness(28, 24, 28, 32);
+        SetInsets(PageHost.ActualWidth);
+        scroll.SizeChanged += (_, args) => SetInsets(args.NewSize.Width);
         if (animate) AnimateEntrance(scroll);
         PageHost.Children.Add(scroll);
         switch (page)
@@ -327,37 +330,37 @@ public sealed partial class MainWindow : Window
 
     private void ShowOverview(StackPanel body)
     {
-        body.Children.Add(PageHeading("控制中心", "查看节点负载和运行中的服务器。",
-            Button("添加连接", () => RunAsync(() => EditConnectionAsync(null)), accent: true)));
-        var metrics = new Grid { ColumnSpacing = 12 };
-        var values = new (string Label, string Value)[]
-        {
-            ("已连接节点", nodes.Count.ToString(CultureInfo.InvariantCulture)),
-            ("当前节点实例", active is { ServerListWarning: null } loaded
-                ? loaded.Servers.Length.ToString(CultureInfo.InvariantCulture) : "—"),
-            ("运行中", active is { ServerListWarning: null } current
-                ? current.Servers.Count(item => item.Status == 2).ToString(CultureInfo.InvariantCulture) : "—"),
-        };
-        for (var index = 0; index < values.Length; index++)
-        {
-            metrics.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            var (label, value) = values[index];
-            var metric = Card(CompactStack(Text(label, "CaptionTextBlockStyle"), Text(value, "TitleTextBlockStyle")));
-            metric.Padding = new Thickness(12, 10, 12, 10);
-            Grid.SetColumn(metric, index);
-            metrics.Children.Add(metric);
-        }
-        body.Children.Add(metrics);
         if (active is not { } node)
         {
-            body.Children.Add(Card(Stack(
-                Text("还没有连接的面板", "SubtitleTextBlockStyle"),
-                Secondary("连接面板后，可以在这里查看服务器状态。"),
-                Actions(Button("管理连接", () => Navigate("connections")),
-                    Button("粘贴配对码", () => RunAsync(PairAsync))))));
+            if (saved.Count == 0 && savedAvailable)
+            {
+                body.Children.Add(PageHeading("连接服务器面板", "选择面板类型，或粘贴 MSLX 的一次性配对码。",
+                    Button("粘贴配对码", () => RunAsync(PairAsync))));
+                body.Children.Add(ProviderList());
+            }
+            else
+            {
+                body.Children.Add(PageHeading("概览", "选择已保存的面板，或添加新的连接。",
+                    Button("管理连接", () => Navigate("connections"))));
+                var savedRows = Stack();
+                if (!savedAvailable) savedRows.Children.Add(Secondary("无法读取已保存的连接。"));
+                foreach (var connection in saved)
+                {
+                    var connect = Button("连接", () => RunAsync(async () => { await ConnectAsync(connection); Render(); }),
+                        accent: saved.Count == 1);
+                    AutomationProperties.SetName(connect, $"连接 {connection.Name}");
+                    savedRows.Children.Add(ConnectionRow(connection, ConnectionProviderName(connection), connect));
+                }
+                body.Children.Add(AdaptivePair(Section("已保存的面板", Card(savedRows)),
+                    Section("添加面板", ProviderList()), 760, equalColumns: true));
+            }
             return;
         }
 
+        var summary = node.ServerListWarning is null
+            ? $"{nodes.Count} 个已连接面板  ·  当前面板有 {node.Servers.Length} 台服务器，{node.Servers.Count(server => server.Status == 2)} 台运行中"
+            : $"{nodes.Count} 个已连接面板  ·  当前面板的服务器列表暂不可用";
+        body.Children.Add(PageHeading("概览", summary, Button("添加连接", () => RunAsync(() => EditConnectionAsync(null)))));
         if (!node.Connection.IsThirdParty)
         {
             monitorText = Secondary("等待宿主机监控数据…");
@@ -478,6 +481,11 @@ public sealed partial class MainWindow : Window
                 (statusFilter switch { "运行中" => server.Status == 2, "已停止" => server.Status == 0, "切换中" => server.Status is 1 or 3 or 4, _ => true }));
             var sorted = (sort == "ID" ? matching.OrderBy(server => server.Id)
                 : matching.OrderBy(server => server.Name, StringComparer.CurrentCultureIgnoreCase)).ToArray();
+            if (sorted.Length == 0)
+            {
+                list.Children.Add(Secondary(node.Servers.Length == 0 ? "当前面板没有可访问的服务器。" : "没有符合搜索或筛选条件的服务器。"));
+                return;
+            }
             list.Children.Add(Text($"{sorted.Length} 台服务器", "BodyStrongTextBlockStyle"));
             foreach (var server in sorted)
             {
@@ -555,7 +563,7 @@ public sealed partial class MainWindow : Window
             label.TextWrapping = TextWrapping.NoWrap;
             label.TextTrimming = TextTrimming.CharacterEllipsis;
             label.MaxWidth = 250;
-            var option = new ComboBoxItem { Content = label, Tag = node };
+            var option = new ComboBoxItem { Content = IconAndDetails(ProviderIcon(ProviderFor(node.Connection).Key, 20), label), Tag = node };
             AutomationProperties.SetName(option, node.Connection.Name);
             ToolTipService.SetToolTip(option, node.Connection.Address);
             select.Items.Add(option);
@@ -574,8 +582,9 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettings(StackPanel body)
     {
-        body.Children.Add(Heading("设置", "调整界面外观，查看账户和版本信息。"));
-        AddAppearanceSettings(body);
+        var title = Text("设置", "TitleTextBlockStyle");
+        AutomationProperties.SetHeadingLevel(title, AutomationHeadingLevel.Level1);
+        body.Children.Add(title);
         if (active is { Connection.IsThirdParty: false } node)
             body.Children.Add(Card(Section("账户", Entry("当前账户", node.Connection.Name,
                 Button("查看资料", () => RunAsync(() => ShowProfileAsync(node)))))));
@@ -628,6 +637,8 @@ public sealed partial class MainWindow : Window
             if (compactLayout == compact)
                 return;
             compactLayout = compact;
+            grid.ColumnSpacing = compact ? 0 : 12;
+            grid.RowSpacing = compact ? 8 : 0;
             side.Width = compact ? new GridLength(0) : equalColumns ? new GridLength(1, GridUnitType.Star) : GridLength.Auto;
             Grid.SetRow(second, compact ? 1 : 0);
             Grid.SetColumn(second, compact ? 0 : 1);

@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Rolithax.Windows;
 
@@ -10,17 +11,23 @@ public sealed partial class MainWindow
 {
     private void ShowConnections(StackPanel body)
     {
-        body.Children.Add(PageHeading("连接管理", "管理已保存的面板和当前连接。", Actions(
+        var firstConnection = nodes.Count == 0 && saved.Count == 0 && savedAvailable;
+        body.Children.Add(PageHeading("连接管理", firstConnection ? "选择要连接的面板类型。" : "管理已保存的面板和当前连接。",
+            firstConnection ? Button("粘贴配对码", () => RunAsync(PairAsync)) : Actions(
             Button("添加连接", () => RunAsync(() => EditConnectionAsync(null)), accent: true),
             Button("粘贴配对码", () => RunAsync(PairAsync)))));
         if (ConnectionStore.HasLegacyConnections && savedAvailable)
             body.Children.Add(Card(Entry("已有桌面版配置", "可以导入旧版保存的兼容连接。",
                 Button("导入连接", () => RunAsync(ImportLegacyAsync)))));
 
+        if (firstConnection)
+        {
+            body.Children.Add(ProviderList());
+            return;
+        }
+
         var connected = Section($"已连接 · {nodes.Count}");
-        body.Children.Add(Card(connected));
-        if (nodes.Count == 0)
-            connected.Children.Add(Secondary("尚未连接任何面板。"));
+        if (nodes.Count > 0) body.Children.Add(Card(connected));
         foreach (var node in nodes)
         {
             var tools = Actions(Button("服务器", () =>
@@ -31,16 +38,14 @@ public sealed partial class MainWindow
             if (active != node)
                 tools.Children.Insert(0, Button("设为当前", () => { SelectNode(node); Render(); }));
             var serverSummary = node.ServerListWarning is null ? $"{node.Servers.Length} 台服务器" : "服务器列表不可用";
-            var detail = $"{ConnectionProviderName(node.Connection)}  ·  {serverSummary}\n{node.Connection.Address}";
-            if (active == node)
-                detail += "  ·  当前节点";
-            connected.Children.Add(Entry(node.Connection.Name, detail, tools));
+            var status = active == node ? $"当前节点 · {serverSummary}" : serverSummary;
+            var detail = $"{ConnectionProviderName(node.Connection)} · {status}\n{node.Connection.Address}";
+            connected.Children.Add(ConnectionRow(node.Connection, detail, tools));
         }
 
         var stored = Section($"已保存 · {saved.Count}");
-        body.Children.Add(Card(stored));
-        if (saved.Count == 0)
-            stored.Children.Add(Secondary(savedAvailable ? "保存后，下次可以直接连接。" : "无法读取连接配置。"));
+        if (saved.Count > 0 || !savedAvailable) body.Children.Add(Card(stored));
+        if (!savedAvailable) stored.Children.Add(Secondary("无法读取连接配置。"));
         foreach (var connection in saved)
         {
             var connect = Button("连接", () => RunAsync(async () =>
@@ -49,34 +54,91 @@ public sealed partial class MainWindow
                 Render();
             }));
             connect.IsEnabled = nodes.All(item => item.Connection.Id != connection.Id);
-            stored.Children.Add(Entry(connection.Name, $"{ConnectionProviderName(connection)} · {connection.Address}",
+            stored.Children.Add(ConnectionRow(connection, $"{ConnectionProviderName(connection)} · {connection.Address}",
                 Actions(connect,
                     Button("编辑", () => RunAsync(() => EditConnectionAsync(connection))),
                     Button("移除", () => RunAsync(() => RemoveConnectionAsync(connection))))));
         }
     }
 
-    private static readonly (string Key, string Name, Symbol Icon)[] ConnectionProviders =
+    private static readonly (string Key, string Name)[] ConnectionProviders =
     [
-        ("mslx", "MSLX", Symbol.Link), ("mcsl", "MCSL Future", Symbol.Play),
-        ("mcsm", "MCSManager", Symbol.Manage), ("pterodactyl", "Pterodactyl", Symbol.Globe),
+        ("mslx", "MSLX"), ("mcsl", "MCSL Future"),
+        ("mcsm", "MCSManager"), ("pterodactyl", "Pterodactyl"),
     ];
 
-    private static string ConnectionProviderName(DaemonConnection connection) =>
-        ConnectionProviders.FirstOrDefault(item => item.Key == connection.Kind).Name ?? "MSLX";
+    private static (string Key, string Name) ProviderFor(DaemonConnection connection) =>
+        ConnectionProviders.FirstOrDefault(provider => provider.Key == connection.Kind, ConnectionProviders[0]);
 
-    private async Task EditConnectionAsync(DaemonConnection? previous, bool startPairing = false)
+    private static string ConnectionProviderName(DaemonConnection connection) => ProviderFor(connection).Name;
+
+    private static Image ProviderIcon(string key, double size)
     {
-        var activeKind = previous?.Kind ?? "mslx";
+        var image = new Image
+        {
+            Source = new BitmapImage(new Uri($"ms-appx:///Assets/Providers/{key}.png")),
+            Width = size, Height = size, Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        AutomationProperties.SetAccessibilityView(image, Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        return image;
+    }
+
+    private static Grid ConnectionRow(DaemonConnection connection, string description, FrameworkElement action)
+    {
+        var label = CompactStack(Text(connection.Name, "BodyStrongTextBlockStyle"), Secondary(description));
+        return AdaptivePair(IconAndDetails(ProviderIcon(ProviderFor(connection).Key, 32), label),
+            action, action is Button ? 280 : 530);
+    }
+
+    private Border ProviderList()
+    {
+        var list = new ListView { SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = true };
+        AutomationProperties.SetName(list, "选择面板类型");
+        foreach (var provider in ConnectionProviders)
+        {
+            var detail = provider.Key switch
+            {
+                "mslx" => "Daemon 地址或 Rolithax 配对码",
+                "mcsl" => "服务地址与远程访问 Token",
+                "mcsm" => "MCSManager 10 面板地址与 API Key",
+                _ => "面板地址与 Client API Key",
+            };
+            var row = new Grid { Tag = provider.Key, ColumnSpacing = 16, Padding = new Thickness(8, 10, 8, 10) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(ProviderIcon(provider.Key, 32));
+            var labels = CompactStack(Text(provider.Name, "BodyStrongTextBlockStyle"), Secondary(detail));
+            Grid.SetColumn(labels, 1);
+            row.Children.Add(labels);
+            var next = new FontIcon { Glyph = "\uE76C", FontSize = 12 };
+            Grid.SetColumn(next, 2);
+            row.Children.Add(next);
+            var item = new ListViewItem { Tag = provider.Key, Content = row, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+            AutomationProperties.SetName(item, $"{provider.Name}，{detail}");
+            list.Items.Add(item);
+        }
+        list.ItemClick += (_, args) =>
+        {
+            if (args.ClickedItem is FrameworkElement { Tag: string kind })
+                _ = RunAsync(() => EditConnectionAsync(null, initialKind: kind));
+        };
+        var surface = Card(list);
+        surface.Padding = new Thickness(4);
+        return surface;
+    }
+
+    private async Task EditConnectionAsync(DaemonConnection? previous, bool startPairing = false, string initialKind = "mslx")
+    {
+        var activeKind = previous?.Kind ?? initialKind;
         var providerGroup = new RadioButtons { MaxColumns = 4 };
         AutomationProperties.SetName(providerGroup, "连接类型");
         foreach (var provider in ConnectionProviders)
         {
             var label = Text(provider.Name);
             label.TextAlignment = TextAlignment.Center;
-            var icon = new SymbolIcon(provider.Icon) { RenderTransform = new ScaleTransform { ScaleX = 1.55, ScaleY = 1.55 },
-                RenderTransformOrigin = new global::Windows.Foundation.Point(0.5, 0.5), Width = 38, Height = 38 };
-            var card = CompactStack(icon, label);
+            var card = CompactStack(ProviderIcon(provider.Key, 40), label);
             card.HorizontalAlignment = HorizontalAlignment.Center;
             var button = new RadioButton { Content = card, MinWidth = 132, MinHeight = 80, IsEnabled = previous is null || activeKind == provider.Key };
             AutomationProperties.SetName(button, provider.Name);
@@ -131,7 +193,7 @@ public sealed partial class MainWindow
         usePairCode.Checked += (_, _) => UpdateForm();
         usePairCode.Unchecked += (_, _) => UpdateForm();
         UpdateForm();
-        var form = Stack(AcrylicCard(carousel), help, name, usePairCode, pairCode, address, key, nodeId, allowHttp, selfSigned, persist);
+        var form = Stack(carousel, help, name, usePairCode, pairCode, address, key, nodeId, allowHttp, selfSigned, persist);
         var content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             MaxHeight = Math.Clamp(Root.ActualHeight - 150, 215, 565) };
         string? Validate()

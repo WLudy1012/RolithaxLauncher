@@ -4,11 +4,11 @@ Windows 客户端使用 .NET 10 和 WinUI 3，面向 x64 Windows 10 1809 及以�
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 下载 `RolithaxLauncher-Windows-x64-Setup.exe`，按向导选择目录和快捷方式。安装包内含 .NET、Windows App SDK 和 Rolithax 原生桥接库，可离线安装。默认安装到当前 Windows 用户下，升级和卸载时保留连接与外观配置。
+从 [GitHub Releases](https://github.com/WLudy1012/RolithaxLauncher/releases) 下载 `RolithaxLauncher-Windows-x64-Setup.exe`，按向导选择目录和快捷方式。安装包内含 .NET、Windows App SDK 和 Rolithax 原生桥接库，可离线安装。默认安装到当前 Windows 用户下，升级和卸载时保留连接配置。
 
 ## 窗口与快捷键
 
-- 在「设置 → 外观」选择跟随系统、浅色或深色，以及云母、云母 Alt、应用内亚克力或纯色。可以从本地选择背景图片。设置会在下次启动时恢复，窗口过渡随 Windows 动画设置。
+- 窗口使用标准云母，浅色、深色和动画跟随 Windows。高对比度与不支持云母的系统使用主题底色。
 - 导航栏随窗口收窄变为图标栏，服务器筛选和操作区会重新排列。窗口使用 Per-Monitor V2 DPI 缩放。
 - `Ctrl+1` 至 `Ctrl+6` 切换主页面，`Ctrl+F` 聚焦服务器搜索或原始控制台的输出筛选，`F5` 刷新概览或服务器列表。原始控制台内可用 `Ctrl+L` 清空当前显示。
 

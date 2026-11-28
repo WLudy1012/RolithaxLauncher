@@ -5,12 +5,6 @@
     <Grid x:Name="Root" RowDefinitions="Auto,*">
         <Border x:Name="SolidWindowBackground" Grid.RowSpan="2" Visibility="Collapsed"
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
-        <Image x:Name="CustomWindowBackground" Grid.RowSpan="2" Visibility="Collapsed"
-               Stretch="UniformToFill" IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw" />
-        <Border x:Name="AcrylicWindowLayer" Grid.RowSpan="2" Visibility="Collapsed" IsHitTestVisible="False"
-                Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}" />
-        <Border x:Name="MicaAltNavigationLayer" Grid.Row="1" Visibility="Collapsed"
-                Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}" />
         <TitleBar x:Name="AppTitleBar" Title="Rolithax" Subtitle="远端管理">
             <TitleBar.IconSource>
                 <BitmapIconSource UriSource="ms-appx:///Assets/Rolithax.png" ShowAsMonochrome="False" />
@@ -33,9 +27,9 @@
             </NavigationView.Resources>
             <NavigationView.PaneHeader>
                 <StackPanel x:Name="NavigationContext" Margin="16,16,12,12" Spacing="2">
-                    <TextBlock Text="远端管理" Style="{ThemeResource BodyStrongTextBlockStyle}" />
-                    <TextBlock x:Name="PaneStatus" Text="尚未连接" Style="{ThemeResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="当前连接" Style="{ThemeResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="PaneStatus" Text="尚未连接" Style="{ThemeResource BodyStrongTextBlockStyle}"
+                               TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </NavigationView.PaneHeader>
             <NavigationView.MenuItems>
@@ -44,9 +38,11 @@
                 <NavigationViewItem Tag="connections" Content="连接管理" Icon="Link" ToolTipService.ToolTip="连接管理" />
                 <NavigationViewItem Tag="schema" Content="插件中心" Icon="AllApps" ToolTipService.ToolTip="Schema 插件中心" />
                 <NavigationViewItem Tag="users" Content="用户管理" Icon="People" ToolTipService.ToolTip="用户管理" />
-                <NavigationViewItem Tag="settings" Content="设置" Icon="Setting" ToolTipService.ToolTip="设置" />
             </NavigationView.MenuItems>
-            <Border x:Name="WorkspaceSurface" Style="{ThemeResource RolithaxWorkspaceSurfaceStyle}" Margin="10,2,10,10">
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Tag="settings" Content="设置" Icon="Setting" ToolTipService.ToolTip="设置" />
+            </NavigationView.FooterMenuItems>
+            <Border x:Name="WorkspaceSurface" Style="{ThemeResource RolithaxWorkspaceSurfaceStyle}">
                 <Grid RowDefinitions="Auto,*">
                     <InfoBar x:Name="Feedback" Margin="24,12,24,0" />
                     <Grid x:Name="PageHost" Grid.Row="1" />
