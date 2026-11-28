@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(rolithax_schema VERSION 3.0.0 LANGUAGES C CXX)
+project(rolithax_schema VERSION 0.1.0 LANGUAGES C CXX)
 include(CTest)
 option(ROLITHAX_SCHEMA_CLI "Build JSON-lines CLI" ON)
 option(ROLITHAX_SCHEMA_JNI "Include JVM JNI adapter for host tests" OFF)

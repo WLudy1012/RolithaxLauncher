@@ -191,6 +191,19 @@ void sdk3(uint64_t id) {
     call(id, {{"op", "reset"}});
     require(call(id, action) == false && call(id, file).is_null(), "Reset invalidates old results and confirmations");
 }
+void booleanCapture(uint64_t id) {
+    auto source = sdk3Source();
+    auto manifest = Json::parse(source["manifest"].get<std::string>());
+    manifest["engine"] = "yaml";
+    source["manifest"] = manifest.dump();
+    source.erase("lua");
+    source["ui"] = R"(<panel title="Flags"><status id="flag" label="Flag" field="flag"/></panel>)";
+    source["rules"] = "rules:\n  flag:\n    prefix: \"flag=\"\n    exclude: \"yes\"\n    field: \"flag\"\n    capture: \"boolean\"";
+    call(id, {{"op", "reload"}, {"source", source}});
+    call(id, {{"op", "logs"}, {"lines", {"flag=on", "flag=off", "flag=yes", "flag=on hold"}}});
+    const auto state = call(id, {{"op", "snapshot"}});
+    require(state["values"]["flag"] == "false" && state["evidence"]["flag"] == "flag=off", "Boolean and excluded log captures");
+}
 void concurrency() {
     const auto id = rolithax_schema_create();
     std::atomic<bool> failed{false};
@@ -210,7 +223,22 @@ int main() {
     const auto id = rolithax_schema_create();
     try {
         require(id != 0, "Create session");
-        builtin(id); yaml(id); lua(id); sdk3(id); concurrency();
+        builtin(id);
+        const auto other = rolithax_schema_create();
+        call(id, {{"op", "reset"}});
+        call(other, {{"op", "reset"}});
+        const Json lines = {"[12:34:56] [thread] [INFO]: Alex joined the game", "Steve left the game", "unrelated"};
+        size_t changed = 0;
+        for (const auto& text : lines) if (call(other, {{"op", "log"}, {"text", text}}) == true) ++changed;
+        require(call(id, {{"op", "logs"}, {"lines", lines}}) == changed, "Batch reports changed lines");
+        const auto batched = call(id, {{"op", "snapshot"}});
+        const auto single = call(other, {{"op", "snapshot"}});
+        require(batched["values"] == single["values"] && batched["evidence"] == single["evidence"], "Batch preserves updates and evidence");
+        require(batched["values"].dump().find("Alex joined the game") != std::string::npos, "Two-part envelope parsed");
+        call(id, {{"op", "logs"}, {"lines", {"Sam joined the game", 1}}}, false);
+        require(call(id, {{"op", "snapshot"}}) == batched, "Malformed batch rejected before ingestion");
+        rolithax_schema_destroy(other);
+        yaml(id); lua(id); sdk3(id); booleanCapture(id); concurrency();
         call(id, {{"op", "restore"}});
         require(call(id, {{"op", "snapshot"}})["pluginId"] == "rolithax.paper", "Restore builtin");
         rolithax_schema_destroy(id);

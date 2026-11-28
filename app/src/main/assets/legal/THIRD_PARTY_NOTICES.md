@@ -84,3 +84,12 @@
 上述组件的许可证副本亦随各自发布产物提供；APK 中 `META-INF/` 目录内可找到多数 JVM 库
 自带的 `LICENSE`/`NOTICE` 文件。若在分发版本时对第三方组件做了实质性修改，请以对应上游
 仓库的许可声明为准复核。
+
+## Windows 连接面板图标
+
+以下图标随 Windows 客户端分发，用于识别连接的面板。图标来自各项目的桌面应用或 Web 面板。
+
+- [MSLX 桌面图标](https://github.com/MSLTeam/MSLX/blob/0b4b483f36e949ae348c5aa2e32ab0714c1f5a0b/MSLX.Desktop/Assets/icon.ico)
+- [MCSL Future 桌面图标](https://github.com/MCSLTeam/MCServerLauncher-Future/blob/29104e73bccc96361e247b57d986c672178b7f29/src/MCServerLauncher.WPF/Resources/MCServerLauncherFuture.ico)
+- [MCSManager 面板图标](https://github.com/MCSManager/MCSManager/blob/ce48841dd512079607ebdc4fb1c44e09f5510b6e/frontend/public/favicon.ico)
+- [Pterodactyl 面板图标](https://github.com/pterodactyl/panel/blob/60a10015815835decffe4f77d15b0e7419d793b9/public/favicons/android-chrome-192x192.png)

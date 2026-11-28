@@ -40,8 +40,8 @@ Name: "chinesesimplified"; MessagesFile: "{#ChineseMessages}"
 [CustomMessages]
 english.NewInstall=Set up Rolithax Launcher for this Windows account. The installer includes the application and its runtimes, so setup can run offline.
 chinesesimplified.NewInstall=为当前 Windows 账户安装 Rolithax Launcher。安装包已包含程序及其运行时，可以离线安装。
-english.ExistingInstall=Update Rolithax Launcher in the existing installation folder. Your Daemon connections and appearance settings are kept.
-chinesesimplified.ExistingInstall=在原安装目录中更新 Rolithax Launcher。已保存的 Daemon 连接和外观设置会保留。
+english.ExistingInstall=Update Rolithax Launcher in the existing installation folder. Your saved Daemon connections are kept.
+chinesesimplified.ExistingInstall=在原安装目录中更新 Rolithax Launcher。已保存的 Daemon 连接会保留。
 english.ExistingFolderRequired=Install the update in the existing folder. To move the program, uninstall it first.
 chinesesimplified.ExistingFolderRequired=请在原目录中更新。如需更换目录，请先卸载程序。
 english.StartMenuShortcut=Create a Start menu shortcut
