@@ -22,7 +22,7 @@ Lua 5.5.1 sandbox limits are 4 MiB allocated script memory, 100,000 work units a
 
 ## Schema 3
 
-`version` returns `{ "minSdk": 1, "maxSdk": 3 }`. Schema 3 keeps the same C ABI and JSON source fields. Binary assets never enter the native request, Lua state, or renderer-provided arguments.
+`version` reports `minSdk` and `maxSdk`. Runtime 0.1.0 also advertises `maxLogBatch: 128` and features `yaml.exclude` and `yaml.boolean`. Send `{"op":"logs","lines":["first","second"]}` to ingest a batch in order. The result counts lines that changed the session. Invalid array shapes are rejected before ingestion. The 512 KiB request limit still applies. Older engines accept one `log` request at a time. Schema 3 keeps the same C ABI and JSON source fields. Binary assets never enter the native request, Lua state, or renderer-provided arguments.
 
 `plugin.json` requires `name`, `description`, `authors` (1–16 strings), `license`, HTTPS `homepage`, and `icon` referencing a declared image asset. `assets` is an array of `{ id, mediaType, size, sha256, path }` or `{ id, mediaType, size, sha256, url }`. Package paths are under `assets/`. Allowed MIME types are `image/png`, `image/jpeg`, `image/webp` (8 MiB each), and `video/mp4` (64 MiB each). The assets total and the package are each limited to 128 MiB. Hosts check stream length, type and SHA-256 before install. External HTTPS assets are also downloaded during installation. `inspect` includes metadata, `assets`, `actions` and `preflight` for SDK 3 only.
 

@@ -172,10 +172,17 @@ Command compileCommand(const Strings& props, int sdk, const std::string& file, i
 struct Rule {
     std::string prefix, suffix, contains, field, operation, capture;
     std::optional<std::string> value;
+    std::string exclude;
     std::optional<std::string> match(const std::string& line) const {
-        if (line.size() < prefix.size() + suffix.size() || !starts(line, prefix) || !ends(line, suffix) || line.find(contains) == std::string::npos) return {};
+        if (line.size() < prefix.size() + suffix.size() || !starts(line, prefix) || !ends(line, suffix) || (!contains.empty() && line.find(contains) == std::string::npos) || (!exclude.empty() && line.find(exclude) != std::string::npos)) return {};
         if (value) return value;
         auto middle = line.substr(prefix.size(), line.size() - prefix.size() - suffix.size());
+        if (capture == "boolean") {
+            const auto token = trim(middle);
+            if (token == "true" || token == "on" || token == "yes") return std::string("true");
+            if (token == "false" || token == "off" || token == "no") return std::string("false");
+            return {};
+        }
         if (capture == "text") return excerpt(middle);
         if (capture == "player") return player(middle) ? std::optional<std::string>(middle) : std::nullopt;
         if (capture == "player-event") return player(middle) ? std::optional<std::string>(line) : std::nullopt;
@@ -269,13 +276,14 @@ void parseYaml(Plugin& plugin, const std::string& text) {
         if (pair.first == "initial") plugin.initial[pair.second] = p.at("value");
         else if (pair.first == "commands") plugin.commands[pair.second] = compileCommand(p, plugin.sdk, "rules.yaml", e.line);
         else {
-            for (const auto& property : p) if (!std::set<std::string>{"prefix", "suffix", "contains", "field", "operation", "value", "capture"}.count(property.first)) fail("rules.yaml", e.line, "Unknown rule property");
+            for (const auto& property : p) if (!(plugin.sdk == 3 && property.first == "exclude") && !std::set<std::string>{"prefix", "suffix", "contains", "field", "operation", "value", "capture"}.count(property.first)) fail("rules.yaml", e.line, "Unknown rule property");
             auto get = [&](const char* key) { const auto found = p.find(key); return found == p.end() ? std::string() : found->second; };
-            Rule rule{get("prefix"), get("suffix"), get("contains"), get("field"), p.count("operation") ? get("operation") : "set", get("capture"), {}};
+            Rule rule{get("prefix"), get("suffix"), get("contains"), get("field"), p.count("operation") ? get("operation") : "set", get("capture"), {}, get("exclude")};
             if (rule.prefix.empty() && rule.suffix.empty() && rule.contains.empty()) fail("rules.yaml", e.line, "A matcher is required");
             if (!symbol(rule.field)) fail("rules.yaml", e.line, "Invalid state field");
             auto captures = std::set<std::string>{"text", "player", "players", "player-event", "online", "online-summary"};
             if (plugin.sdk >= 2) { captures.insert("number"); captures.insert("percent"); }
+            if (plugin.sdk == 3) captures.insert("boolean");
             if ((rule.operation != "set" && rule.operation != "append") || p.count("value") == p.count("capture") || (p.count("capture") && !captures.count(rule.capture))) fail("rules.yaml", e.line, "Invalid operation, value or capture");
             if (p.count("value")) rule.value = get("value");
             plugin.rules.push_back(std::move(rule));
@@ -865,9 +873,22 @@ std::string stripLog(const std::string& raw) {
     return clean;
 }
 std::string messageBody(const std::string& plain) {
-    static const std::regex envelope("^\\[[0-9]{2}:[0-9]{2}:[0-9]{2}\\](?:[ ]+\\[[^\\]\\r\\n]{1,96}\\]){1,2}:[ ]*");
-    std::smatch match;
-    return std::regex_search(plain, match, envelope) ? plain.substr(match.length()) : plain;
+    if (plain.size() < 15 || plain[0] != '[' || plain[3] != ':' || plain[6] != ':' || plain[9] != ']') return plain;
+    for (size_t i : {1, 2, 4, 5, 7, 8}) if (plain[i] < '0' || plain[i] > '9') return plain;
+    size_t pos = 10;
+    for (int group = 0; group < 2; ++group) {
+        if (pos >= plain.size() || plain[pos] != ' ') return plain;
+        pos = plain.find_first_not_of(' ', pos);
+        if (pos == std::string::npos || plain[pos] != '[') return plain;
+        const auto end = plain.find(']', pos + 1);
+        if (end == std::string::npos || end == pos + 1 || end - pos > 97) return plain;
+        pos = end + 1;
+        if (pos < plain.size() && plain[pos] == ':') {
+            pos = plain.find_first_not_of(' ', pos + 1);
+            return pos == std::string::npos ? std::string() : plain.substr(pos);
+        }
+    }
+    return plain;
 }
 struct Model {
     std::unique_ptr<Plugin> plugin;
@@ -883,9 +904,10 @@ struct Model {
         for (unsigned char c : first) for (size_t i = 0; i < plugin->rules.size(); ++i) if (plugin->rules[i].prefix.empty() || static_cast<unsigned char>(plugin->rules[i].prefix.front()) == c) index[c].push_back(i);
     }
     bool accept(const std::string& raw) {
-        const auto plain = stripLog(raw);
+        std::string cleaned;
+        const auto& plain = raw.find('\x1b') == std::string::npos ? raw : (cleaned = stripLog(raw));
         if (!validText(plain)) return false;
-        const auto line = messageBody(plain), proof = excerpt(plain);
+        const auto line = messageBody(plain);
         Strings updates;
         if (plugin->lua) updates = plugin->lua->accept(line, values);
         else {
@@ -906,7 +928,7 @@ struct Model {
                 } else updates[rule.field] = *value;
             }
         }
-        return apply(updates, proof);
+        return !updates.empty() && apply(updates, excerpt(plain));
     }
     bool apply(const Strings& updates, const std::string& proof) {
         bool changed = false;
@@ -955,9 +977,9 @@ struct Session {
     bool log(std::string text) {
         if (text.size() > 8192) return gap();
         while (!text.empty() && (text.back() == '\r' || text.back() == '\n')) text.pop_back();
-        if (trim(text).empty() || text.find_first_of("\r\n") != std::string::npos) return false;
+        if (text.find_first_not_of(" \r\n\t") == std::string::npos || text.find_first_of("\r\n") != std::string::npos) return false;
         const bool changed = model->accept(text);
-        history.push_back(text); historySize += text.size();
+        historySize += text.size(); history.push_back(std::move(text));
         while (history.size() > 256 || historySize > 262144) { historySize -= history.front().size(); history.pop_front(); }
         if (changed) ++revision;
         return changed;
@@ -985,7 +1007,7 @@ struct Session {
     Json request(const Json& request) {
         if (!request.is_object()) fail("request.json", 1, "Expected a request object");
         const auto op = stringAt(request, "op", "request.json");
-        if (op == "version") return {{"minSdk", 1}, {"maxSdk", 3}};
+        if (op == "version") return {{"minSdk", 1}, {"maxSdk", 3}, {"runtimeVersion", "0.1.0"}, {"maxLogBatch", 128}, {"features", {"yaml.exclude", "yaml.boolean"}}};
         if (op == "snapshot") return snapshot();
         if (op == "inspect" || op == "reload") {
             if (!request.contains("source")) fail("request.json", 1, "Missing source");
@@ -1000,6 +1022,15 @@ struct Session {
             return install(std::move(plugin), std::move(allowed));
         }
         if (op == "log") return log(stringAt(request, "text", "request.json"));
+        if (op == "logs") {
+            const auto lines = request.find("lines");
+            if (lines == request.end() || !lines->is_array() || lines->size() > 128 ||
+                !std::all_of(lines->begin(), lines->end(), [](const Json& line) { return line.is_string(); }))
+                fail("request.json", 1, "Expected an array of at most 128 log strings");
+            size_t changed = 0;
+            for (const auto& line : *lines) if (log(line.get<std::string>())) ++changed;
+            return changed;
+        }
         if (op == "gap") return gap();
         if (op == "reset") {
             auto replacement = std::make_unique<Model>(compile(model->plugin->source), model->allowed);
